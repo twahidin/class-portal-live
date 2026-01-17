@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}Create Assignment - Teacher Portal{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark teacher-nav">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('teacher_dashboard') }}">
+            <i class="bi bi-mortarboard-fill me-2"></i>Teacher Portal
+        </a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="{{ url_for('teacher_logout') }}">
+                <i class="bi bi-box-arrow-right me-1"></i>Logout
+            </a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('teacher_assignments') }}">Assignments</a></li>
+            <li class="breadcrumb-item active">Create New</li>
+        </ol>
+    </nav>
+    
+    <div class="page-header mb-4">
+        <h1><i class="bi bi-plus-circle me-2"></i>Create Assignment</h1>
+    </div>
+    
+    {% if error %}
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+    </div>
+    {% endif %}
+    
+    <form method="POST" id="create-assignment-form">
+        <div class="row">
+            <div class="col-lg-8">
+                <!-- Basic Info -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Basic Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="title" class="form-label">Assignment Title *</label>
+                            <input type="text" class="form-control" id="title" name="title" required 
+                                   placeholder="e.g., Chapter 5 Assessment">
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="subject" class="form-label">Subject *</label>
+                                <input type="text" class="form-control" id="subject" name="subject" required
+                                       placeholder="e.g., Mathematics" list="subjects-list">
+                                <datalist id="subjects-list">
+                                    {% if teacher.subjects %}
+                                    {% for subj in teacher.subjects %}
+                                    <option value="{{ subj }}">
+                                    {% endfor %}
+                                    {% endif %}
+                                </datalist>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="due_date" class="form-label">Due Date (optional)</label>
+                                <input type="date" class="form-control" id="due_date" name="due_date">
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="instructions" class="form-label">Instructions (optional)</label>
+                            <textarea class="form-control" id="instructions" name="instructions" rows="3"
+                                      placeholder="Add any special instructions for students..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Questions -->
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-list-ol me-2"></i>Questions</h5>
+                        <button type="button" class="btn btn-success btn-sm" id="add-question-btn">
+                            <i class="bi bi-plus me-1"></i>Add Question
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="questions-container">
+                            <!-- Question 1 -->
+                            <div class="question-item" data-question="1">
+                                <div class="question-header">
+                                    <span class="question-label">Question 1</span>
+                                    <button type="button" class="btn btn-link text-danger remove-question" style="display: none;">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Question Text *</label>
+                                    <textarea class="form-control" name="question_1" rows="2" required
+                                              placeholder="Enter your question..."></textarea>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Marks *</label>
+                                        <input type="number" class="form-control" name="marks_1" value="10" min="1" required>
+                                    </div>
+                                    <div class="col-md-8 mb-3">
+                                        <label class="form-label">Model Answer (for AI marking)</label>
+                                        <textarea class="form-control" name="model_answer_1" rows="2"
+                                                  placeholder="Optional: Provide an ideal answer for AI reference"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-lg-4">
+                <!-- Summary & Actions -->
+                <div class="card sticky-top" style="top: 20px;">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-check2-square me-2"></i>Summary</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="summary-item">
+                            <span>Questions:</span>
+                            <strong id="question-count">1</strong>
+                        </div>
+                        <div class="summary-item">
+                            <span>Total Marks:</span>
+                            <strong id="total-marks">10</strong>
+                        </div>
+                        
+                        <hr>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="publish" name="publish" checked>
+                            <label class="form-check-label" for="publish">
+                                Publish immediately
+                            </label>
+                            <small class="d-block text-muted">If unchecked, assignment will be saved as draft</small>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="bi bi-save me-2"></i>Save Assignment
+                            </button>
+                            <a href="{{ url_for('teacher_assignments') }}" class="btn btn-outline-secondary">
+                                Cancel
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let questionCount = 1;
+    
+    document.getElementById('add-question-btn').addEventListener('click', () => {
+        questionCount++;
+        const container = document.getElementById('questions-container');
+        
+        const questionHtml = `
+            <div class="question-item" data-question="${questionCount}">
+                <div class="question-header">
+                    <span class="question-label">Question ${questionCount}</span>
+                    <button type="button" class="btn btn-link text-danger remove-question">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Question Text *</label>
+                    <textarea class="form-control" name="question_${questionCount}" rows="2" required
+                              placeholder="Enter your question..."></textarea>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Marks *</label>
+                        <input type="number" class="form-control marks-input" name="marks_${questionCount}" value="10" min="1" required>
+                    </div>
+                    <div class="col-md-8 mb-3">
+                        <label class="form-label">Model Answer (for AI marking)</label>
+                        <textarea class="form-control" name="model_answer_${questionCount}" rows="2"
+                                  placeholder="Optional: Provide an ideal answer for AI reference"></textarea>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.insertAdjacentHTML('beforeend', questionHtml);
+        updateSummary();
+        updateRemoveButtons();
+    });
+    
+    document.getElementById('questions-container').addEventListener('click', (e) => {
+        if (e.target.closest('.remove-question')) {
+            e.target.closest('.question-item').remove();
+            renumberQuestions();
+            updateSummary();
+            updateRemoveButtons();
+        }
+    });
+    
+    document.getElementById('questions-container').addEventListener('input', (e) => {
+        if (e.target.classList.contains('marks-input') || e.target.name?.startsWith('marks_')) {
+            updateSummary();
+        }
+    });
+    
+    function renumberQuestions() {
+        const items = document.querySelectorAll('.question-item');
+        items.forEach((item, index) => {
+            const num = index + 1;
+            item.dataset.question = num;
+            item.querySelector('.question-label').textContent = `Question ${num}`;
+            
+            const textarea = item.querySelector('textarea[name^="question_"]');
+            textarea.name = `question_${num}`;
+            
+            const marks = item.querySelector('input[name^="marks_"]');
+            marks.name = `marks_${num}`;
+            
+            const modelAnswer = item.querySelector('textarea[name^="model_answer_"]');
+            modelAnswer.name = `model_answer_${num}`;
+        });
+        questionCount = items.length;
+    }
+    
+    function updateSummary() {
+        const items = document.querySelectorAll('.question-item');
+        document.getElementById('question-count').textContent = items.length;
+        
+        let total = 0;
+        items.forEach(item => {
+            const marks = item.querySelector('input[name^="marks_"]');
+            total += parseInt(marks.value) || 0;
+        });
+        document.getElementById('total-marks').textContent = total;
+    }
+    
+    function updateRemoveButtons() {
+        const items = document.querySelectorAll('.question-item');
+        const buttons = document.querySelectorAll('.remove-question');
+        buttons.forEach(btn => {
+            btn.style.display = items.length > 1 ? 'block' : 'none';
+        });
+    }
+    
+    // Initial setup
+    updateRemoveButtons();
+</script>
+{% endblock %}

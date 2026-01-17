@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+
+{% block title %}Review Submission - Teacher Portal{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark teacher-nav">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('teacher_dashboard') }}">
+            <i class="bi bi-mortarboard-fill me-2"></i>Teacher Portal
+        </a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="{{ url_for('teacher_logout') }}">
+                <i class="bi bi-box-arrow-right me-1"></i>Logout
+            </a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('teacher_submissions') }}">Submissions</a></li>
+            <li class="breadcrumb-item active">Review</li>
+        </ol>
+    </nav>
+    
+    <div class="row">
+        <!-- Left Side: Submission Details -->
+        <div class="col-lg-7">
+            <div class="review-header mb-4">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h1>{{ assignment.title }}</h1>
+                        <div class="meta">
+                            <span class="badge bg-primary me-2">{{ assignment.subject }}</span>
+                            <span><i class="bi bi-star me-1"></i>{{ assignment.total_marks }} marks</span>
+                        </div>
+                    </div>
+                    <div class="student-info-card">
+                        <strong>{{ student.name if student else 'Unknown' }}</strong>
+                        <small class="d-block text-muted">{{ student.student_id if student else '' }} • Class {{ student.class if student else 'N/A' }}</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Questions and Answers -->
+            <div class="qa-review-container">
+                {% for question in assignment.questions %}
+                <div class="qa-review-card">
+                    <div class="question-section">
+                        <div class="q-header">
+                            <span class="q-number">Q{{ loop.index }}</span>
+                            <span class="q-marks">{{ question.marks }} marks</span>
+                        </div>
+                        <p class="q-text">{{ question.question }}</p>
+                        {% if question.model_answer %}
+                        <details class="model-answer">
+                            <summary><i class="bi bi-lightbulb me-1"></i>Model Answer</summary>
+                            <p>{{ question.model_answer }}</p>
+                        </details>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="answer-section">
+                        <h6><i class="bi bi-pencil me-2"></i>Student's Answer</h6>
+                        <div class="answer-content">
+                            {{ submission.answers.get(loop.index|string, submission.answers.get('q' ~ loop.index, 'No answer provided')) }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <!-- AI Feedback -->
+            {% if submission.ai_feedback and submission.ai_feedback.overall %}
+            <div class="ai-feedback-card mt-4">
+                <div class="card-header bg-info text-white">
+                    <i class="bi bi-robot me-2"></i>AI-Generated Feedback
+                </div>
+                <div class="card-body">
+                    <div class="ai-feedback-content">
+                        {{ submission.ai_feedback.overall | replace('\n', '<br>') | safe }}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Right Side: Grading Panel -->
+        <div class="col-lg-5">
+            <div class="grading-panel sticky-top" style="top: 20px;">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Grade Submission</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="review-form" data-submission-id="{{ submission.submission_id }}">
+                            <!-- Score Input -->
+                            <div class="mb-4">
+                                <label class="form-label">Final Score</label>
+                                <div class="input-group input-group-lg">
+                                    <input type="number" class="form-control text-center" id="final_score" 
+                                           name="final_score" min="0" max="{{ assignment.total_marks }}"
+                                           value="{{ submission.teacher_review.final_score if submission.teacher_review else '' }}"
+                                           placeholder="0">
+                                    <span class="input-group-text">/ {{ assignment.total_marks }}</span>
+                                </div>
+                                <div class="score-slider mt-2">
+                                    <input type="range" class="form-range" id="score_slider" 
+                                           min="0" max="{{ assignment.total_marks }}"
+                                           value="{{ submission.teacher_review.final_score if submission.teacher_review else 0 }}">
+                                </div>
+                            </div>
+                            
+                            <!-- Comments -->
+                            <div class="mb-4">
+                                <label class="form-label">Comments for Student</label>
+                                <textarea class="form-control" id="comments" name="comments" rows="6"
+                                          placeholder="Provide feedback and comments...">{{ submission.teacher_review.comments if submission.teacher_review else '' }}</textarea>
+                            </div>
+                            
+                            <!-- Quick Comments -->
+                            <div class="mb-4">
+                                <label class="form-label">Quick Comments</label>
+                                <div class="quick-comments">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm quick-comment" data-text="Excellent work! Well done.">
+                                        👏 Excellent
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm quick-comment" data-text="Good effort. Keep it up!">
+                                        👍 Good effort
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm quick-comment" data-text="Please review the material and try again.">
+                                        📚 Review needed
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm quick-comment" data-text="See me for additional help.">
+                                        🤝 See me
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Actions -->
+                            <div class="d-grid gap-2">
+                                <button type="button" class="btn btn-primary" id="save-review-btn">
+                                    <i class="bi bi-save me-1"></i>Save Review
+                                </button>
+                                
+                                {% if submission.status != 'approved' %}
+                                <button type="button" class="btn btn-success btn-lg" id="approve-btn">
+                                    <i class="bi bi-check-circle me-1"></i>Approve & Finalize
+                                </button>
+                                {% else %}
+                                <div class="alert alert-success mb-0">
+                                    <i class="bi bi-check-circle me-2"></i>This submission has been approved.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                
+                <div class="mt-3">
+                    <a href="{{ url_for('teacher_submissions') }}" class="btn btn-outline-secondary w-100">
+                        <i class="bi bi-arrow-left me-1"></i>Back to Submissions
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const submissionId = '{{ submission.submission_id }}';
+    const totalMarks = {{ assignment.total_marks }};
+    
+    // Sync slider with input
+    document.getElementById('score_slider').addEventListener('input', (e) => {
+        document.getElementById('final_score').value = e.target.value;
+    });
+    
+    document.getElementById('final_score').addEventListener('input', (e) => {
+        const val = Math.min(Math.max(0, parseInt(e.target.value) || 0), totalMarks);
+        document.getElementById('score_slider').value = val;
+    });
+    
+    // Quick comments
+    document.querySelectorAll('.quick-comment').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const textarea = document.getElementById('comments');
+            const text = btn.dataset.text;
+            textarea.value = textarea.value ? textarea.value + '\n\n' + text : text;
+        });
+    });
+    
+    // Save review
+    document.getElementById('save-review-btn').addEventListener('click', async () => {
+        const data = {
+            final_score: parseInt(document.getElementById('final_score').value) || 0,
+            comments: document.getElementById('comments').value
+        };
+        
+        try {
+            const response = await fetch(`/teacher/submissions/${submissionId}/review`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                showToast('Success', 'Review saved successfully', 'success');
+            } else {
+                showToast('Error', result.error || 'Failed to save', 'danger');
+            }
+        } catch (error) {
+            showToast('Error', 'Failed to save review', 'danger');
+        }
+    });
+    
+    // Approve
+    const approveBtn = document.getElementById('approve-btn');
+    if (approveBtn) {
+        approveBtn.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to approve this submission? The student will be notified.')) {
+                return;
+            }
+            
+            const data = {
+                final_score: parseInt(document.getElementById('final_score').value) || 0,
+                comments: document.getElementById('comments').value
+            };
+            
+            try {
+                const response = await fetch(`/teacher/submissions/${submissionId}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    showToast('Success', 'Submission approved!', 'success');
+                    setTimeout(() => window.location.href = '{{ url_for("teacher_submissions") }}', 1500);
+                } else {
+                    showToast('Error', result.error || 'Failed to approve', 'danger');
+                }
+            } catch (error) {
+                showToast('Error', 'Failed to approve submission', 'danger');
+            }
+        });
+    }
+</script>
+{% endblock %}

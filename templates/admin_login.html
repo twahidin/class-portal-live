@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Login - School Portal{% endblock %}
+
+{% block content %}
+<div class="auth-page admin-auth">
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="auth-logo admin-logo">
+                    <i class="bi bi-shield-lock"></i>
+                </div>
+                <h1>Admin Access</h1>
+                <p>Restricted area - authorized personnel only</p>
+            </div>
+            
+            {% if error %}
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endif %}
+            
+            <form method="POST" class="auth-form">
+                <div class="form-floating mb-4">
+                    <input type="password" class="form-control" id="password" name="password" 
+                           placeholder="Password" required autofocus>
+                    <label for="password"><i class="bi bi-lock me-2"></i>Admin Password</label>
+                </div>
+                
+                <button type="submit" class="btn btn-danger btn-lg w-100">
+                    <i class="bi bi-box-arrow-in-right me-2"></i>Access Admin Panel
+                </button>
+            </form>
+            
+            <div class="auth-footer">
+                <p><a href="{{ url_for('login') }}">← Back to Student Login</a></p>
+            </div>
+        </div>
+        
+        <div class="auth-decoration admin-decoration">
+            <div class="floating-shape shape-1"></div>
+            <div class="floating-shape shape-2"></div>
+            <div class="floating-shape shape-3"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}

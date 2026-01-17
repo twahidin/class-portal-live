@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - School Portal{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark admin-nav">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('admin_dashboard') }}">
+            <i class="bi bi-shield-lock me-2"></i>Admin Panel
+        </a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="{{ url_for('logout') }}">
+                <i class="bi bi-box-arrow-right me-1"></i>Logout
+            </a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="page-header mb-4">
+        <h1><i class="bi bi-speedometer2 me-2"></i>Admin Dashboard</h1>
+        <p class="text-muted">Manage students, teachers, and system settings</p>
+    </div>
+    
+    <!-- Stats -->
+    <div class="row g-4 mb-5">
+        <div class="col-md-4 col-lg">
+            <div class="stat-card stat-primary">
+                <div class="stat-icon">
+                    <i class="bi bi-people"></i>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ stats.students }}</h3>
+                    <p>Students</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg">
+            <div class="stat-card stat-success">
+                <div class="stat-icon">
+                    <i class="bi bi-person-workspace"></i>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ stats.teachers }}</h3>
+                    <p>Teachers</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg">
+            <div class="stat-card stat-info">
+                <div class="stat-icon">
+                    <i class="bi bi-collection"></i>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ stats.classes }}</h3>
+                    <p>Classes</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg">
+            <div class="stat-card stat-warning">
+                <div class="stat-icon">
+                    <i class="bi bi-journal-text"></i>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ stats.assignments }}</h3>
+                    <p>Assignments</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg">
+            <div class="stat-card stat-secondary">
+                <div class="stat-icon">
+                    <i class="bi bi-check2-square"></i>
+                </div>
+                <div class="stat-info">
+                    <h3>{{ stats.submissions }}</h3>
+                    <p>Submissions</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row g-4">
+        <!-- Import Students -->
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Import Students</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Import multiple students at once using JSON format.</p>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Student Data (JSON)</label>
+                        <textarea class="form-control font-monospace" id="students-json" rows="8" placeholder='[
+  {
+    "student_id": "S001",
+    "name": "John Doe",
+    "class": "10A",
+    "password": "student123",
+    "teachers": ["T001"]
+  }
+]'></textarea>
+                    </div>
+                    
+                    <button class="btn btn-primary" id="import-students-btn">
+                        <i class="bi bi-upload me-1"></i>Import Students
+                    </button>
+                    
+                    <div id="import-result" class="mt-3" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Add Teacher -->
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Add Teacher</h5>
+                </div>
+                <div class="card-body">
+                    <form id="add-teacher-form">
+                        <div class="mb-3">
+                            <label class="form-label">Teacher ID *</label>
+                            <input type="text" class="form-control" id="teacher_id" placeholder="e.g., T001" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Name *</label>
+                            <input type="text" class="form-control" id="teacher_name" placeholder="Full name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Password</label>
+                            <input type="text" class="form-control" id="teacher_password" placeholder="Default: teacher123">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Subjects (comma-separated)</label>
+                            <input type="text" class="form-control" id="teacher_subjects" placeholder="e.g., Math, Physics">
+                        </div>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-plus-circle me-1"></i>Add Teacher
+                        </button>
+                    </form>
+                    
+                    <div id="add-teacher-result" class="mt-3" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Add Class -->
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-collection me-2"></i>Add Class</h5>
+                </div>
+                <div class="card-body">
+                    <form id="add-class-form">
+                        <div class="mb-3">
+                            <label class="form-label">Class ID *</label>
+                            <input type="text" class="form-control" id="class_id" placeholder="e.g., 10A" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Class Name</label>
+                            <input type="text" class="form-control" id="class_name" placeholder="e.g., Year 10 Class A">
+                        </div>
+                        <button type="submit" class="btn btn-info">
+                            <i class="bi bi-plus-circle me-1"></i>Add Class
+                        </button>
+                    </form>
+                    
+                    <div id="add-class-result" class="mt-3" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Assign Teacher -->
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-link me-2"></i>Assign Teacher to Class</h5>
+                </div>
+                <div class="card-body">
+                    <form id="assign-teacher-form">
+                        <div class="mb-3">
+                            <label class="form-label">Teacher *</label>
+                            <select class="form-select" id="assign_teacher_id" required>
+                                <option value="">Select teacher...</option>
+                                {% for t in teachers %}
+                                <option value="{{ t.teacher_id }}">{{ t.name }} ({{ t.teacher_id }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Class *</label>
+                            <select class="form-select" id="assign_class_id" required>
+                                <option value="">Select class...</option>
+                                {% for c in classes %}
+                                <option value="{{ c.class_id }}">{{ c.name or c.class_id }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-warning">
+                            <i class="bi bi-link me-1"></i>Assign Teacher
+                        </button>
+                    </form>
+                    
+                    <div id="assign-result" class="mt-3" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Teachers List -->
+    {% if teachers %}
+    <div class="card mt-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-people me-2"></i>Teachers</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Subjects</th>
+                            <th>Telegram</th>
+                            <th>API Key</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in teachers %}
+                        <tr>
+                            <td><code>{{ t.teacher_id }}</code></td>
+                            <td>{{ t.name }}</td>
+                            <td>{{ t.subjects | join(', ') if t.subjects else '-' }}</td>
+                            <td>
+                                {% if t.telegram_id %}
+                                <span class="badge bg-success"><i class="bi bi-check"></i> Connected</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Not connected</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if t.anthropic_api_key %}
+                                <span class="badge bg-info">Configured</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Default</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Import Students
+    document.getElementById('import-students-btn').addEventListener('click', async () => {
+        const jsonText = document.getElementById('students-json').value;
+        const resultDiv = document.getElementById('import-result');
+        
+        try {
+            const students = JSON.parse(jsonText);
+            
+            const response = await fetch('/admin/import_students', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ students })
+            });
+            
+            const data = await response.json();
+            
+            resultDiv.style.display = 'block';
+            if (data.success) {
+                resultDiv.className = 'mt-3 alert alert-success';
+                resultDiv.innerHTML = `<i class="bi bi-check-circle me-2"></i>Imported ${data.imported} students.` +
+                    (data.errors.length ? `<br><small class="text-muted">Errors: ${data.errors.join(', ')}</small>` : '');
+            } else {
+                resultDiv.className = 'mt-3 alert alert-danger';
+                resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>${data.error}`;
+            }
+        } catch (error) {
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'mt-3 alert alert-danger';
+            resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>Invalid JSON format`;
+        }
+    });
+    
+    // Add Teacher
+    document.getElementById('add-teacher-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const resultDiv = document.getElementById('add-teacher-result');
+        
+        const data = {
+            teacher_id: document.getElementById('teacher_id').value,
+            name: document.getElementById('teacher_name').value,
+            password: document.getElementById('teacher_password').value || 'teacher123',
+            subjects: document.getElementById('teacher_subjects').value.split(',').map(s => s.trim()).filter(s => s)
+        };
+        
+        try {
+            const response = await fetch('/admin/add_teacher', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            
+            resultDiv.style.display = 'block';
+            if (result.success) {
+                resultDiv.className = 'mt-3 alert alert-success';
+                resultDiv.innerHTML = `<i class="bi bi-check-circle me-2"></i>Teacher added: ${result.teacher_id}`;
+                e.target.reset();
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                resultDiv.className = 'mt-3 alert alert-danger';
+                resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>${result.error}`;
+            }
+        } catch (error) {
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'mt-3 alert alert-danger';
+            resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>Failed to add teacher`;
+        }
+    });
+    
+    // Add Class
+    document.getElementById('add-class-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const resultDiv = document.getElementById('add-class-result');
+        
+        const data = {
+            class_id: document.getElementById('class_id').value,
+            name: document.getElementById('class_name').value || document.getElementById('class_id').value
+        };
+        
+        try {
+            const response = await fetch('/admin/add_class', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            
+            resultDiv.style.display = 'block';
+            if (result.success) {
+                resultDiv.className = 'mt-3 alert alert-success';
+                resultDiv.innerHTML = `<i class="bi bi-check-circle me-2"></i>Class added: ${result.class_id}`;
+                e.target.reset();
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                resultDiv.className = 'mt-3 alert alert-danger';
+                resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>${result.error}`;
+            }
+        } catch (error) {
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'mt-3 alert alert-danger';
+            resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>Failed to add class`;
+        }
+    });
+    
+    // Assign Teacher
+    document.getElementById('assign-teacher-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const resultDiv = document.getElementById('assign-result');
+        
+        const data = {
+            teacher_id: document.getElementById('assign_teacher_id').value,
+            class_id: document.getElementById('assign_class_id').value
+        };
+        
+        try {
+            const response = await fetch('/admin/assign_teacher', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            
+            resultDiv.style.display = 'block';
+            if (result.success) {
+                resultDiv.className = 'mt-3 alert alert-success';
+                resultDiv.innerHTML = `<i class="bi bi-check-circle me-2"></i>Assigned to ${result.updated} students`;
+                e.target.reset();
+            } else {
+                resultDiv.className = 'mt-3 alert alert-danger';
+                resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>${result.error}`;
+            }
+        } catch (error) {
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'mt-3 alert alert-danger';
+            resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>Failed to assign`;
+        }
+    });
+</script>
+{% endblock %}

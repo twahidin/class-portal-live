@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Submission - {{ assignment.title }}{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+            <i class="bi bi-mortarboard-fill me-2"></i>School Portal
+        </a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="{{ url_for('logout') }}">
+                <i class="bi bi-box-arrow-right me-1"></i>Logout
+            </a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('student_submissions') }}">Submissions</a></li>
+            <li class="breadcrumb-item active">{{ assignment.title }}</li>
+        </ol>
+    </nav>
+    
+    <!-- Header -->
+    <div class="submission-header mb-4">
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <h1>{{ assignment.title }}</h1>
+                <div class="meta">
+                    <span class="badge bg-primary me-2">{{ assignment.subject }}</span>
+                    {% if submission.status == 'approved' %}
+                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Reviewed</span>
+                    {% elif submission.status == 'ai_reviewed' %}
+                    <span class="badge bg-info"><i class="bi bi-robot me-1"></i>AI Reviewed</span>
+                    {% else %}
+                    <span class="badge bg-warning"><i class="bi bi-clock me-1"></i>Pending Review</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% if submission.status == 'approved' %}
+            <a href="{{ url_for('download_submission_pdf', submission_id=submission.submission_id) }}" class="btn btn-success">
+                <i class="bi bi-download me-1"></i>Download PDF
+            </a>
+            {% endif %}
+        </div>
+        
+        {% if submission.teacher_review and submission.teacher_review.final_score is defined %}
+        <div class="score-display mt-3">
+            <div class="score-circle">
+                {% set score = submission.teacher_review.final_score %}
+                {% set total = assignment.total_marks %}
+                {% set percentage = (score / total * 100) if total > 0 else 0 %}
+                <span class="score-value">{{ score }}</span>
+                <span class="score-total">/ {{ total }}</span>
+            </div>
+            <div class="score-info">
+                <span class="percentage">{{ "%.0f"|format(percentage) }}%</span>
+                <span class="label">Final Score</span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Questions and Answers -->
+    <div class="qa-container">
+        {% for question in assignment.questions %}
+        <div class="qa-card">
+            <div class="question-section">
+                <div class="q-header">
+                    <span class="q-number">Question {{ loop.index }}</span>
+                    <span class="q-marks">{{ question.marks }} marks</span>
+                </div>
+                <p class="q-text">{{ question.question }}</p>
+            </div>
+            
+            <div class="answer-section">
+                <h6><i class="bi bi-pencil me-2"></i>Your Answer</h6>
+                <div class="answer-content">
+                    {{ submission.answers.get(loop.index|string, submission.answers.get('q' ~ loop.index, 'No answer provided')) }}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <!-- AI Feedback -->
+    {% if submission.ai_feedback and submission.ai_feedback.overall %}
+    <div class="feedback-card mt-4">
+        <div class="feedback-header">
+            <i class="bi bi-robot me-2"></i>AI Feedback
+        </div>
+        <div class="feedback-content">
+            <div class="feedback-text">
+                {{ submission.ai_feedback.overall | replace('\n', '<br>') | safe }}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Teacher Review -->
+    {% if submission.teacher_review and submission.teacher_review.comments %}
+    <div class="feedback-card teacher-review mt-4">
+        <div class="feedback-header">
+            <i class="bi bi-person-check me-2"></i>Teacher's Comments
+        </div>
+        <div class="feedback-content">
+            <div class="feedback-text">
+                {{ submission.teacher_review.comments | replace('\n', '<br>') | safe }}
+            </div>
+            {% if submission.teacher_review.reviewed_at %}
+            <div class="review-date mt-3">
+                <small class="text-muted">
+                    <i class="bi bi-calendar me-1"></i>Reviewed on {{ submission.teacher_review.reviewed_at.strftime('%d %B %Y') if submission.teacher_review.reviewed_at is string == false else submission.teacher_review.reviewed_at }}
+                </small>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    
+    <div class="mt-4">
+        <a href="{{ url_for('student_submissions') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Back to Submissions
+        </a>
+    </div>
+</div>
+{% endblock %}

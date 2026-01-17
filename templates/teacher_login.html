@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Teacher Login - School Portal{% endblock %}
+
+{% block content %}
+<div class="auth-page teacher-auth">
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="auth-logo teacher-logo">
+                    <i class="bi bi-person-workspace"></i>
+                </div>
+                <h1>Teacher Portal</h1>
+                <p>Sign in to manage your classes</p>
+            </div>
+            
+            {% if error %}
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endif %}
+            
+            <form method="POST" class="auth-form">
+                <div class="form-floating mb-3">
+                    <input type="text" class="form-control" id="teacher_id" name="teacher_id" 
+                           placeholder="Teacher ID" required autofocus>
+                    <label for="teacher_id"><i class="bi bi-person me-2"></i>Teacher ID</label>
+                </div>
+                
+                <div class="form-floating mb-4">
+                    <input type="password" class="form-control" id="password" name="password" 
+                           placeholder="Password" required>
+                    <label for="password"><i class="bi bi-lock me-2"></i>Password</label>
+                </div>
+                
+                <button type="submit" class="btn btn-primary btn-lg w-100">
+                    <i class="bi bi-box-arrow-in-right me-2"></i>Sign In
+                </button>
+            </form>
+            
+            <div class="auth-footer">
+                <p>Are you a student? <a href="{{ url_for('login') }}">Student Login</a></p>
+                <p class="mt-2"><a href="{{ url_for('admin_login') }}">Administrator Access</a></p>
+            </div>
+        </div>
+        
+        <div class="auth-decoration">
+            <div class="floating-shape shape-1"></div>
+            <div class="floating-shape shape-2"></div>
+            <div class="floating-shape shape-3"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}

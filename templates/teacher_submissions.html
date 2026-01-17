@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Submissions - Teacher Portal{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark teacher-nav">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('teacher_dashboard') }}">
+            <i class="bi bi-mortarboard-fill me-2"></i>Teacher Portal
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('teacher_dashboard') }}">
+                        <i class="bi bi-speedometer2 me-1"></i>Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('teacher_assignments') }}">
+                        <i class="bi bi-journal-text me-1"></i>Assignments
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link active" href="{{ url_for('teacher_submissions') }}">
+                        <i class="bi bi-inbox me-1"></i>Submissions
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('teacher_messages') }}">
+                        <i class="bi bi-chat-dots me-1"></i>Messages
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('teacher_settings') }}">
+                        <i class="bi bi-gear me-1"></i>Settings
+                    </a>
+                </li>
+            </ul>
+            <div class="navbar-nav">
+                <a class="nav-link" href="{{ url_for('teacher_logout') }}">
+                    <i class="bi bi-box-arrow-right me-1"></i>Logout
+                </a>
+            </div>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="page-header mb-4">
+        <h1><i class="bi bi-inbox me-2"></i>Student Submissions</h1>
+        <p class="text-muted">Review and grade student work</p>
+    </div>
+    
+    <!-- Filters -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="GET" class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-select" onchange="this.form.submit()">
+                        <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending Review</option>
+                        <option value="approved" {% if status_filter == 'approved' %}selected{% endif %}>Approved</option>
+                        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Assignment</label>
+                    <select name="assignment" class="form-select" onchange="this.form.submit()">
+                        <option value="">All Assignments</option>
+                        {% for a in assignments %}
+                        <option value="{{ a.assignment_id }}" {% if assignment_filter == a.assignment_id %}selected{% endif %}>
+                            {{ a.title }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-funnel me-1"></i>Apply Filters
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    {% if submissions %}
+    <div class="table-responsive">
+        <table class="table table-hover submissions-table">
+            <thead>
+                <tr>
+                    <th>Student</th>
+                    <th>Assignment</th>
+                    <th>Submitted</th>
+                    <th>Status</th>
+                    <th>Score</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sub in submissions %}
+                <tr>
+                    <td>
+                        <div class="student-cell">
+                            <strong>{{ sub.student.name if sub.student else 'Unknown' }}</strong>
+                            <small class="text-muted d-block">{{ sub.student.student_id if sub.student else '' }}</small>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="assignment-cell">
+                            <span>{{ sub.assignment.title if sub.assignment else 'Unknown' }}</span>
+                            <small class="text-muted d-block">{{ sub.assignment.subject if sub.assignment else '' }}</small>
+                        </div>
+                    </td>
+                    <td>
+                        {{ sub.submitted_at.strftime('%d %b %Y, %H:%M') if sub.submitted_at else 'N/A' }}
+                    </td>
+                    <td>
+                        {% if sub.status == 'approved' %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Approved</span>
+                        {% elif sub.status == 'ai_reviewed' %}
+                        <span class="badge bg-info"><i class="bi bi-robot me-1"></i>AI Reviewed</span>
+                        {% else %}
+                        <span class="badge bg-warning"><i class="bi bi-clock me-1"></i>Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if sub.teacher_review and sub.teacher_review.final_score is defined %}
+                        <strong>{{ sub.teacher_review.final_score }}</strong>/{{ sub.assignment.total_marks if sub.assignment else '?' }}
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('review_submission', submission_id=sub.submission_id) }}" 
+                           class="btn btn-sm {% if sub.status == 'approved' %}btn-outline-success{% else %}btn-primary{% endif %}">
+                            {% if sub.status == 'approved' %}
+                            <i class="bi bi-eye me-1"></i>View
+                            {% else %}
+                            <i class="bi bi-pencil me-1"></i>Review
+                            {% endif %}
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-inbox"></i>
+        <h4>No Submissions</h4>
+        <p>{% if status_filter == 'pending' %}No pending submissions to review.{% else %}No submissions found matching your filters.{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

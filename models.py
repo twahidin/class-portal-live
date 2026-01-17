@@ -1,0 +1,164 @@
+from pymongo import MongoClient
+from datetime import datetime
+import os
+
+class Database:
+    def __init__(self):
+        self.client = None
+        self.db = None
+    
+    def init_app(self, app):
+        mongodb_uri = app.config.get('MONGODB_URI')
+        self.client = MongoClient(mongodb_uri)
+        self.db = self.client.get_database()
+        self._create_indexes()
+    
+    def _create_indexes(self):
+        self.db.students.create_index('student_id', unique=True)
+        self.db.students.create_index('class')
+        self.db.teachers.create_index('teacher_id', unique=True)
+        self.db.teachers.create_index('telegram_id', unique=True, sparse=True)
+        self.db.messages.create_index([('student_id', 1), ('teacher_id', 1), ('timestamp', -1)])
+        self.db.messages.create_index([('timestamp', -1)])
+        self.db.classes.create_index('class_id', unique=True)
+        self.db.assignments.create_index([('teacher_id', 1), ('subject', 1)])
+        self.db.assignments.create_index('assignment_id', unique=True)
+        self.db.submissions.create_index([('student_id', 1), ('assignment_id', 1)])
+        self.db.submissions.create_index([('assignment_id', 1), ('status', 1)])
+        self.db.submissions.create_index('submission_id', unique=True)
+
+db = Database()
+
+class Student:
+    @staticmethod
+    def find_one(query):
+        return db.db.students.find_one(query)
+    
+    @staticmethod
+    def find(query):
+        return db.db.students.find(query)
+    
+    @staticmethod
+    def insert_one(document):
+        return db.db.students.insert_one(document).inserted_id
+    
+    @staticmethod
+    def update_one(query, update):
+        return db.db.students.update_one(query, update)
+    
+    @staticmethod
+    def update_many(query, update):
+        return db.db.students.update_many(query, update)
+    
+    @staticmethod
+    def count(query):
+        return db.db.students.count_documents(query)
+
+class Teacher:
+    @staticmethod
+    def find_one(query):
+        return db.db.teachers.find_one(query)
+    
+    @staticmethod
+    def find(query):
+        return db.db.teachers.find(query)
+    
+    @staticmethod
+    def insert_one(document):
+        return db.db.teachers.insert_one(document).inserted_id
+    
+    @staticmethod
+    def update_one(query, update):
+        return db.db.teachers.update_one(query, update)
+    
+    @staticmethod
+    def count(query):
+        return db.db.teachers.count_documents(query)
+
+class Message:
+    @staticmethod
+    def find_one(query):
+        return db.db.messages.find_one(query)
+    
+    @staticmethod
+    def find(query):
+        return db.db.messages.find(query)
+    
+    @staticmethod
+    def insert_one(document):
+        return db.db.messages.insert_one(document).inserted_id
+    
+    @staticmethod
+    def update_many(query, update):
+        return db.db.messages.update_many(query, update)
+    
+    @staticmethod
+    def count(query):
+        return db.db.messages.count_documents(query)
+    
+    @staticmethod
+    def distinct(field, query):
+        return db.db.messages.distinct(field, query)
+
+class Class:
+    @staticmethod
+    def find_one(query):
+        return db.db.classes.find_one(query)
+    
+    @staticmethod
+    def find(query):
+        return db.db.classes.find(query)
+    
+    @staticmethod
+    def insert_one(document):
+        return db.db.classes.insert_one(document).inserted_id
+    
+    @staticmethod
+    def update_one(query, update, upsert=False):
+        return db.db.classes.update_one(query, update, upsert=upsert)
+    
+    @staticmethod
+    def count(query):
+        return db.db.classes.count_documents(query)
+
+class Assignment:
+    @staticmethod
+    def find_one(query):
+        return db.db.assignments.find_one(query)
+    
+    @staticmethod
+    def find(query):
+        return db.db.assignments.find(query)
+    
+    @staticmethod
+    def insert_one(document):
+        return db.db.assignments.insert_one(document).inserted_id
+    
+    @staticmethod
+    def update_one(query, update):
+        return db.db.assignments.update_one(query, update)
+    
+    @staticmethod
+    def count(query):
+        return db.db.assignments.count_documents(query)
+
+class Submission:
+    @staticmethod
+    def find_one(query):
+        return db.db.submissions.find_one(query)
+    
+    @staticmethod
+    def find(query):
+        return db.db.submissions.find(query)
+    
+    @staticmethod
+    def insert_one(document):
+        return db.db.submissions.insert_one(document).inserted_id
+    
+    @staticmethod
+    def update_one(query, update):
+        return db.db.submissions.update_one(query, update)
+    
+    @staticmethod
+    def count(query):
+        return db.db.submissions.count_documents(query)

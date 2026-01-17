@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}{{ assignment.title }} - School Portal{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+            <i class="bi bi-mortarboard-fill me-2"></i>School Portal
+        </a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="{{ url_for('logout') }}">
+                <i class="bi bi-box-arrow-right me-1"></i>Logout
+            </a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('assignments_list') }}">Assignments</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('assignments_by_subject', subject=assignment.subject) }}">{{ assignment.subject }}</a></li>
+            <li class="breadcrumb-item active">{{ assignment.title }}</li>
+        </ol>
+    </nav>
+    
+    <div class="assignment-header mb-4">
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <h1>{{ assignment.title }}</h1>
+                <div class="assignment-meta">
+                    <span class="badge bg-primary me-2">{{ assignment.subject }}</span>
+                    <span><i class="bi bi-star-fill me-1"></i>{{ assignment.total_marks }} marks</span>
+                    {% if assignment.due_date %}
+                    <span class="ms-3"><i class="bi bi-calendar me-1"></i>Due: {{ assignment.due_date }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="btn-group">
+                <button type="button" class="btn btn-outline-primary" id="save-draft-btn">
+                    <i class="bi bi-save me-1"></i>Save Draft
+                </button>
+                <button type="button" class="btn btn-outline-info" id="get-feedback-btn">
+                    <i class="bi bi-robot me-1"></i>AI Feedback
+                </button>
+            </div>
+        </div>
+        
+        {% if assignment.instructions %}
+        <div class="instructions-box mt-3">
+            <h6><i class="bi bi-info-circle me-1"></i>Instructions</h6>
+            <p>{{ assignment.instructions }}</p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <form id="assignment-form" data-assignment-id="{{ assignment.assignment_id }}">
+        <div class="questions-container">
+            {% for question in assignment.questions %}
+            <div class="question-card" data-question="{{ loop.index }}">
+                <div class="question-header">
+                    <span class="question-number">Q{{ loop.index }}</span>
+                    <span class="question-marks">{{ question.marks }} marks</span>
+                </div>
+                <div class="question-text">
+                    {{ question.question }}
+                </div>
+                <div class="answer-area">
+                    <label class="form-label">Your Answer</label>
+                    <textarea class="form-control answer-input" 
+                              name="answer_{{ loop.index }}" 
+                              id="answer_{{ loop.index }}"
+                              rows="4" 
+                              placeholder="Type your answer here...">{% if submission and submission.answers %}{{ submission.answers.get(loop.index|string, submission.answers.get('q' ~ loop.index, '')) }}{% endif %}</textarea>
+                    <div class="answer-footer">
+                        <small class="text-muted char-count">0 characters</small>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <!-- AI Feedback Section -->
+        <div class="feedback-section" id="feedback-section" style="display: none;">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <i class="bi bi-robot me-2"></i>AI Feedback Preview
+                </div>
+                <div class="card-body">
+                    <div id="ai-feedback-content"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Submit Section -->
+        <div class="submit-section mt-4">
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>Important:</strong> Once submitted, you cannot edit your answers. Make sure to review them carefully!
+            </div>
+            <div class="d-flex justify-content-between">
+                <a href="{{ url_for('assignments_by_subject', subject=assignment.subject) }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left me-1"></i>Back
+                </a>
+                <button type="button" class="btn btn-success btn-lg" id="submit-btn">
+                    <i class="bi bi-send me-1"></i>Submit Assignment
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Loading Modal -->
+<div class="modal fade" id="loading-modal" data-bs-backdrop="static" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-5">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h5 id="loading-text">Processing...</h5>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal fade" id="confirm-modal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Submission</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to submit this assignment? You won't be able to edit your answers after submission.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" id="confirm-submit-btn">Submit</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    initAssignmentForm('{{ assignment.assignment_id }}');
+</script>
+{% endblock %}

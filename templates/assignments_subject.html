@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}{{ subject }} - Assignments{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+            <i class="bi bi-mortarboard-fill me-2"></i>School Portal
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('dashboard') }}">
+                        <i class="bi bi-house me-1"></i>Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link active" href="{{ url_for('assignments_list') }}">
+                        <i class="bi bi-journal-text me-1"></i>Assignments
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('student_submissions') }}">
+                        <i class="bi bi-check2-square me-1"></i>Submissions
+                    </a>
+                </li>
+            </ul>
+            <div class="navbar-nav">
+                <span class="navbar-text me-3">
+                    <i class="bi bi-person-circle me-1"></i>{{ session.student_name }}
+                </span>
+                <a class="nav-link" href="{{ url_for('logout') }}">
+                    <i class="bi bi-box-arrow-right me-1"></i>Logout
+                </a>
+            </div>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('assignments_list') }}">Assignments</a></li>
+            <li class="breadcrumb-item active">{{ subject }}</li>
+        </ol>
+    </nav>
+    
+    <div class="page-header mb-4">
+        <h1><i class="bi bi-journal-text me-2"></i>{{ subject }}</h1>
+        <p class="text-muted">{{ assignments|length }} assignment{% if assignments|length != 1 %}s{% endif %}</p>
+    </div>
+    
+    {% if assignments %}
+    <div class="assignments-list">
+        {% for assignment in assignments %}
+        <div class="assignment-card">
+            <div class="assignment-status">
+                {% if assignment.submission %}
+                    {% if assignment.submission.status == 'approved' %}
+                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Completed</span>
+                    {% elif assignment.submission.status in ['submitted', 'ai_reviewed'] %}
+                    <span class="badge bg-warning"><i class="bi bi-hourglass me-1"></i>Pending Review</span>
+                    {% else %}
+                    <span class="badge bg-info"><i class="bi bi-pencil me-1"></i>Draft</span>
+                    {% endif %}
+                {% else %}
+                <span class="badge bg-secondary"><i class="bi bi-circle me-1"></i>Not Started</span>
+                {% endif %}
+            </div>
+            
+            <div class="assignment-info">
+                <h4>{{ assignment.title }}</h4>
+                <div class="assignment-meta">
+                    <span><i class="bi bi-question-circle me-1"></i>{{ assignment.questions|length }} questions</span>
+                    <span><i class="bi bi-star me-1"></i>{{ assignment.total_marks }} marks</span>
+                    {% if assignment.due_date %}
+                    <span><i class="bi bi-calendar me-1"></i>Due: {{ assignment.due_date }}</span>
+                    {% endif %}
+                </div>
+                {% if assignment.instructions %}
+                <p class="assignment-desc">{{ assignment.instructions[:150] }}{% if assignment.instructions|length > 150 %}...{% endif %}</p>
+                {% endif %}
+            </div>
+            
+            <div class="assignment-actions">
+                {% if assignment.submission and assignment.submission.status == 'approved' %}
+                <a href="{{ url_for('view_submission', submission_id=assignment.submission.submission_id) }}" class="btn btn-outline-success">
+                    <i class="bi bi-eye me-1"></i>View Feedback
+                </a>
+                {% elif assignment.submission and assignment.submission.status in ['submitted', 'ai_reviewed'] %}
+                <a href="{{ url_for('view_submission', submission_id=assignment.submission.submission_id) }}" class="btn btn-outline-warning">
+                    <i class="bi bi-eye me-1"></i>View Submission
+                </a>
+                {% else %}
+                <a href="{{ url_for('view_assignment', assignment_id=assignment.assignment_id) }}" class="btn btn-primary">
+                    <i class="bi bi-pencil-square me-1"></i>{% if assignment.submission %}Continue{% else %}Start{% endif %}
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-journal-x"></i>
+        <h4>No Assignments</h4>
+        <p>No assignments available for {{ subject }} yet.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
