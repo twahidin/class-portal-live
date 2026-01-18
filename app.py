@@ -2002,6 +2002,36 @@ def assign_teacher():
         logger.error(f"Error assigning teacher: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/admin/assign_students_to_class', methods=['POST'])
+@admin_required
+def assign_students_to_class():
+    """Assign selected students to a class"""
+    try:
+        data = request.get_json()
+        
+        student_ids = data.get('student_ids', [])
+        class_id = data.get('class_id')
+        
+        if not student_ids:
+            return jsonify({'error': 'No students selected'}), 400
+        
+        if not class_id:
+            return jsonify({'error': 'No class selected'}), 400
+        
+        # Update students
+        result = Student.update_many(
+            {'student_id': {'$in': student_ids}},
+            {'$set': {'class': class_id}}
+        )
+        
+        return jsonify({'success': True, 'updated': result.modified_count})
+        
+    except Exception as e:
+        logger.error(f"Error assigning students to class: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/add_class', methods=['POST'])
 @admin_required
 def add_class():

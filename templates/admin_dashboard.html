@@ -234,6 +234,29 @@
                                     </button>
                                 </div>
                             </div>
+                            
+                            <!-- Assign to Class -->
+                            <div class="row mb-3 align-items-center" id="assign-class-section" style="display: none;">
+                                <div class="col">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text bg-primary text-white">
+                                            <i class="bi bi-arrow-right-circle me-1"></i>Assign to
+                                        </span>
+                                        <select class="form-select form-select-sm" id="assign-to-class">
+                                            <option value="">Select class...</option>
+                                            {% for c in classes %}
+                                            <option value="{{ c.class_id }}">{{ c.name or c.class_id }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button class="btn btn-primary btn-sm" id="assign-class-btn" disabled>
+                                            <i class="bi bi-check-lg"></i> Assign
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-auto">
+                                    <small class="text-muted"><span id="selected-count">0</span> selected</small>
+                                </div>
+                            </div>
 
                             <!-- Students Table -->
                             <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
@@ -933,18 +956,71 @@
     // Select all students
     document.getElementById('select-all-students').addEventListener('change', (e) => {
         document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = e.target.checked);
-        updateDeleteButtons();
+        updateSelectionUI();
     });
 
-    document.getElementById('students-tbody').addEventListener('change', updateDeleteButtons);
+    document.getElementById('students-tbody').addEventListener('change', updateSelectionUI);
 
-    function updateDeleteButtons() {
+    function updateSelectionUI() {
         const selectedStudents = document.querySelectorAll('.student-checkbox:checked').length;
         document.getElementById('delete-selected-students').disabled = selectedStudents === 0;
+        
+        // Show/hide assign class section
+        const assignSection = document.getElementById('assign-class-section');
+        if (selectedStudents > 0) {
+            assignSection.style.display = 'flex';
+            document.getElementById('selected-count').textContent = selectedStudents;
+        } else {
+            assignSection.style.display = 'none';
+        }
+        
+        // Update assign button state
+        updateAssignButton();
         
         const selectedTeachers = document.querySelectorAll('.teacher-checkbox:checked').length;
         document.getElementById('delete-selected-teachers').disabled = selectedTeachers === 0;
     }
+    
+    // Assign to class functionality
+    document.getElementById('assign-to-class').addEventListener('change', updateAssignButton);
+    
+    function updateAssignButton() {
+        const selectedStudents = document.querySelectorAll('.student-checkbox:checked').length;
+        const selectedClass = document.getElementById('assign-to-class').value;
+        document.getElementById('assign-class-btn').disabled = selectedStudents === 0 || !selectedClass;
+    }
+    
+    document.getElementById('assign-class-btn').addEventListener('click', async () => {
+        const selectedIds = [...document.querySelectorAll('.student-checkbox:checked')].map(cb => cb.value);
+        const classId = document.getElementById('assign-to-class').value;
+        
+        if (selectedIds.length === 0 || !classId) return;
+        
+        try {
+            const response = await fetch('/admin/assign_students_to_class', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ student_ids: selectedIds, class_id: classId })
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                // Show success message
+                alert(`✅ ${data.updated} student(s) assigned to class "${classId}"`);
+                // Refresh student list
+                loadStudents();
+                // Reset selection
+                document.getElementById('select-all-students').checked = false;
+                document.getElementById('assign-to-class').value = '';
+                updateSelectionUI();
+            } else {
+                alert('❌ ' + (data.error || 'Failed to assign students'));
+            }
+        } catch (e) {
+            alert('❌ Failed to assign students');
+            console.error(e);
+        }
+    });
 
     // Delete selected students
     let deleteAction = null;
