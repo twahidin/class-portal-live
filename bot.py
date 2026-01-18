@@ -51,7 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🎯 *Quick Start:*
 /menu - Main menu with all actions
-/messages - Reply to students
+/msg - Reply to students
 /help - Interactive help guide
 
 📚 *More Commands:*
@@ -790,7 +790,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['awaiting_reply'] = False
     context.user_data['reply_to_student'] = None
     
-    await update.message.reply_text("❌ Cancelled. Use /messages to start a new conversation.")
+    await update.message.reply_text("❌ Cancelled. Use /msg to start a new conversation.")
 
 async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reply to a specific student: /reply STUDENT_ID message"""
@@ -809,7 +809,7 @@ async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ *Usage:* `/reply STUDENT_ID Your message`\n\n"
             "Example: `/reply S001 Great work on your assignment!`\n\n"
-            "Use /messages to see your conversations.",
+            "Use /msg to see your conversations.",
             parse_mode='Markdown'
         )
         return
@@ -866,7 +866,7 @@ async def purge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ *Usage:* `/purge STUDENT_ID`\n\n"
             "This will delete all messages with the specified student.\n\n"
-            "Use /messages to see your conversations.",
+            "Use /msg to see your conversations.",
             parse_mode='Markdown'
         )
         return
@@ -917,7 +917,7 @@ async def purge_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         teacher = db.teachers.find_one({'telegram_id': chat_id})
         
         if not teacher:
-            await query.edit_message_text("⚠️ Session expired. Use /messages")
+            await query.edit_message_text("⚠️ Session expired. Use /msg")
             return
         
         # Get conversations (same logic as messages_command)
@@ -1189,11 +1189,11 @@ Type /menu anytime for quick actions!"""
         text = """💬 *Messages & Replies*
 
 *View Conversations:*
-Type /messages to see all student chats
+Type /msg to see all student chats
 
 *Reply to Students:*
 1️⃣ *Easy way:* 
-   • Type /messages
+   • Type /msg
    • Click on a student
    • Click "✏️ Reply"
    • Type your message
@@ -1250,7 +1250,7 @@ Type /messages to see all student chats
 
 *Students & Messages*
 /students - Your students list
-/messages - Conversations
+/msg - Conversations
 /reply <id> <msg> - Reply to student
 /purge <id> - Delete conversation
 /cancel - Cancel current action
@@ -1418,7 +1418,7 @@ def main():
     application.add_handler(CommandHandler("assignments", list_assignments))
     application.add_handler(CommandHandler("summary", summary_command))
     application.add_handler(CommandHandler("report", report_command))
-    application.add_handler(CommandHandler("messages", messages_command))
+    application.add_handler(CommandHandler("msg", messages_command))
     application.add_handler(CommandHandler("reply", reply_command))
     application.add_handler(CommandHandler("purge", purge_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
