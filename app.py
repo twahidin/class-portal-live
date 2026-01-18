@@ -2113,6 +2113,41 @@ def delete_students():
         logger.error(f"Error deleting students: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/reset_student_password', methods=['POST'])
+@admin_required
+def reset_student_password():
+    """Reset a student's password to their student ID"""
+    try:
+        data = request.get_json()
+        student_id = data.get('student_id')
+        
+        if not student_id:
+            return jsonify({'error': 'Student ID required'}), 400
+        
+        # Find the student
+        student = db.db.students.find_one({'student_id': student_id})
+        if not student:
+            return jsonify({'error': 'Student not found'}), 404
+        
+        # Reset password to student ID
+        new_password = student_id
+        hashed = hash_password(new_password)
+        
+        db.db.students.update_one(
+            {'student_id': student_id},
+            {'$set': {'password_hash': hashed}}
+        )
+        
+        return jsonify({
+            'success': True, 
+            'new_password': new_password,
+            'message': f'Password reset to: {new_password}'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error resetting password: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/admin/delete_teachers', methods=['POST'])
 @admin_required
 def delete_teachers():
