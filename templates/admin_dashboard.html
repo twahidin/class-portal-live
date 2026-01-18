@@ -224,7 +224,7 @@
                                     <select class="form-select form-select-sm" id="filter-class">
                                         <option value="">All Classes</option>
                                         {% for c in classes %}
-                                        <option value="{{ c.class_id }}">{{ c.name or c.class_id }}</option>
+                                        <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %}</option>
                                         {% endfor %}
                                     </select>
                                 </div>
@@ -245,7 +245,7 @@
                                         <select class="form-select form-select-sm" id="assign-to-class">
                                             <option value="">Select class...</option>
                                             {% for c in classes %}
-                                            <option value="{{ c.class_id }}">{{ c.name or c.class_id }}</option>
+                                            <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %}</option>
                                             {% endfor %}
                                         </select>
                                         <button class="btn btn-primary btn-sm" id="assign-class-btn" disabled>
@@ -378,11 +378,11 @@
                             <form id="add-class-form">
                                 <div class="mb-3">
                                     <label class="form-label">Class ID *</label>
-                                    <input type="text" class="form-control" id="class_id" placeholder="e.g., 10A" required>
+                                    <input type="text" class="form-control" id="class_id" placeholder="e.g., SEC1, 10A" required>
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label">Class Name</label>
-                                    <input type="text" class="form-control" id="class_name" placeholder="e.g., Year 10 Class A">
+                                    <label class="form-label">Level <small class="text-muted">(optional)</small></label>
+                                    <input type="text" class="form-control" id="class_name" placeholder="e.g., Secondary 1, Year 10">
                                 </div>
                                 <button type="submit" class="btn btn-info">
                                     <i class="bi bi-plus-circle me-1"></i>Add Class
@@ -415,7 +415,7 @@
                                     <select class="form-select" id="assign_class_id" required>
                                         <option value="">Select class...</option>
                                         {% for c in classes %}
-                                        <option value="{{ c.class_id }}">{{ c.name or c.class_id }}</option>
+                                        <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %}</option>
                                         {% endfor %}
                                     </select>
                                 </div>
@@ -441,11 +441,11 @@
                                     <div>
                                         <strong>{{ c.class_id }}</strong>
                                         {% if c.name and c.name != c.class_id %}
-                                        <small class="text-muted d-block">{{ c.name }}</small>
+                                        <small class="text-muted d-block">Level: {{ c.name }}</small>
                                         {% endif %}
-                                        <small class="text-primary">{{ c.student_count or 0 }} students</small>
+                                        <small class="text-primary d-block">{{ c.student_count or 0 }} students</small>
                                     </div>
-                                    <button class="btn btn-outline-danger btn-sm delete-class-btn" 
+                                    <button type="button" class="btn btn-outline-danger btn-sm delete-class-btn" 
                                             data-class-id="{{ c.class_id }}"
                                             data-student-count="{{ c.student_count or 0 }}">
                                         <i class="bi bi-trash"></i>
@@ -1052,7 +1052,7 @@
     });
 
     document.querySelectorAll('.teacher-checkbox').forEach(cb => {
-        cb.addEventListener('change', updateDeleteButtons);
+        cb.addEventListener('change', updateSelectionUI);
     });
 
     document.getElementById('delete-selected-teachers').addEventListener('click', () => {
