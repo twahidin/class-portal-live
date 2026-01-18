@@ -1988,6 +1988,32 @@ def teacher_chat(student_id):
                          student=student,
                          messages=messages)
 
+@app.route('/teacher/messages/<student_id>/purge', methods=['POST'])
+@teacher_required
+def teacher_purge_conversation(student_id):
+    """Delete all messages with a student"""
+    try:
+        # Verify student exists
+        student = Student.find_one({'student_id': student_id})
+        if not student:
+            return jsonify({'error': 'Student not found'}), 404
+        
+        # Delete all messages between this teacher and student
+        result = Message.delete_many({
+            'student_id': student_id,
+            'teacher_id': session['teacher_id']
+        })
+        
+        return jsonify({
+            'success': True,
+            'deleted': result.deleted_count,
+            'message': f'Deleted {result.deleted_count} messages'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error purging conversation: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/teacher/send_message', methods=['POST'])
 @teacher_required
 def teacher_send_message():

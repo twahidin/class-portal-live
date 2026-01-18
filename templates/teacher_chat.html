@@ -20,21 +20,26 @@
 {% block content %}
 <div class="chat-container teacher-chat">
     <!-- Chat Header -->
-    <div class="chat-header">
-        <a href="{{ url_for('teacher_messages') }}" class="btn btn-link text-white">
-            <i class="bi bi-arrow-left"></i>
-        </a>
-        <div class="chat-user-info">
-            <div class="chat-avatar">
-                <i class="bi bi-person-circle"></i>
-            </div>
-            <div>
-                <h5>{{ student.name }}</h5>
-                <span class="status">
-                    {{ student.student_id }} • Class {{ student.class }}
-                </span>
+    <div class="chat-header d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <a href="{{ url_for('teacher_messages') }}" class="btn btn-link text-white">
+                <i class="bi bi-arrow-left"></i>
+            </a>
+            <div class="chat-user-info">
+                <div class="chat-avatar">
+                    <i class="bi bi-person-circle"></i>
+                </div>
+                <div>
+                    <h5>{{ student.name }}</h5>
+                    <span class="status">
+                        {{ student.student_id }} • Class {{ student.classes | join(', ') if student.classes else student.class or 'N/A' }}
+                    </span>
+                </div>
             </div>
         </div>
+        <button class="btn btn-outline-light btn-sm" id="purge-btn" title="Clear conversation">
+            <i class="bi bi-trash"></i>
+        </button>
     </div>
     
     <!-- Messages Area -->
@@ -127,5 +132,29 @@
     // Scroll to bottom on load
     const container = document.getElementById('messages-container');
     container.scrollTop = container.scrollHeight;
+    
+    // Purge conversation
+    document.getElementById('purge-btn').addEventListener('click', async () => {
+        if (!confirm('Delete all messages with this student? This cannot be undone.')) return;
+        
+        try {
+            const response = await fetch(`/teacher/messages/${studentId}/purge`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                showToast('Success', `Deleted ${data.deleted} messages`, 'success');
+                // Redirect back to messages list
+                setTimeout(() => window.location.href = '/teacher/messages', 1500);
+            } else {
+                showToast('Error', data.error || 'Failed to delete messages', 'danger');
+            }
+        } catch (error) {
+            showToast('Error', 'Failed to delete messages', 'danger');
+        }
+    });
 </script>
 {% endblock %}

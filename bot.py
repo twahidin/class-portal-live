@@ -569,6 +569,362 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
+async def messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show student conversations with reply options"""
+    if db is None:
+        await update.message.reply_text("❌ Database not connected.")
+        return
+    
+    chat_id = update.effective_chat.id
+    teacher = db.teachers.find_one({'telegram_id': chat_id})
+    
+    if not teacher:
+        await update.message.reply_text("⚠️ Not linked. Use `/verify <teacher_id>`", parse_mode='Markdown')
+        return
+    
+    # Get students with recent messages
+    pipeline = [
+        {'$match': {'teacher_id': teacher['teacher_id']}},
+        {'$sort': {'timestamp': -1}},
+        {'$group': {
+            '_id': '$student_id',
+            'last_message': {'$first': '$message'},
+            'last_time': {'$first': '$timestamp'},
+            'from_student': {'$first': '$from_student'},
+            'unread': {'$sum': {'$cond': [{'$and': [{'$eq': ['$from_student', True]}, {'$eq': ['$read', False]}]}, 1, 0]}}
+        }},
+        {'$sort': {'last_time': -1}},
+        {'$limit': 10}
+    ]
+    
+    conversations = list(db.messages.aggregate(pipeline))
+    
+    if not conversations:
+        await update.message.reply_text("💬 No conversations yet.\n\nStudents can message you through the web portal.")
+        return
+    
+    # Build inline keyboard for student selection
+    keyboard = []
+    message_text = "💬 *Your Conversations*\n\n"
+    
+    for conv in conversations:
+        student = db.students.find_one({'student_id': conv['_id']})
+        if not student:
+            continue
+        
+        name = student.get('name', 'Unknown')
+        student_id = student['student_id']
+        unread = conv.get('unread', 0)
+        
+        # Show preview of last message
+        preview = conv.get('last_message', '')[:30] + ('...' if len(conv.get('last_message', '')) > 30 else '')
+        direction = '📥' if conv.get('from_student') else '📤'
+        unread_badge = f" 🔴{unread}" if unread > 0 else ""
+        
+        message_text += f"{direction} *{name}*{unread_badge}\n"
+        message_text += f"   _{preview}_\n\n"
+        
+        # Button to reply to this student
+        btn_label = f"💬 {name[:20]}" + (f" ({unread})" if unread > 0 else "")
+        keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"chat_{student_id}")])
+    
+    message_text += "_Select a student to reply or use:_\n"
+    message_text += "`/reply STUDENT_ID Your message`"
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        message_text,
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+async def chat_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle student selection for chat"""
+    query = update.callback_query
+    await query.answer()
+    
+    if not query.data.startswith('chat_'):
+        return
+    
+    student_id = query.data.replace('chat_', '')
+    
+    chat_id = update.effective_chat.id
+    teacher = db.teachers.find_one({'telegram_id': chat_id})
+    student = db.students.find_one({'student_id': student_id})
+    
+    if not teacher or not student:
+        await query.edit_message_text("❌ Error loading conversation.")
+        return
+    
+    # Get recent messages
+    messages = list(db.messages.find({
+        'student_id': student_id,
+        'teacher_id': teacher['teacher_id']
+    }).sort('timestamp', -1).limit(10))
+    
+    messages.reverse()  # Show oldest first
+    
+    # Mark messages as read
+    db.messages.update_many(
+        {'student_id': student_id, 'teacher_id': teacher['teacher_id'], 'from_student': True},
+        {'$set': {'read': True}}
+    )
+    
+    text = f"💬 *Chat with {student.get('name')}*\n"
+    text += f"Student ID: `{student_id}`\n\n"
+    
+    if messages:
+        text += "📜 *Recent Messages:*\n"
+        for msg in messages:
+            direction = "👤" if msg.get('from_student') else "👨‍🏫"
+            time_str = msg.get('timestamp', datetime.utcnow()).strftime('%d/%m %H:%M')
+            content = msg.get('message', '')[:100]
+            text += f"{direction} _{time_str}_\n{content}\n\n"
+    else:
+        text += "_No messages yet_\n\n"
+    
+    text += f"📝 *To reply, use:*\n`/reply {student_id} Your message here`"
+    
+    keyboard = [
+        [InlineKeyboardButton("🗑️ Clear Conversation", callback_data=f"purge_{student_id}")],
+        [InlineKeyboardButton("🔙 Back to Messages", callback_data="back_messages")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def reply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reply to a specific student: /reply STUDENT_ID message"""
+    if db is None:
+        await update.message.reply_text("❌ Database not connected.")
+        return
+    
+    chat_id = update.effective_chat.id
+    teacher = db.teachers.find_one({'telegram_id': chat_id})
+    
+    if not teacher:
+        await update.message.reply_text("⚠️ Not linked. Use `/verify <teacher_id>`", parse_mode='Markdown')
+        return
+    
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "⚠️ *Usage:* `/reply STUDENT_ID Your message`\n\n"
+            "Example: `/reply S001 Great work on your assignment!`\n\n"
+            "Use /messages to see your conversations.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    student_id = context.args[0]
+    message_text = ' '.join(context.args[1:])
+    
+    # Find student (case-insensitive)
+    student = db.students.find_one({
+        'student_id': {'$regex': f'^{re.escape(student_id)}$', '$options': 'i'}
+    })
+    
+    if not student:
+        await update.message.reply_text(f"❌ Student `{student_id}` not found.", parse_mode='Markdown')
+        return
+    
+    # Verify teacher is linked to student
+    if teacher['teacher_id'] not in student.get('teachers', []):
+        await update.message.reply_text(f"⚠️ You are not assigned to this student.")
+        return
+    
+    # Save the message
+    db.messages.insert_one({
+        'student_id': student['student_id'],
+        'teacher_id': teacher['teacher_id'],
+        'message': message_text,
+        'from_student': False,
+        'timestamp': datetime.utcnow(),
+        'read': False,
+        'sent_via': 'telegram'
+    })
+    
+    await update.message.reply_text(
+        f"✅ *Message sent to {student.get('name')}!*\n\n"
+        f"_{message_text}_\n\n"
+        "They will see it in their web portal.",
+        parse_mode='Markdown'
+    )
+
+async def purge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Purge conversation with a student: /purge STUDENT_ID"""
+    if db is None:
+        await update.message.reply_text("❌ Database not connected.")
+        return
+    
+    chat_id = update.effective_chat.id
+    teacher = db.teachers.find_one({'telegram_id': chat_id})
+    
+    if not teacher:
+        await update.message.reply_text("⚠️ Not linked. Use `/verify <teacher_id>`", parse_mode='Markdown')
+        return
+    
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ *Usage:* `/purge STUDENT_ID`\n\n"
+            "This will delete all messages with the specified student.\n\n"
+            "Use /messages to see your conversations.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    student_id = context.args[0]
+    
+    # Find student
+    student = db.students.find_one({
+        'student_id': {'$regex': f'^{re.escape(student_id)}$', '$options': 'i'}
+    })
+    
+    if not student:
+        await update.message.reply_text(f"❌ Student `{student_id}` not found.", parse_mode='Markdown')
+        return
+    
+    # Show confirmation
+    keyboard = [
+        [InlineKeyboardButton("🗑️ Yes, Delete All", callback_data=f"confirm_purge_{student['student_id']}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_purge")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    msg_count = db.messages.count_documents({
+        'student_id': student['student_id'],
+        'teacher_id': teacher['teacher_id']
+    })
+    
+    await update.message.reply_text(
+        f"⚠️ *Delete conversation with {student.get('name')}?*\n\n"
+        f"This will permanently delete {msg_count} message(s).\n\n"
+        "This action cannot be undone.",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+async def purge_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle purge confirmation from inline button"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "cancel_purge":
+        await query.edit_message_text("❌ Cancelled. No messages were deleted.")
+        return
+    
+    if query.data == "back_messages":
+        # Redirect to messages command
+        chat_id = update.effective_chat.id
+        teacher = db.teachers.find_one({'telegram_id': chat_id})
+        
+        if not teacher:
+            await query.edit_message_text("⚠️ Session expired. Use /messages")
+            return
+        
+        # Get conversations (same logic as messages_command)
+        pipeline = [
+            {'$match': {'teacher_id': teacher['teacher_id']}},
+            {'$sort': {'timestamp': -1}},
+            {'$group': {
+                '_id': '$student_id',
+                'last_message': {'$first': '$message'},
+                'last_time': {'$first': '$timestamp'},
+                'from_student': {'$first': '$from_student'},
+                'unread': {'$sum': {'$cond': [{'$and': [{'$eq': ['$from_student', True]}, {'$eq': ['$read', False]}]}, 1, 0]}}
+            }},
+            {'$sort': {'last_time': -1}},
+            {'$limit': 10}
+        ]
+        
+        conversations = list(db.messages.aggregate(pipeline))
+        
+        keyboard = []
+        message_text = "💬 *Your Conversations*\n\n"
+        
+        for conv in conversations:
+            student = db.students.find_one({'student_id': conv['_id']})
+            if not student:
+                continue
+            
+            name = student.get('name', 'Unknown')
+            student_id = student['student_id']
+            unread = conv.get('unread', 0)
+            
+            preview = conv.get('last_message', '')[:30] + ('...' if len(conv.get('last_message', '')) > 30 else '')
+            direction = '📥' if conv.get('from_student') else '📤'
+            unread_badge = f" 🔴{unread}" if unread > 0 else ""
+            
+            message_text += f"{direction} *{name}*{unread_badge}\n"
+            message_text += f"   _{preview}_\n\n"
+            
+            btn_label = f"💬 {name[:20]}" + (f" ({unread})" if unread > 0 else "")
+            keyboard.append([InlineKeyboardButton(btn_label, callback_data=f"chat_{student_id}")])
+        
+        message_text += "_Select a student to reply_"
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+        return
+    
+    if not query.data.startswith('confirm_purge_') and not query.data.startswith('purge_'):
+        return
+    
+    # Handle purge from chat view (purge_STUDENTID)
+    if query.data.startswith('purge_') and not query.data.startswith('purge_confirm'):
+        student_id = query.data.replace('purge_', '')
+        student = db.students.find_one({'student_id': student_id})
+        
+        if not student:
+            await query.edit_message_text("❌ Student not found.")
+            return
+        
+        chat_id = update.effective_chat.id
+        teacher = db.teachers.find_one({'telegram_id': chat_id})
+        
+        msg_count = db.messages.count_documents({
+            'student_id': student_id,
+            'teacher_id': teacher['teacher_id']
+        })
+        
+        keyboard = [
+            [InlineKeyboardButton("🗑️ Yes, Delete All", callback_data=f"confirm_purge_{student_id}")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="back_messages")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"⚠️ *Delete conversation with {student.get('name')}?*\n\n"
+            f"This will permanently delete {msg_count} message(s).\n\n"
+            "This action cannot be undone.",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Confirmed purge
+    student_id = query.data.replace('confirm_purge_', '')
+    
+    chat_id = update.effective_chat.id
+    teacher = db.teachers.find_one({'telegram_id': chat_id})
+    student = db.students.find_one({'student_id': student_id})
+    
+    if not teacher or not student:
+        await query.edit_message_text("❌ Error: Could not complete deletion.")
+        return
+    
+    # Delete messages
+    result = db.messages.delete_many({
+        'student_id': student_id,
+        'teacher_id': teacher['teacher_id']
+    })
+    
+    await query.edit_message_text(
+        f"✅ *Conversation deleted*\n\n"
+        f"Deleted {result.deleted_count} message(s) with {student.get('name')}.",
+        parse_mode='Markdown'
+    )
+
 async def handle_teacher_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process replies to student messages"""
     if db is None:
@@ -645,8 +1001,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /report - Download PDF report for assignment
 
 *Communication:*
-• Reply directly to any notification to respond to student
-• Messages appear in student's web portal
+/messages - View conversations with students
+/reply <id> <msg> - Reply to a specific student
+/purge <id> - Delete conversation with a student
+
+*Quick Reply:*
+• Reply directly to any notification to respond
+• Or use: `/reply STUDENT_ID Your message`
 
 *Notifications You'll Receive:*
 📬 New assignment submissions
@@ -680,6 +1041,9 @@ def main():
     application.add_handler(CommandHandler("assignments", list_assignments))
     application.add_handler(CommandHandler("summary", summary_command))
     application.add_handler(CommandHandler("report", report_command))
+    application.add_handler(CommandHandler("messages", messages_command))
+    application.add_handler(CommandHandler("reply", reply_command))
+    application.add_handler(CommandHandler("purge", purge_command))
     application.add_handler(CommandHandler("help", help_command))
     
     # Callback handlers for inline buttons
@@ -687,6 +1051,8 @@ def main():
     application.add_handler(CallbackQueryHandler(detail_callback, pattern="^detail_"))
     application.add_handler(CallbackQueryHandler(pdf_callback, pattern="^pdf_"))
     application.add_handler(CallbackQueryHandler(back_to_assignments, pattern="^back_assignments"))
+    application.add_handler(CallbackQueryHandler(chat_callback, pattern="^chat_"))
+    application.add_handler(CallbackQueryHandler(purge_callback, pattern="^purge_|^confirm_purge_|^cancel_purge|^back_messages"))
     
     # Handle teacher replies
     application.add_handler(MessageHandler(
