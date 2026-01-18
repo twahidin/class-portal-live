@@ -61,33 +61,42 @@ async def verify_teacher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not context.args:
         await update.message.reply_text(
-            "⚠️ Please provide your teacher ID.\n"
-            "Usage: `/verify T12345`",
-            parse_mode='Markdown'
+            "⚠️ Please provide your teacher ID.\n\n"
+            "Usage: /verify your_teacher_id\n\n"
+            "Example: /verify teacher_demo"
         )
         return
     
-    teacher_id = context.args[0].upper()
+    # Accept teacher ID in any case (lowercase, uppercase, mixed)
+    teacher_id_input = context.args[0]
     chat_id = update.effective_chat.id
     
-    # Check if teacher exists
-    teacher = db.teachers.find_one({'teacher_id': teacher_id})
+    # Try to find teacher with case-insensitive search
+    teacher = db.teachers.find_one({
+        'teacher_id': {'$regex': f'^{re.escape(teacher_id_input)}$', '$options': 'i'}
+    })
     
     if not teacher:
+        # List available teachers for debugging
+        all_teachers = list(db.teachers.find({}, {'teacher_id': 1, 'name': 1}))
+        teacher_list = ", ".join([t.get('teacher_id', 'unknown') for t in all_teachers[:5]])
+        
         await update.message.reply_text(
-            f"❌ Teacher ID `{teacher_id}` not found.\n"
-            "Please check your ID and try again.",
-            parse_mode='Markdown'
+            f"❌ Teacher ID '{teacher_id_input}' not found.\n\n"
+            f"Available teachers: {teacher_list if teacher_list else 'None'}\n\n"
+            "Please check your ID and try again."
         )
         return
+    
+    # Get the actual teacher_id from database
+    teacher_id = teacher['teacher_id']
     
     # Check if already linked to another account
     existing = db.teachers.find_one({'telegram_id': chat_id})
     if existing and existing['teacher_id'] != teacher_id:
         await update.message.reply_text(
-            f"⚠️ Your Telegram is already linked to teacher `{existing['teacher_id']}`.\n"
-            "Contact admin if you need to change this.",
-            parse_mode='Markdown'
+            f"⚠️ Your Telegram is already linked to teacher '{existing['teacher_id']}'.\n"
+            "Contact admin if you need to change this."
         )
         return
     
@@ -98,14 +107,14 @@ async def verify_teacher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     await update.message.reply_text(
-        f"✅ Success! Your Telegram is now linked to teacher account `{teacher_id}`.\n\n"
-        f"Welcome, {teacher.get('name', 'Teacher')}! 🎉\n\n"
+        f"✅ Verification Complete!\n\n"
+        f"🎉 Welcome, {teacher.get('name', 'Teacher')}!\n\n"
+        f"Your Telegram is now linked to: {teacher_id}\n\n"
         "You will now receive:\n"
-        "• Student messages\n"
-        "• Assignment submission notifications\n"
-        "• System alerts\n\n"
-        "Reply to any student message to respond directly!",
-        parse_mode='Markdown'
+        "• 📱 Student messages\n"
+        "• 📚 Assignment submission notifications\n"
+        "• 🔔 System alerts\n\n"
+        "Reply to any student message to respond directly!"
     )
 
 async def list_students(update: Update, context: ContextTypes.DEFAULT_TYPE):
