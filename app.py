@@ -1727,20 +1727,36 @@ def teacher_settings():
                 # Refresh teacher data
                 teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
             
+            classes = list(db.db.classes.find())
+            all_students = list(Student.find({}).sort('name', 1))
+            my_students = list(Student.find({'teachers': session['teacher_id']}).sort('name', 1))
             return render_template('teacher_settings.html',
                                  teacher=teacher,
-                                 classes=list(db.db.classes.find()),
+                                 classes=classes,
+                                 all_students=all_students,
+                                 my_students=my_students,
                                  success='Settings updated successfully')
             
         except Exception as e:
             logger.error(f"Error updating settings: {e}")
+            classes = list(db.db.classes.find())
+            all_students = list(Student.find({}).sort('name', 1))
+            my_students = list(Student.find({'teachers': session['teacher_id']}).sort('name', 1))
             return render_template('teacher_settings.html',
                                  teacher=teacher,
-                                 classes=list(db.db.classes.find()),
+                                 classes=classes,
+                                 all_students=all_students,
+                                 my_students=my_students,
                                  error='Failed to update settings')
     
     classes = list(db.db.classes.find())
-    return render_template('teacher_settings.html', teacher=teacher, classes=classes)
+    all_students = list(Student.find({}).sort('name', 1))
+    my_students = list(Student.find({'teachers': session['teacher_id']}).sort('name', 1))
+    return render_template('teacher_settings.html', 
+                         teacher=teacher, 
+                         classes=classes,
+                         all_students=all_students,
+                         my_students=my_students)
 
 @app.route('/teacher/change_password', methods=['POST'])
 @teacher_required
@@ -1797,9 +1813,9 @@ def teacher_assign_class():
             {'$addToSet': {'classes': class_id}, '$set': {'updated_at': datetime.utcnow()}}
         )
         
-        # Add teacher to all students in this class
+        # Add teacher to all students in this class (support both 'class' and 'classes' fields)
         Student.update_many(
-            {'class': class_id},
+            {'$or': [{'class': class_id}, {'classes': class_id}]},
             {'$addToSet': {'teachers': session['teacher_id']}}
         )
         
@@ -1826,9 +1842,9 @@ def teacher_remove_class():
             {'$pull': {'classes': class_id}, '$set': {'updated_at': datetime.utcnow()}}
         )
         
-        # Remove teacher from students in this class
+        # Remove teacher from students in this class (support both 'class' and 'classes' fields)
         Student.update_many(
-            {'class': class_id, 'teachers': session['teacher_id']},
+            {'$or': [{'class': class_id}, {'classes': class_id}], 'teachers': session['teacher_id']},
             {'$pull': {'teachers': session['teacher_id']}}
         )
         
@@ -1838,78 +1854,73 @@ def teacher_remove_class():
         logger.error(f"Error removing class from teacher: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/teacher/add_student', methods=['POST'])
+@app.route('/teacher/assign_student_to_class', methods=['POST'])
 @teacher_required
-def teacher_add_student():
-    """Teacher adds a new student or updates existing one"""
+def teacher_assign_student_to_class():
+    """Teacher assigns an existing student to one of their classes"""
     try:
         data = request.get_json()
         student_id = data.get('student_id')
-        name = data.get('name')
-        class_id = data.get('class_id', '')
+        class_id = data.get('class_id')
         
-        if not student_id or not name:
-            return jsonify({'error': 'Student ID and name required'}), 400
+        if not student_id or not class_id:
+            return jsonify({'error': 'Student ID and Class ID required'}), 400
         
-        # Check if student already exists
-        existing = Student.find_one({'student_id': student_id})
+        # Verify teacher has this class
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        if not teacher or class_id not in teacher.get('classes', []):
+            return jsonify({'error': 'You are not assigned to this class'}), 403
         
-        if existing:
-            # Student exists - update their class and add this teacher
-            update_data = {
-                'updated_at': datetime.utcnow()
+        # Check if student exists
+        student = Student.find_one({'student_id': student_id})
+        if not student:
+            return jsonify({'error': 'Student not found'}), 404
+        
+        # Add class to student's classes array and add teacher
+        Student.update_one(
+            {'student_id': student_id},
+            {
+                '$addToSet': {
+                    'classes': class_id,
+                    'teachers': session['teacher_id']
+                },
+                '$set': {'updated_at': datetime.utcnow()}
             }
-            
-            if class_id:
-                update_data['class'] = class_id
-            
-            # Update name if provided and different
-            if name and name != existing.get('name'):
-                update_data['name'] = name
-            
-            Student.update_one(
-                {'student_id': student_id},
-                {
-                    '$set': update_data,
-                    '$addToSet': {'teachers': session['teacher_id']}
-                }
-            )
-            
-            msg = f'Student {student_id} updated'
-            if class_id:
-                msg += f' and assigned to class {class_id}'
-            
-            return jsonify({
-                'success': True, 
-                'message': msg,
-                'updated': True
-            })
-        else:
-            # Create new student with password = student_id
-            password = student_id
-            hashed = hash_password(password)
-            
-            student_data = {
-                'student_id': student_id,
-                'name': name,
-                'password_hash': hashed,
-                'class': class_id,
-                'teachers': [session['teacher_id']],
-                'created_at': datetime.utcnow(),
-                'updated_at': datetime.utcnow()
-            }
-            
-            Student.insert_one(student_data)
-            
-            return jsonify({
-                'success': True, 
-                'message': f'Student {student_id} created',
-                'password': password,
-                'created': True
-            })
+        )
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Student {student.get("name")} assigned to class {class_id} and linked to you'
+        })
         
     except Exception as e:
-        logger.error(f"Error adding student: {e}")
+        logger.error(f"Error assigning student to class: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/teacher/remove_student', methods=['POST'])
+@teacher_required
+def teacher_remove_student():
+    """Teacher removes a student from their list (unlinks teacher from student)"""
+    try:
+        data = request.get_json()
+        student_id = data.get('student_id')
+        
+        if not student_id:
+            return jsonify({'error': 'Student ID required'}), 400
+        
+        # Remove this teacher from the student's teachers list
+        Student.update_one(
+            {'student_id': student_id},
+            {
+                '$pull': {'teachers': session['teacher_id']},
+                '$set': {'updated_at': datetime.utcnow()}
+            }
+        )
+        
+        return jsonify({'success': True, 'message': f'Student {student_id} removed from your list'})
+        
+    except Exception as e:
+        logger.error(f"Error removing student: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/teacher/messages')

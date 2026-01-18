@@ -258,39 +258,84 @@
                 </div>
             </div>
             
-            <!-- Add Students -->
+            <!-- Assign Students to My Classes -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Add / Assign Students</h5>
+                    <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Assign Students to My Classes</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted">Add new students or assign existing students to a class. They will automatically be linked to you as their teacher.</p>
+                    <p class="text-muted">Select existing students and assign them to one of your classes. Students can belong to multiple classes.</p>
                     
-                    <form id="add-student-form">
+                    <form id="assign-student-form">
                         <div class="row">
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Student ID *</label>
-                                <input type="text" class="form-control" id="student_id" placeholder="e.g., S001" required>
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Name *</label>
-                                <input type="text" class="form-control" id="student_name" placeholder="Full name" required>
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Class</label>
-                                <select class="form-select" id="student_class">
-                                    <option value="">No class</option>
-                                    {% for c in classes %}
-                                    <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %}</option>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Select Student *</label>
+                                <select class="form-select" id="student_select" required>
+                                    <option value="">Choose a student...</option>
+                                    {% for s in all_students %}
+                                    <option value="{{ s.student_id }}">{{ s.name }} ({{ s.student_id }}){% if s.classes %} - {{ s.classes | join(', ') }}{% elif s.class %} - {{ s.class }}{% endif %}</option>
                                     {% endfor %}
                                 </select>
                             </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Assign to Class *</label>
+                                <select class="form-select" id="target_class" required>
+                                    <option value="">Choose one of your classes...</option>
+                                    {% for cls in teacher.classes or [] %}
+                                    <option value="{{ cls }}">{{ cls }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% if not teacher.classes %}
+                                <small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>You need to assign yourself to a class first (above)</small>
+                                {% endif %}
+                            </div>
                         </div>
-                        <button type="submit" class="btn btn-success">
-                            <i class="bi bi-plus-circle me-1"></i>Add Student
+                        <button type="submit" class="btn btn-success" {% if not teacher.classes %}disabled{% endif %}>
+                            <i class="bi bi-person-plus me-1"></i>Assign Student
                         </button>
                     </form>
-                    <div id="add-student-result" class="mt-2"></div>
+                    <div id="assign-student-result" class="mt-2"></div>
+                    
+                    <!-- My Students List -->
+                    <hr class="my-4">
+                    <h6><i class="bi bi-people me-2"></i>My Students</h6>
+                    <div class="table-responsive" style="max-height: 300px;">
+                        <table class="table table-sm table-hover">
+                            <thead class="sticky-top bg-white">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Classes</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="my-students-tbody">
+                                {% for s in my_students %}
+                                <tr>
+                                    <td><code>{{ s.student_id }}</code></td>
+                                    <td>{{ s.name }}</td>
+                                    <td>
+                                        {% if s.classes %}
+                                        {{ s.classes | join(', ') }}
+                                        {% elif s.class %}
+                                        {{ s.class }}
+                                        {% else %}
+                                        <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-outline-danger btn-sm remove-student-btn" 
+                                                data-student-id="{{ s.student_id }}" title="Remove from my students">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="4" class="text-center text-muted">No students assigned to you yet</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -415,41 +460,67 @@
         });
     });
     
-    // Add Student
-    document.getElementById('add-student-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const resultDiv = document.getElementById('add-student-result');
-        
-        const data = {
-            student_id: document.getElementById('student_id').value,
-            name: document.getElementById('student_name').value,
-            class_id: document.getElementById('student_class').value
-        };
-        
-        try {
-            const response = await fetch('/teacher/add_student', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
+    // Assign Student to Class
+    const assignForm = document.getElementById('assign-student-form');
+    if (assignForm) {
+        assignForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const resultDiv = document.getElementById('assign-student-result');
             
-            const result = await response.json();
+            const studentId = document.getElementById('student_select').value;
+            const classId = document.getElementById('target_class').value;
             
-            if (result.success) {
-                if (result.created) {
-                    // New student created
-                    resultDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Student <strong>${data.student_id}</strong> created! Password: <code>${result.password}</code></div>`;
-                } else {
-                    // Existing student updated
-                    resultDiv.innerHTML = `<div class="alert alert-info"><i class="bi bi-info-circle me-1"></i>Student <strong>${data.student_id}</strong> updated and linked to you.${data.class_id ? ' Class assigned: <strong>' + data.class_id + '</strong>' : ''}</div>`;
-                }
-                document.getElementById('add-student-form').reset();
-            } else {
-                resultDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-1"></i>${result.error || 'Failed to add student'}</div>`;
+            if (!studentId || !classId) {
+                resultDiv.innerHTML = '<div class="alert alert-warning">Please select both a student and a class</div>';
+                return;
             }
-        } catch (e) {
-            resultDiv.innerHTML = '<div class="alert alert-danger">Error adding student</div>';
-        }
+            
+            try {
+                const response = await fetch('/teacher/assign_student_to_class', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ student_id: studentId, class_id: classId })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>${result.message}</div>`;
+                    // Reload page to update student list
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    resultDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-1"></i>${result.error || 'Failed to assign student'}</div>`;
+                }
+            } catch (e) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">Error assigning student</div>';
+            }
+        });
+    }
+    
+    // Remove Student from My Students
+    document.querySelectorAll('.remove-student-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const studentId = btn.dataset.studentId;
+            if (!confirm(`Remove student ${studentId} from your students?`)) return;
+            
+            try {
+                const response = await fetch('/teacher/remove_student', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ student_id: studentId })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    location.reload();
+                } else {
+                    alert(result.error || 'Failed to remove student');
+                }
+            } catch (e) {
+                alert('Error removing student');
+            }
+        });
     });
 </script>
 {% endblock %}
