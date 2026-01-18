@@ -83,10 +83,11 @@
                             <div class="col-md-6">
                                 <label class="form-label">Teacher ID</label>
                                 <input type="text" class="form-control" value="{{ teacher.teacher_id }}" disabled>
+                                <small class="text-muted">Cannot be changed</small>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Name</label>
-                                <input type="text" class="form-control" value="{{ teacher.name }}" disabled>
+                                <input type="text" class="form-control" name="name" value="{{ teacher.name }}" required>
                             </div>
                         </div>
                         

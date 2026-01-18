@@ -1712,6 +1712,10 @@ def teacher_settings():
             
             update_data = {}
             
+            # Update name
+            if data.get('name') and data['name'].strip():
+                update_data['name'] = data['name'].strip()
+            
             # Update Anthropic API key
             if data.get('anthropic_api_key'):
                 encrypted = encrypt_api_key(data['anthropic_api_key'])
@@ -1726,6 +1730,8 @@ def teacher_settings():
             if data.get('subjects'):
                 subjects = [s.strip() for s in data['subjects'].split(',') if s.strip()]
                 update_data['subjects'] = subjects
+            elif 'subjects' in data:
+                update_data['subjects'] = []
             
             if update_data:
                 update_data['updated_at'] = datetime.utcnow()
@@ -2401,6 +2407,48 @@ def reset_teacher_password():
         
     except Exception as e:
         logger.error(f"Error resetting teacher password: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/update_teacher', methods=['POST'])
+@admin_required
+def admin_update_teacher():
+    """Admin updates a teacher's information"""
+    try:
+        data = request.get_json()
+        teacher_id = data.get('teacher_id')
+        name = data.get('name')
+        subjects = data.get('subjects', [])
+        
+        if not teacher_id:
+            return jsonify({'error': 'Teacher ID required'}), 400
+        
+        if not name or not name.strip():
+            return jsonify({'error': 'Name is required'}), 400
+        
+        # Find the teacher
+        teacher = db.db.teachers.find_one({'teacher_id': teacher_id})
+        if not teacher:
+            return jsonify({'error': 'Teacher not found'}), 404
+        
+        # Update teacher
+        update_data = {
+            'name': name.strip(),
+            'subjects': subjects,
+            'updated_at': datetime.utcnow()
+        }
+        
+        db.db.teachers.update_one(
+            {'teacher_id': teacher_id},
+            {'$set': update_data}
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': f'Teacher {teacher_id} updated successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating teacher: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/admin/delete_teachers', methods=['POST'])
