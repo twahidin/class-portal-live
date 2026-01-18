@@ -2109,6 +2109,39 @@ def delete_teachers():
         logger.error(f"Error deleting teachers: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/admin/delete_class', methods=['POST'])
+@admin_required
+def delete_class():
+    """Delete a class"""
+    try:
+        data = request.get_json()
+        class_id = data.get('class_id')
+        
+        if not class_id:
+            return jsonify({'error': 'No class specified'}), 400
+        
+        # Check if class exists
+        existing = db.db.classes.find_one({'class_id': class_id})
+        if not existing:
+            return jsonify({'error': 'Class not found'}), 404
+        
+        # Remove class from students (don't delete students, just unassign)
+        db.db.students.update_many(
+            {'class': class_id},
+            {'$set': {'class': ''}}
+        )
+        
+        # Delete the class
+        db.db.classes.delete_one({'class_id': class_id})
+        
+        return jsonify({'success': True, 'deleted': class_id})
+        
+    except Exception as e:
+        logger.error(f"Error deleting class: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # ============================================================================
 # ERROR HANDLERS
 # ============================================================================

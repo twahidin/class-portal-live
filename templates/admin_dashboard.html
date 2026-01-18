@@ -98,7 +98,7 @@
         <div class="tab-pane fade show active" id="students" role="tabpanel">
             <div class="row g-4">
                 <!-- Import Students -->
-                <div class="col-lg-6">
+                <div class="col-lg-7">
                     <div class="card">
                         <div class="card-header">
                             <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Import Students</h5>
@@ -126,16 +126,49 @@
                             <div class="tab-content">
                                 <!-- Excel Paste -->
                                 <div class="tab-pane fade show active" id="excel-paste">
-                                    <p class="text-muted small">Copy from Excel/Google Sheets. Format: <code>student_id, name, class, password, teachers</code></p>
-                                    <p class="text-muted small">Example row: <code>S001, John Doe, 10A, password123, T001</code></p>
-                                    <textarea class="form-control font-monospace" id="excel-data" rows="8" 
-                                        placeholder="Paste data here (one student per line)...
+                                    <div class="alert alert-info small py-2">
+                                        <i class="bi bi-info-circle me-1"></i>
+                                        <strong>Format:</strong> student_id, name, class, password, teachers (semicolon-separated)
+                                    </div>
+                                    
+                                    <div class="paste-area mb-3" id="paste-area">
+                                        <textarea class="form-control font-monospace" id="excel-data" rows="4" 
+                                            placeholder="Paste from Excel here... (Ctrl+V)
+Example:
 S001, John Doe, 10A, student123, T001
-S002, Jane Smith, 10A, student123, T001
-S003, Bob Wilson, 10B, student123, T001;T002"></textarea>
-                                    <button class="btn btn-primary mt-3" id="import-excel-btn">
-                                        <i class="bi bi-upload me-1"></i>Import from Paste
-                                    </button>
+S002, Jane Smith, 10B, student123, T001;T002"></textarea>
+                                    </div>
+                                    
+                                    <!-- Preview Table -->
+                                    <div id="preview-container" style="display: none;">
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <h6 class="mb-0"><i class="bi bi-eye me-1"></i>Preview (<span id="preview-count">0</span> students)</h6>
+                                            <button class="btn btn-sm btn-outline-secondary" onclick="clearPreview()">
+                                                <i class="bi bi-x me-1"></i>Clear
+                                            </button>
+                                        </div>
+                                        <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                                            <table class="table table-sm table-bordered mb-0" id="preview-table">
+                                                <thead class="table-light sticky-top">
+                                                    <tr>
+                                                        <th>Student ID</th>
+                                                        <th>Name</th>
+                                                        <th>Class</th>
+                                                        <th>Password</th>
+                                                        <th>Teachers</th>
+                                                        <th></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="preview-tbody"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="d-flex gap-2 mt-3">
+                                        <button class="btn btn-primary" id="import-excel-btn" disabled>
+                                            <i class="bi bi-upload me-1"></i>Import <span id="import-count">0</span> Students
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <!-- CSV Upload -->
@@ -175,7 +208,7 @@ S003, Bob Wilson, 10B, student123, T001;T002"></textarea>
                 </div>
 
                 <!-- Manage Students -->
-                <div class="col-lg-6">
+                <div class="col-lg-5">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="mb-0"><i class="bi bi-people me-2"></i>Manage Students</h5>
@@ -373,28 +406,33 @@ S003, Bob Wilson, 10B, student123, T001;T002"></textarea>
                     </div>
                 </div>
 
-                <!-- Classes List -->
+                <!-- Classes List with Delete -->
                 <div class="col-lg-4">
                     <div class="card">
                         <div class="card-header">
-                            <h5 class="mb-0"><i class="bi bi-list me-2"></i>Classes</h5>
+                            <h5 class="mb-0"><i class="bi bi-list me-2"></i>Manage Classes</h5>
                         </div>
-                        <div class="card-body">
-                            <ul class="list-group">
+                        <div class="card-body p-0">
+                            <div class="list-group list-group-flush">
                                 {% for c in classes %}
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div class="list-group-item d-flex justify-content-between align-items-center">
                                     <div>
                                         <strong>{{ c.class_id }}</strong>
                                         {% if c.name and c.name != c.class_id %}
                                         <small class="text-muted d-block">{{ c.name }}</small>
                                         {% endif %}
+                                        <small class="text-primary">{{ c.student_count or 0 }} students</small>
                                     </div>
-                                    <span class="badge bg-primary">{{ c.student_count or 0 }} students</span>
-                                </li>
+                                    <button class="btn btn-outline-danger btn-sm delete-class-btn" 
+                                            data-class-id="{{ c.class_id }}"
+                                            data-student-count="{{ c.student_count or 0 }}">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
                                 {% else %}
-                                <li class="list-group-item text-muted">No classes yet</li>
+                                <div class="list-group-item text-muted text-center">No classes yet</div>
                                 {% endfor %}
-                            </ul>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -422,6 +460,30 @@ S003, Bob Wilson, 10B, student123, T001;T002"></textarea>
         </div>
     </div>
 </div>
+
+<style>
+.paste-area textarea:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+#preview-table {
+    font-size: 0.85rem;
+}
+
+#preview-table th {
+    font-weight: 600;
+    background: #f8f9fa;
+}
+
+.preview-row-invalid {
+    background-color: #fff3cd !important;
+}
+
+.sticky-top {
+    z-index: 10;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
@@ -429,39 +491,121 @@ S003, Bob Wilson, 10B, student123, T001;T002"></textarea>
     // Load students on page load
     loadStudents();
 
-    // ================== STUDENT IMPORT ==================
-
-    // Excel/Paste Import
-    document.getElementById('import-excel-btn').addEventListener('click', async () => {
-        const data = document.getElementById('excel-data').value.trim();
-        if (!data) {
-            showResult('import-result', 'Please paste some data', 'warning');
+    // ================== EXCEL PASTE WITH PREVIEW ==================
+    
+    let previewStudents = [];
+    
+    document.getElementById('excel-data').addEventListener('input', function() {
+        parseAndPreview(this.value);
+    });
+    
+    document.getElementById('excel-data').addEventListener('paste', function(e) {
+        // Handle paste with slight delay to get pasted content
+        setTimeout(() => {
+            parseAndPreview(this.value);
+        }, 50);
+    });
+    
+    function parseAndPreview(data) {
+        previewStudents = [];
+        const tbody = document.getElementById('preview-tbody');
+        const container = document.getElementById('preview-container');
+        
+        if (!data.trim()) {
+            container.style.display = 'none';
+            updateImportButton();
             return;
         }
-
-        const students = [];
+        
         const lines = data.split('\n');
+        tbody.innerHTML = '';
         
         for (const line of lines) {
             if (!line.trim()) continue;
-            const parts = line.split(',').map(p => p.trim());
-            if (parts.length >= 3) {
-                students.push({
-                    student_id: parts[0],
-                    name: parts[1],
-                    class: parts[2],
+            
+            // Handle both comma and tab separated
+            let parts = line.includes('\t') ? line.split('\t') : line.split(',');
+            parts = parts.map(p => p.trim());
+            
+            if (parts.length >= 2) {
+                const student = {
+                    student_id: parts[0] || '',
+                    name: parts[1] || '',
+                    class: parts[2] || '',
                     password: parts[3] || 'student123',
                     teachers: parts[4] ? parts[4].split(';').map(t => t.trim()) : []
-                });
+                };
+                
+                const isValid = student.student_id && student.name;
+                previewStudents.push(student);
+                
+                const row = document.createElement('tr');
+                if (!isValid) row.classList.add('preview-row-invalid');
+                
+                row.innerHTML = `
+                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.student_id)}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'student_id', this.value)"></td>
+                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.name)}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'name', this.value)"></td>
+                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.class)}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'class', this.value)"></td>
+                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.password)}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'password', this.value)"></td>
+                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.teachers.join(';'))}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'teachers', this.value)"></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="removePreviewRow(${previewStudents.length - 1})"><i class="bi bi-x"></i></button></td>
+                `;
+                tbody.appendChild(row);
             }
         }
+        
+        container.style.display = previewStudents.length > 0 ? 'block' : 'none';
+        document.getElementById('preview-count').textContent = previewStudents.length;
+        updateImportButton();
+    }
+    
+    function updatePreviewRow(index, field, value) {
+        if (previewStudents[index]) {
+            if (field === 'teachers') {
+                previewStudents[index].teachers = value.split(';').map(t => t.trim()).filter(t => t);
+            } else {
+                previewStudents[index][field] = value;
+            }
+            updateImportButton();
+        }
+    }
+    
+    function removePreviewRow(index) {
+        previewStudents.splice(index, 1);
+        parseAndPreview(document.getElementById('excel-data').value); // Re-render
+    }
+    
+    function clearPreview() {
+        document.getElementById('excel-data').value = '';
+        previewStudents = [];
+        document.getElementById('preview-container').style.display = 'none';
+        updateImportButton();
+    }
+    
+    function updateImportButton() {
+        const validCount = previewStudents.filter(s => s.student_id && s.name).length;
+        const btn = document.getElementById('import-excel-btn');
+        btn.disabled = validCount === 0;
+        document.getElementById('import-count').textContent = validCount;
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
 
-        if (students.length === 0) {
-            showResult('import-result', 'No valid student data found', 'warning');
+    // Excel/Paste Import
+    document.getElementById('import-excel-btn').addEventListener('click', async () => {
+        const validStudents = previewStudents.filter(s => s.student_id && s.name);
+        
+        if (validStudents.length === 0) {
+            showResult('import-result', 'No valid students to import', 'warning');
             return;
         }
 
-        await importStudents(students);
+        await importStudents(validStudents);
+        clearPreview();
     });
 
     // CSV Import
@@ -665,6 +809,24 @@ S003, Bob Wilson, 10B, student123, T001;T002"></textarea>
         deleteModal.show();
     });
 
+    // ================== CLASS MANAGEMENT ==================
+    
+    document.querySelectorAll('.delete-class-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const classId = btn.dataset.classId;
+            const studentCount = parseInt(btn.dataset.studentCount) || 0;
+            
+            let message = `Delete class "${classId}"?`;
+            if (studentCount > 0) {
+                message += `\n\nWarning: This class has ${studentCount} student(s). They will NOT be deleted, but will no longer be assigned to this class.`;
+            }
+            
+            document.getElementById('delete-message').innerHTML = message.replace('\n\n', '<br><br>');
+            deleteAction = { type: 'class', class_id: classId };
+            deleteModal.show();
+        });
+    });
+
     // Confirm delete
     document.getElementById('confirm-delete-btn').addEventListener('click', async () => {
         if (!deleteAction) return;
@@ -688,6 +850,12 @@ S003, Bob Wilson, 10B, student123, T001;T002"></textarea>
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ teacher_ids: deleteAction.ids })
+                });
+            } else if (deleteAction.type === 'class') {
+                response = await fetch('/admin/delete_class', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ class_id: deleteAction.class_id })
                 });
             }
             
