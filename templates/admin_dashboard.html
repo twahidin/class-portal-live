@@ -126,40 +126,39 @@
                             <div class="tab-content">
                                 <!-- Excel Paste -->
                                 <div class="tab-pane fade show active" id="excel-paste">
-                                    <div class="alert alert-info small py-2">
+                                    <div class="alert alert-info small py-2 mb-3">
                                         <i class="bi bi-info-circle me-1"></i>
-                                        <strong>Format:</strong> student_id, name, class, password, teachers (semicolon-separated)
+                                        <strong>Tip:</strong> Click any cell and paste from Excel (Ctrl+V), or type directly. Press Tab to move between cells.
                                     </div>
                                     
-                                    <div class="paste-area mb-3" id="paste-area">
-                                        <textarea class="form-control font-monospace" id="excel-data" rows="4" 
-                                            placeholder="Paste from Excel here... (Ctrl+V)
-Example:
-S001, John Doe, 10A, student123, T001
-S002, Jane Smith, 10B, student123, T001;T002"></textarea>
-                                    </div>
-                                    
-                                    <!-- Preview Table -->
-                                    <div id="preview-container" style="display: none;">
+                                    <!-- Spreadsheet Grid -->
+                                    <div class="spreadsheet-container">
                                         <div class="d-flex justify-content-between align-items-center mb-2">
-                                            <h6 class="mb-0"><i class="bi bi-eye me-1"></i>Preview (<span id="preview-count">0</span> students)</h6>
-                                            <button class="btn btn-sm btn-outline-secondary" onclick="clearPreview()">
-                                                <i class="bi bi-x me-1"></i>Clear
-                                            </button>
+                                            <span class="text-muted small"><span id="row-count">0</span> students</span>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-secondary" onclick="addEmptyRow()">
+                                                    <i class="bi bi-plus me-1"></i>Add Row
+                                                </button>
+                                                <button class="btn btn-outline-danger" onclick="clearAllRows()">
+                                                    <i class="bi bi-trash me-1"></i>Clear All
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
-                                            <table class="table table-sm table-bordered mb-0" id="preview-table">
-                                                <thead class="table-light sticky-top">
+                                        <div class="table-responsive spreadsheet-wrapper" id="spreadsheet-wrapper">
+                                            <table class="table table-sm table-bordered spreadsheet-table mb-0" id="spreadsheet-table">
+                                                <thead class="table-dark">
                                                     <tr>
-                                                        <th>Student ID</th>
-                                                        <th>Name</th>
-                                                        <th>Class</th>
-                                                        <th>Password</th>
-                                                        <th>Teachers</th>
-                                                        <th></th>
+                                                        <th style="width: 100px;">Student ID *</th>
+                                                        <th style="width: 150px;">Name *</th>
+                                                        <th style="width: 80px;">Class</th>
+                                                        <th style="width: 100px;">Password</th>
+                                                        <th style="width: 120px;">Teachers</th>
+                                                        <th style="width: 40px;"></th>
                                                     </tr>
                                                 </thead>
-                                                <tbody id="preview-tbody"></tbody>
+                                                <tbody id="spreadsheet-tbody">
+                                                    <!-- Empty rows will be populated by JS -->
+                                                </tbody>
                                             </table>
                                         </div>
                                     </div>
@@ -462,22 +461,83 @@ S002, Jane Smith, 10B, student123, T001;T002"></textarea>
 </div>
 
 <style>
-.paste-area textarea:focus {
-    border-color: #667eea;
-    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+/* Spreadsheet styling */
+.spreadsheet-wrapper {
+    max-height: 350px;
+    overflow-y: auto;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
 }
 
-#preview-table {
+.spreadsheet-table {
     font-size: 0.85rem;
+    margin: 0;
 }
 
-#preview-table th {
-    font-weight: 600;
+.spreadsheet-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 4px;
+    white-space: nowrap;
+}
+
+.spreadsheet-table td {
+    padding: 0 !important;
+    vertical-align: middle;
+}
+
+.spreadsheet-table input {
+    border: none;
+    border-radius: 0;
+    padding: 6px 8px;
+    width: 100%;
+    height: 100%;
+    font-size: 0.85rem;
+    background: transparent;
+}
+
+.spreadsheet-table input:focus {
+    background: #e8f4ff;
+    outline: 2px solid #0d6efd;
+    outline-offset: -2px;
+}
+
+.spreadsheet-table input::placeholder {
+    color: #ccc;
+    font-style: italic;
+}
+
+.spreadsheet-table tr:hover input {
     background: #f8f9fa;
 }
 
-.preview-row-invalid {
-    background-color: #fff3cd !important;
+.spreadsheet-table tr:hover input:focus {
+    background: #e8f4ff;
+}
+
+.spreadsheet-table .delete-row-btn {
+    border: none;
+    background: none;
+    color: #dc3545;
+    padding: 4px 8px;
+    opacity: 0.3;
+    transition: opacity 0.15s;
+}
+
+.spreadsheet-table tr:hover .delete-row-btn {
+    opacity: 1;
+}
+
+.spreadsheet-table .row-invalid input {
+    background-color: #fff3cd;
+}
+
+.spreadsheet-table .row-valid {
+    background-color: #d1e7dd;
 }
 
 .sticky-top {
@@ -491,102 +551,221 @@ S002, Jane Smith, 10B, student123, T001;T002"></textarea>
     // Load students on page load
     loadStudents();
 
-    // ================== EXCEL PASTE WITH PREVIEW ==================
+    // ================== SPREADSHEET GRID ==================
     
-    let previewStudents = [];
+    const INITIAL_ROWS = 10;
     
-    document.getElementById('excel-data').addEventListener('input', function() {
-        parseAndPreview(this.value);
+    // Initialize spreadsheet with empty rows on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        initSpreadsheet();
     });
     
-    document.getElementById('excel-data').addEventListener('paste', function(e) {
-        // Handle paste with slight delay to get pasted content
-        setTimeout(() => {
-            parseAndPreview(this.value);
-        }, 50);
-    });
-    
-    function parseAndPreview(data) {
-        previewStudents = [];
-        const tbody = document.getElementById('preview-tbody');
-        const container = document.getElementById('preview-container');
-        
-        if (!data.trim()) {
-            container.style.display = 'none';
-            updateImportButton();
-            return;
-        }
-        
-        const lines = data.split('\n');
+    function initSpreadsheet() {
+        const tbody = document.getElementById('spreadsheet-tbody');
         tbody.innerHTML = '';
+        for (let i = 0; i < INITIAL_ROWS; i++) {
+            addRowToSpreadsheet();
+        }
+        updateRowCount();
+    }
+    
+    function addRowToSpreadsheet(data = {}) {
+        const tbody = document.getElementById('spreadsheet-tbody');
+        const row = document.createElement('tr');
         
-        for (const line of lines) {
-            if (!line.trim()) continue;
+        row.innerHTML = `
+            <td><input type="text" class="cell-input" data-field="student_id" value="${escapeHtml(data.student_id || '')}" placeholder="S001"></td>
+            <td><input type="text" class="cell-input" data-field="name" value="${escapeHtml(data.name || '')}" placeholder="John Doe"></td>
+            <td><input type="text" class="cell-input" data-field="class" value="${escapeHtml(data.class || '')}" placeholder="10A"></td>
+            <td><input type="text" class="cell-input" data-field="password" value="${escapeHtml(data.password || '')}" placeholder="student123"></td>
+            <td><input type="text" class="cell-input" data-field="teachers" value="${escapeHtml(data.teachers || '')}" placeholder="T001;T002"></td>
+            <td><button type="button" class="delete-row-btn" onclick="deleteRow(this)"><i class="bi bi-x-lg"></i></button></td>
+        `;
+        
+        // Add event listeners
+        row.querySelectorAll('.cell-input').forEach(input => {
+            input.addEventListener('input', updateRowCount);
+            input.addEventListener('paste', handleCellPaste);
+            input.addEventListener('keydown', handleCellKeydown);
+        });
+        
+        tbody.appendChild(row);
+        return row;
+    }
+    
+    function addEmptyRow() {
+        const row = addRowToSpreadsheet();
+        row.querySelector('input').focus();
+        updateRowCount();
+    }
+    
+    function deleteRow(btn) {
+        const row = btn.closest('tr');
+        row.remove();
+        
+        // Ensure at least one row exists
+        const tbody = document.getElementById('spreadsheet-tbody');
+        if (tbody.children.length === 0) {
+            addRowToSpreadsheet();
+        }
+        updateRowCount();
+    }
+    
+    function clearAllRows() {
+        initSpreadsheet();
+    }
+    
+    function handleCellPaste(e) {
+        const clipboardData = e.clipboardData || window.clipboardData;
+        const pastedText = clipboardData.getData('text');
+        
+        // Check if pasting multiple lines (from Excel)
+        if (pastedText.includes('\n') || pastedText.includes('\t')) {
+            e.preventDefault();
             
-            // Handle both comma and tab separated
-            let parts = line.includes('\t') ? line.split('\t') : line.split(',');
-            parts = parts.map(p => p.trim());
+            const lines = pastedText.split('\n').filter(line => line.trim());
+            const currentRow = e.target.closest('tr');
+            const tbody = document.getElementById('spreadsheet-tbody');
+            const currentRowIndex = Array.from(tbody.children).indexOf(currentRow);
             
-            if (parts.length >= 2) {
-                const student = {
-                    student_id: parts[0] || '',
-                    name: parts[1] || '',
-                    class: parts[2] || '',
-                    password: parts[3] || 'student123',
-                    teachers: parts[4] ? parts[4].split(';').map(t => t.trim()) : []
-                };
+            // Parse and insert rows
+            lines.forEach((line, lineIndex) => {
+                // Handle both tab and comma separated
+                let parts = line.includes('\t') ? line.split('\t') : line.split(',');
+                parts = parts.map(p => p.trim());
                 
-                const isValid = student.student_id && student.name;
-                previewStudents.push(student);
+                const rowIndex = currentRowIndex + lineIndex;
+                let row = tbody.children[rowIndex];
                 
-                const row = document.createElement('tr');
-                if (!isValid) row.classList.add('preview-row-invalid');
+                // Create new row if needed
+                if (!row) {
+                    row = addRowToSpreadsheet();
+                }
                 
-                row.innerHTML = `
-                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.student_id)}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'student_id', this.value)"></td>
-                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.name)}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'name', this.value)"></td>
-                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.class)}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'class', this.value)"></td>
-                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.password)}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'password', this.value)"></td>
-                    <td><input class="form-control form-control-sm" value="${escapeHtml(student.teachers.join(';'))}" onchange="updatePreviewRow(${previewStudents.length - 1}, 'teachers', this.value)"></td>
-                    <td><button class="btn btn-sm btn-outline-danger" onclick="removePreviewRow(${previewStudents.length - 1})"><i class="bi bi-x"></i></button></td>
-                `;
-                tbody.appendChild(row);
+                // Fill in the cells
+                const inputs = row.querySelectorAll('.cell-input');
+                inputs[0].value = parts[0] || '';  // student_id
+                inputs[1].value = parts[1] || '';  // name
+                inputs[2].value = parts[2] || '';  // class
+                inputs[3].value = parts[3] || '';  // password
+                inputs[4].value = parts[4] || '';  // teachers
+            });
+            
+            // Add a few extra empty rows if needed
+            const totalRows = tbody.children.length;
+            const neededRows = currentRowIndex + lines.length + 3;
+            for (let i = totalRows; i < neededRows; i++) {
+                addRowToSpreadsheet();
+            }
+            
+            updateRowCount();
+        }
+    }
+    
+    function handleCellKeydown(e) {
+        const input = e.target;
+        const row = input.closest('tr');
+        const cell = input.closest('td');
+        const tbody = document.getElementById('spreadsheet-tbody');
+        const rows = Array.from(tbody.children);
+        const rowIndex = rows.indexOf(row);
+        const cells = Array.from(row.querySelectorAll('td'));
+        const cellIndex = cells.indexOf(cell);
+        
+        if (e.key === 'Tab') {
+            // Tab moves to next cell, shift+tab to previous
+            const direction = e.shiftKey ? -1 : 1;
+            let nextCellIndex = cellIndex + direction;
+            let nextRowIndex = rowIndex;
+            
+            if (nextCellIndex < 0) {
+                nextRowIndex--;
+                nextCellIndex = 4; // Last editable column
+            } else if (nextCellIndex > 4) {
+                nextRowIndex++;
+                nextCellIndex = 0;
+                // Add new row if at the end
+                if (nextRowIndex >= rows.length) {
+                    addRowToSpreadsheet();
+                }
+            }
+            
+            if (nextRowIndex >= 0 && nextRowIndex < tbody.children.length) {
+                e.preventDefault();
+                const nextRow = tbody.children[nextRowIndex];
+                const nextInput = nextRow.querySelectorAll('.cell-input')[nextCellIndex];
+                if (nextInput) nextInput.focus();
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            // Move to same column in next row
+            let nextRowIndex = rowIndex + 1;
+            if (nextRowIndex >= rows.length) {
+                addRowToSpreadsheet();
+            }
+            const nextRow = tbody.children[nextRowIndex];
+            if (nextRow) {
+                const nextInput = nextRow.querySelectorAll('.cell-input')[cellIndex];
+                if (nextInput) nextInput.focus();
+            }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (rowIndex < rows.length - 1) {
+                const nextRow = rows[rowIndex + 1];
+                nextRow.querySelectorAll('.cell-input')[cellIndex]?.focus();
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (rowIndex > 0) {
+                const prevRow = rows[rowIndex - 1];
+                prevRow.querySelectorAll('.cell-input')[cellIndex]?.focus();
             }
         }
+    }
+    
+    function getSpreadsheetData() {
+        const rows = document.querySelectorAll('#spreadsheet-tbody tr');
+        const students = [];
         
-        container.style.display = previewStudents.length > 0 ? 'block' : 'none';
-        document.getElementById('preview-count').textContent = previewStudents.length;
-        updateImportButton();
-    }
-    
-    function updatePreviewRow(index, field, value) {
-        if (previewStudents[index]) {
-            if (field === 'teachers') {
-                previewStudents[index].teachers = value.split(';').map(t => t.trim()).filter(t => t);
-            } else {
-                previewStudents[index][field] = value;
+        rows.forEach(row => {
+            const inputs = row.querySelectorAll('.cell-input');
+            const student_id = inputs[0].value.trim();
+            const name = inputs[1].value.trim();
+            
+            if (student_id && name) {
+                students.push({
+                    student_id: student_id,
+                    name: name,
+                    class: inputs[2].value.trim(),
+                    password: inputs[3].value.trim() || 'student123',
+                    teachers: inputs[4].value.trim() ? inputs[4].value.split(';').map(t => t.trim()).filter(t => t) : []
+                });
             }
-            updateImportButton();
-        }
+        });
+        
+        return students;
     }
     
-    function removePreviewRow(index) {
-        previewStudents.splice(index, 1);
-        parseAndPreview(document.getElementById('excel-data').value); // Re-render
-    }
-    
-    function clearPreview() {
-        document.getElementById('excel-data').value = '';
-        previewStudents = [];
-        document.getElementById('preview-container').style.display = 'none';
-        updateImportButton();
-    }
-    
-    function updateImportButton() {
-        const validCount = previewStudents.filter(s => s.student_id && s.name).length;
-        const btn = document.getElementById('import-excel-btn');
-        btn.disabled = validCount === 0;
-        document.getElementById('import-count').textContent = validCount;
+    function updateRowCount() {
+        const students = getSpreadsheetData();
+        const count = students.length;
+        document.getElementById('row-count').textContent = count;
+        document.getElementById('import-count').textContent = count;
+        document.getElementById('import-excel-btn').disabled = count === 0;
+        
+        // Highlight valid rows
+        document.querySelectorAll('#spreadsheet-tbody tr').forEach(row => {
+            const inputs = row.querySelectorAll('.cell-input');
+            const hasId = inputs[0].value.trim();
+            const hasName = inputs[1].value.trim();
+            
+            row.classList.remove('row-valid', 'row-invalid');
+            if (hasId && hasName) {
+                row.classList.add('row-valid');
+            } else if (hasId || hasName) {
+                row.classList.add('row-invalid');
+            }
+        });
     }
     
     function escapeHtml(text) {
@@ -597,15 +776,15 @@ S002, Jane Smith, 10B, student123, T001;T002"></textarea>
 
     // Excel/Paste Import
     document.getElementById('import-excel-btn').addEventListener('click', async () => {
-        const validStudents = previewStudents.filter(s => s.student_id && s.name);
+        const students = getSpreadsheetData();
         
-        if (validStudents.length === 0) {
+        if (students.length === 0) {
             showResult('import-result', 'No valid students to import', 'warning');
             return;
         }
 
-        await importStudents(validStudents);
-        clearPreview();
+        await importStudents(students);
+        initSpreadsheet(); // Clear after import
     });
 
     // CSV Import
