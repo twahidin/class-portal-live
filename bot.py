@@ -55,7 +55,7 @@ Once verified, students can message you directly through the web portal, and you
 
 async def verify_teacher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Link Telegram ID to teacher account"""
-    if not db:
+    if db is None:
         await update.message.reply_text("❌ Database not connected. Please try again later.")
         return
     
@@ -119,7 +119,7 @@ async def verify_teacher(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_students(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show teacher's students"""
-    if not db:
+    if db is None:
         await update.message.reply_text("❌ Database not connected.")
         return
     
@@ -161,7 +161,7 @@ async def list_students(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show pending submissions for review"""
-    if not db:
+    if db is None:
         await update.message.reply_text("❌ Database not connected.")
         return
     
@@ -220,7 +220,7 @@ async def list_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_teacher_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process replies to student messages"""
-    if not db:
+    if db is None:
         return
     
     chat_id = update.effective_chat.id
