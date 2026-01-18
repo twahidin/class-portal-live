@@ -261,10 +261,10 @@
             <!-- Add Students -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Add Students</h5>
+                    <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Add / Assign Students</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted">Add students to your classes. They will automatically be linked to you as their teacher.</p>
+                    <p class="text-muted">Add new students or assign existing students to a class. They will automatically be linked to you as their teacher.</p>
                     
                     <form id="add-student-form">
                         <div class="row">
@@ -436,7 +436,13 @@
             const result = await response.json();
             
             if (result.success) {
-                resultDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Student ${data.student_id} added successfully! Password: <code>${result.password}</code></div>`;
+                if (result.created) {
+                    // New student created
+                    resultDiv.innerHTML = `<div class="alert alert-success"><i class="bi bi-check-circle me-1"></i>Student <strong>${data.student_id}</strong> created! Password: <code>${result.password}</code></div>`;
+                } else {
+                    // Existing student updated
+                    resultDiv.innerHTML = `<div class="alert alert-info"><i class="bi bi-info-circle me-1"></i>Student <strong>${data.student_id}</strong> updated and linked to you.${data.class_id ? ' Class assigned: <strong>' + data.class_id + '</strong>' : ''}</div>`;
+                }
                 document.getElementById('add-student-form').reset();
             } else {
                 resultDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-1"></i>${result.error || 'Failed to add student'}</div>`;

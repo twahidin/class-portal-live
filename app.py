@@ -1841,7 +1841,7 @@ def teacher_remove_class():
 @app.route('/teacher/add_student', methods=['POST'])
 @teacher_required
 def teacher_add_student():
-    """Teacher adds a new student"""
+    """Teacher adds a new student or updates existing one"""
     try:
         data = request.get_json()
         student_id = data.get('student_id')
@@ -1853,30 +1853,60 @@ def teacher_add_student():
         
         # Check if student already exists
         existing = Student.find_one({'student_id': student_id})
+        
         if existing:
-            return jsonify({'error': 'Student ID already exists'}), 400
-        
-        # Create student with password = student_id
-        password = student_id
-        hashed = hash_password(password)
-        
-        student_data = {
-            'student_id': student_id,
-            'name': name,
-            'password_hash': hashed,
-            'class': class_id,
-            'teachers': [session['teacher_id']],
-            'created_at': datetime.utcnow(),
-            'updated_at': datetime.utcnow()
-        }
-        
-        Student.insert_one(student_data)
-        
-        return jsonify({
-            'success': True, 
-            'message': f'Student {student_id} created',
-            'password': password
-        })
+            # Student exists - update their class and add this teacher
+            update_data = {
+                'updated_at': datetime.utcnow()
+            }
+            
+            if class_id:
+                update_data['class'] = class_id
+            
+            # Update name if provided and different
+            if name and name != existing.get('name'):
+                update_data['name'] = name
+            
+            Student.update_one(
+                {'student_id': student_id},
+                {
+                    '$set': update_data,
+                    '$addToSet': {'teachers': session['teacher_id']}
+                }
+            )
+            
+            msg = f'Student {student_id} updated'
+            if class_id:
+                msg += f' and assigned to class {class_id}'
+            
+            return jsonify({
+                'success': True, 
+                'message': msg,
+                'updated': True
+            })
+        else:
+            # Create new student with password = student_id
+            password = student_id
+            hashed = hash_password(password)
+            
+            student_data = {
+                'student_id': student_id,
+                'name': name,
+                'password_hash': hashed,
+                'class': class_id,
+                'teachers': [session['teacher_id']],
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow()
+            }
+            
+            Student.insert_one(student_data)
+            
+            return jsonify({
+                'success': True, 
+                'message': f'Student {student_id} created',
+                'password': password,
+                'created': True
+            })
         
     except Exception as e:
         logger.error(f"Error adding student: {e}")
