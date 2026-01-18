@@ -420,10 +420,11 @@ def view_assignment(assignment_id):
     if not assignment:
         return redirect(url_for('assignments_list'))
     
-    # Get existing submission/draft
-    submission = Submission.find_one({
+    # Get existing submission
+    existing_submission = Submission.find_one({
         'assignment_id': assignment_id,
-        'student_id': session['student_id']
+        'student_id': session['student_id'],
+        'status': {'$in': ['submitted', 'ai_reviewed', 'reviewed']}
     })
     
     teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
@@ -431,7 +432,7 @@ def view_assignment(assignment_id):
     return render_template('assignment_view.html',
                          student=student,
                          assignment=assignment,
-                         submission=submission,
+                         existing_submission=existing_submission,
                          teacher=teacher)
 
 @app.route('/assignments/<assignment_id>/save', methods=['POST'])
@@ -648,6 +649,230 @@ def download_submission_pdf(submission_id):
         as_attachment=True,
         download_name=f"feedback_{submission_id}.pdf"
     )
+
+@app.route('/student/submit', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def student_submit_files():
+    """Submit assignment with photo/PDF upload"""
+    from gridfs import GridFS
+    from utils.ai_marking import analyze_submission_images
+    
+    try:
+        assignment_id = request.form.get('assignment_id')
+        file_type = request.form.get('file_type', 'images')
+        files = request.files.getlist('files')
+        
+        if not assignment_id or not files:
+            return jsonify({'error': 'Missing assignment or files'}), 400
+        
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        if not assignment:
+            return jsonify({'error': 'Assignment not found'}), 404
+        
+        student = Student.find_one({'student_id': session['student_id']})
+        teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
+        
+        # Check for existing submission
+        existing = Submission.find_one({
+            'assignment_id': assignment_id,
+            'student_id': session['student_id'],
+            'status': {'$in': ['submitted', 'ai_reviewed', 'reviewed']}
+        })
+        
+        if existing:
+            return jsonify({'error': 'Already submitted'}), 400
+        
+        submission_id = generate_submission_id()
+        fs = GridFS(db.db)
+        
+        # Store files
+        file_ids = []
+        pages = []
+        
+        for i, file in enumerate(files):
+            file_data = file.read()
+            
+            # Determine content type
+            if file.filename.lower().endswith('.pdf'):
+                content_type = 'application/pdf'
+                page_type = 'pdf'
+            else:
+                content_type = 'image/jpeg'
+                page_type = 'image'
+            
+            # Store in GridFS
+            file_id = fs.put(
+                file_data,
+                filename=f"{submission_id}_page_{i+1}.{file.filename.split('.')[-1]}",
+                content_type=content_type,
+                submission_id=submission_id,
+                page_num=i + 1
+            )
+            file_ids.append(str(file_id))
+            
+            pages.append({
+                'type': page_type,
+                'data': file_data,
+                'page_num': i + 1
+            })
+        
+        # Create submission
+        submission = {
+            'submission_id': submission_id,
+            'assignment_id': assignment_id,
+            'student_id': session['student_id'],
+            'teacher_id': assignment['teacher_id'],
+            'file_ids': file_ids,
+            'file_type': 'pdf' if file_type == 'pdf' else 'image',
+            'page_count': len(files),
+            'status': 'submitted',
+            'submitted_at': datetime.utcnow(),
+            'submitted_via': 'web',
+            'created_at': datetime.utcnow()
+        }
+        
+        Submission.insert_one(submission)
+        
+        # Generate AI feedback
+        try:
+            # Get answer key
+            answer_key_content = None
+            if assignment.get('answer_key_id'):
+                try:
+                    answer_file = fs.get(assignment['answer_key_id'])
+                    answer_key_content = answer_file.read()
+                except:
+                    pass
+            
+            ai_result = analyze_submission_images(pages, assignment, answer_key_content, teacher)
+            
+            Submission.update_one(
+                {'submission_id': submission_id},
+                {'$set': {
+                    'ai_feedback': ai_result,
+                    'status': 'ai_reviewed'
+                }}
+            )
+        except Exception as e:
+            logger.error(f"AI feedback error: {e}")
+        
+        # Notify teacher
+        try:
+            notify_submission_ready(submission, assignment, student, teacher)
+        except Exception as e:
+            logger.warning(f"Notification error: {e}")
+        
+        return jsonify({
+            'success': True,
+            'submission_id': submission_id,
+            'redirect': url_for('view_submission', submission_id=submission_id)
+        })
+        
+    except Exception as e:
+        logger.error(f"Submission error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/student/submission/<submission_id>/file/<int:file_index>')
+@login_required
+def view_student_submission_file(submission_id, file_index):
+    """Serve student's submission file"""
+    from gridfs import GridFS
+    from bson import ObjectId
+    
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id']
+    })
+    
+    if not submission:
+        return 'Not found', 404
+    
+    file_ids = submission.get('file_ids', [])
+    if file_index >= len(file_ids):
+        return 'File not found', 404
+    
+    fs = GridFS(db.db)
+    try:
+        file_data = fs.get(ObjectId(file_ids[file_index]))
+        content_type = file_data.content_type or 'application/octet-stream'
+        return Response(
+            file_data.read(),
+            mimetype=content_type,
+            headers={'Content-Disposition': 'inline'}
+        )
+    except Exception as e:
+        logger.error(f"Error serving file: {e}")
+        return 'File not found', 404
+
+@app.route('/student/assignment/<assignment_id>/file/<file_type>')
+@login_required
+def download_student_assignment_file(assignment_id, file_type):
+    """Download assignment file (question paper) for student"""
+    from gridfs import GridFS
+    
+    assignment = Assignment.find_one({'assignment_id': assignment_id})
+    if not assignment:
+        return 'Assignment not found', 404
+    
+    # Verify student has access (teacher is assigned to student)
+    student = Student.find_one({'student_id': session['student_id']})
+    if assignment['teacher_id'] not in student.get('teachers', []):
+        return 'Unauthorized', 403
+    
+    file_id_field = f"{file_type}_id"
+    file_name_field = f"{file_type}_name"
+    
+    if file_id_field not in assignment:
+        return 'File not found', 404
+    
+    fs = GridFS(db.db)
+    try:
+        file_data = fs.get(assignment[file_id_field])
+        return Response(
+            file_data.read(),
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'inline; filename="{assignment.get(file_name_field, "document.pdf")}"'
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error downloading file: {e}")
+        return 'File not found', 404
+
+@app.route('/student/feedback/<submission_id>/pdf')
+@login_required
+def download_student_feedback_pdf(submission_id):
+    """Download feedback PDF for student"""
+    from utils.pdf_generator import generate_review_pdf
+    
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id']
+    })
+    
+    if not submission:
+        return 'Not found', 404
+    
+    assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+    student = Student.find_one({'student_id': session['student_id']})
+    teacher = Teacher.find_one({'teacher_id': submission.get('teacher_id')})
+    
+    try:
+        pdf_content = generate_review_pdf(submission, assignment, student, teacher)
+        
+        filename = f"feedback_{assignment['title']}_{student['student_id']}.pdf"
+        
+        return Response(
+            pdf_content,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error generating PDF: {e}")
+        return 'Error generating PDF', 500
 
 # ============================================================================
 # TEACHER ROUTES

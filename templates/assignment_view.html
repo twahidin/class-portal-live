@@ -8,10 +8,22 @@
         <a class="navbar-brand" href="{{ url_for('dashboard') }}">
             <i class="bi bi-mortarboard-fill me-2"></i>School Portal
         </a>
-        <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="{{ url_for('logout') }}">
-                <i class="bi bi-box-arrow-right me-1"></i>Logout
-            </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('assignments_list') }}">Assignments</a>
+                </li>
+            </ul>
+            <div class="navbar-nav">
+                <span class="navbar-text me-3">{{ session.student_name }}</span>
+                <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+            </div>
         </div>
     </div>
 </nav>
@@ -27,90 +39,187 @@
         </ol>
     </nav>
     
-    <div class="assignment-header mb-4">
-        <div class="d-flex justify-content-between align-items-start">
-            <div>
-                <h1>{{ assignment.title }}</h1>
-                <div class="assignment-meta">
-                    <span class="badge bg-primary me-2">{{ assignment.subject }}</span>
-                    <span><i class="bi bi-star-fill me-1"></i>{{ assignment.total_marks }} marks</span>
-                    {% if assignment.due_date %}
-                    <span class="ms-3"><i class="bi bi-calendar me-1"></i>Due: {{ assignment.due_date }}</span>
+    <div class="row">
+        <!-- Left: Assignment Details -->
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="bi bi-file-text me-2"></i>Assignment Details</h5>
+                </div>
+                <div class="card-body">
+                    <h4>{{ assignment.title }}</h4>
+                    
+                    <div class="assignment-meta mb-3">
+                        <span class="badge bg-primary me-2">{{ assignment.subject }}</span>
+                        <span class="badge bg-secondary me-2">{{ assignment.total_marks }} marks</span>
+                        {% if assignment.due_date %}
+                        <span class="badge bg-warning text-dark">Due: {{ assignment.due_date }}</span>
+                        {% endif %}
+                    </div>
+                    
+                    {% if assignment.instructions %}
+                    <div class="alert alert-info">
+                        <strong><i class="bi bi-info-circle me-1"></i>Instructions:</strong>
+                        <p class="mb-0 mt-2">{{ assignment.instructions }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Question Paper Download -->
+                    {% if assignment.question_paper_id %}
+                    <div class="question-paper-section mt-4">
+                        <h6><i class="bi bi-file-pdf me-2"></i>Question Paper</h6>
+                        <div class="d-grid gap-2">
+                            <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
+                               class="btn btn-outline-primary" target="_blank">
+                                <i class="bi bi-eye me-1"></i>View Question Paper
+                            </a>
+                            <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
+                               class="btn btn-primary" download>
+                                <i class="bi bi-download me-1"></i>Download Question Paper
+                            </a>
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Submission Status -->
+                    {% if existing_submission %}
+                    <div class="alert alert-success mt-4">
+                        <h6 class="alert-heading"><i class="bi bi-check-circle me-2"></i>Already Submitted</h6>
+                        <p class="mb-2">You submitted this assignment on {{ existing_submission.submitted_at.strftime('%d %B %Y at %H:%M') }}</p>
+                        <hr>
+                        <div class="d-flex gap-2">
+                            <a href="{{ url_for('view_submission', submission_id=existing_submission.submission_id) }}" class="btn btn-success btn-sm">
+                                <i class="bi bi-eye me-1"></i>View Submission & Feedback
+                            </a>
+                        </div>
+                    </div>
                     {% endif %}
                 </div>
             </div>
-            <div class="btn-group">
-                <button type="button" class="btn btn-outline-primary" id="save-draft-btn">
-                    <i class="bi bi-save me-1"></i>Save Draft
-                </button>
-                <button type="button" class="btn btn-outline-info" id="get-feedback-btn">
-                    <i class="bi bi-robot me-1"></i>AI Feedback
-                </button>
-            </div>
         </div>
         
-        {% if assignment.instructions %}
-        <div class="instructions-box mt-3">
-            <h6><i class="bi bi-info-circle me-1"></i>Instructions</h6>
-            <p>{{ assignment.instructions }}</p>
-        </div>
-        {% endif %}
-    </div>
-    
-    <form id="assignment-form" data-assignment-id="{{ assignment.assignment_id }}">
-        <div class="questions-container">
-            {% for question in assignment.questions %}
-            <div class="question-card" data-question="{{ loop.index }}">
-                <div class="question-header">
-                    <span class="question-number">Q{{ loop.index }}</span>
-                    <span class="question-marks">{{ question.marks }} marks</span>
+        <!-- Right: Upload Section -->
+        <div class="col-lg-6 mb-4">
+            {% if existing_submission %}
+            <!-- Already submitted - show status -->
+            <div class="card h-100">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-check-circle me-2"></i>Submission Complete</h5>
                 </div>
-                <div class="question-text">
-                    {{ question.question }}
-                </div>
-                <div class="answer-area">
-                    <label class="form-label">Your Answer</label>
-                    <textarea class="form-control answer-input" 
-                              name="answer_{{ loop.index }}" 
-                              id="answer_{{ loop.index }}"
-                              rows="4" 
-                              placeholder="Type your answer here...">{% if submission and submission.answers %}{{ submission.answers.get(loop.index|string, submission.answers.get('q' ~ loop.index, '')) }}{% endif %}</textarea>
-                    <div class="answer-footer">
-                        <small class="text-muted char-count">0 characters</small>
+                <div class="card-body text-center py-5">
+                    <div class="mb-4">
+                        <i class="bi bi-patch-check" style="font-size: 4rem; color: #28a745;"></i>
                     </div>
+                    <h5>Your work has been submitted!</h5>
+                    <p class="text-muted">
+                        Status: 
+                        {% if existing_submission.status == 'reviewed' %}
+                        <span class="badge bg-success">Reviewed</span>
+                        {% elif existing_submission.status == 'ai_reviewed' %}
+                        <span class="badge bg-info">AI Reviewed - Awaiting Teacher</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">Pending Review</span>
+                        {% endif %}
+                    </p>
+                    
+                    {% if existing_submission.final_marks is not none %}
+                    <div class="score-display mt-4">
+                        <h2 class="text-success">{{ existing_submission.final_marks }} / {{ assignment.total_marks }}</h2>
+                        <p class="text-muted">Your Score</p>
+                    </div>
+                    {% endif %}
+                    
+                    <a href="{{ url_for('view_submission', submission_id=existing_submission.submission_id) }}" class="btn btn-primary btn-lg mt-3">
+                        <i class="bi bi-eye me-1"></i>View Feedback
+                    </a>
                 </div>
             </div>
-            {% endfor %}
-        </div>
-        
-        <!-- AI Feedback Section -->
-        <div class="feedback-section" id="feedback-section" style="display: none;">
-            <div class="card">
-                <div class="card-header bg-info text-white">
-                    <i class="bi bi-robot me-2"></i>AI Feedback Preview
+            {% else %}
+            <!-- Upload Form -->
+            <div class="card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Submit Your Work</h5>
                 </div>
                 <div class="card-body">
-                    <div id="ai-feedback-content"></div>
+                    <form id="submission-form" enctype="multipart/form-data">
+                        <input type="hidden" name="assignment_id" value="{{ assignment.assignment_id }}">
+                        
+                        <!-- Upload Method Tabs -->
+                        <ul class="nav nav-pills mb-4" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#photo-upload" type="button">
+                                    <i class="bi bi-camera me-1"></i>Photos
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pdf-upload" type="button">
+                                    <i class="bi bi-file-pdf me-1"></i>PDF
+                                </button>
+                            </li>
+                        </ul>
+                        
+                        <div class="tab-content">
+                            <!-- Photo Upload -->
+                            <div class="tab-pane fade show active" id="photo-upload">
+                                <p class="text-muted small">Take photos of each page of your work. Multiple photos allowed.</p>
+                                
+                                <div class="upload-zone" id="photo-zone">
+                                    <input type="file" class="d-none" id="photo-input" name="photos" 
+                                           accept="image/*" multiple capture="environment">
+                                    <label for="photo-input" class="upload-label">
+                                        <i class="bi bi-camera" style="font-size: 3rem; color: #667eea;"></i>
+                                        <h6 class="mt-2">Click to take/upload photos</h6>
+                                        <p class="text-muted small mb-0">Or drag and drop images here</p>
+                                    </label>
+                                </div>
+                                
+                                <!-- Preview -->
+                                <div id="photo-preview" class="photo-preview mt-3" style="display: none;">
+                                    <h6><i class="bi bi-images me-1"></i>Uploaded Pages:</h6>
+                                    <div class="preview-grid" id="preview-grid"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- PDF Upload -->
+                            <div class="tab-pane fade" id="pdf-upload">
+                                <p class="text-muted small">Upload your work as a single PDF file.</p>
+                                
+                                <div class="upload-zone" id="pdf-zone">
+                                    <input type="file" class="d-none" id="pdf-input" name="pdf" accept=".pdf">
+                                    <label for="pdf-input" class="upload-label">
+                                        <i class="bi bi-file-earmark-pdf" style="font-size: 3rem; color: #dc3545;"></i>
+                                        <h6 class="mt-2">Click to upload PDF</h6>
+                                        <p class="text-muted small mb-0">Or drag and drop here</p>
+                                    </label>
+                                </div>
+                                
+                                <div id="pdf-preview" class="mt-3" style="display: none;">
+                                    <div class="alert alert-success">
+                                        <i class="bi bi-check-circle me-2"></i>
+                                        <span id="pdf-filename">file.pdf</span>
+                                        <button type="button" class="btn-close float-end" onclick="clearPdf()"></button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <div class="d-grid gap-2 mt-4">
+                            <button type="submit" class="btn btn-success btn-lg" id="submit-btn" disabled>
+                                <i class="bi bi-send me-1"></i>Submit Assignment
+                            </button>
+                        </div>
+                        
+                        <div class="alert alert-warning mt-3 small">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            <strong>Note:</strong> Once submitted, you cannot change your answers. AI will provide initial feedback, then your teacher will review.
+                        </div>
+                    </form>
                 </div>
             </div>
+            {% endif %}
         </div>
-        
-        <!-- Submit Section -->
-        <div class="submit-section mt-4">
-            <div class="alert alert-warning">
-                <i class="bi bi-exclamation-triangle me-2"></i>
-                <strong>Important:</strong> Once submitted, you cannot edit your answers. Make sure to review them carefully!
-            </div>
-            <div class="d-flex justify-content-between">
-                <a href="{{ url_for('assignments_by_subject', subject=assignment.subject) }}" class="btn btn-outline-secondary">
-                    <i class="bi bi-arrow-left me-1"></i>Back
-                </a>
-                <button type="button" class="btn btn-success btn-lg" id="submit-btn">
-                    <i class="bi bi-send me-1"></i>Submit Assignment
-                </button>
-            </div>
-        </div>
-    </form>
+    </div>
 </div>
 
 <!-- Loading Modal -->
@@ -118,37 +227,284 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-body text-center py-5">
-                <div class="spinner-border text-primary mb-3" role="status">
-                    <span class="visually-hidden">Loading...</span>
+                <div class="spinner-border text-primary mb-3" role="status"></div>
+                <h5 id="loading-text">Uploading your work...</h5>
+                <p class="text-muted">Please wait, this may take a moment.</p>
+                <div class="progress mt-3" style="height: 8px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" id="upload-progress" style="width: 0%"></div>
                 </div>
-                <h5 id="loading-text">Processing...</h5>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Confirm Modal -->
-<div class="modal fade" id="confirm-modal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Confirm Submission</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p>Are you sure you want to submit this assignment? You won't be able to edit your answers after submission.</p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-success" id="confirm-submit-btn">Submit</button>
-            </div>
-        </div>
-    </div>
-</div>
+<style>
+.upload-zone {
+    border: 3px dashed #dee2e6;
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: #fafafa;
+}
+
+.upload-zone:hover, .upload-zone.dragover {
+    border-color: #667eea;
+    background: #f0f4ff;
+}
+
+.upload-zone.has-files {
+    border-color: #28a745;
+    background: #f0fff4;
+}
+
+.upload-label {
+    cursor: pointer;
+    display: block;
+    margin: 0;
+}
+
+.preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+}
+
+.preview-item {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    aspect-ratio: 3/4;
+    background: #f0f0f0;
+}
+
+.preview-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.preview-item .page-num {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.preview-item .remove-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.score-display {
+    padding: 20px;
+    background: linear-gradient(135deg, #f0fff4, #e8f5e9);
+    border-radius: 12px;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    initAssignmentForm('{{ assignment.assignment_id }}');
+    let uploadedPhotos = [];
+    let uploadedPdf = null;
+    
+    // Photo input handling
+    const photoInput = document.getElementById('photo-input');
+    const photoZone = document.getElementById('photo-zone');
+    const photoPreview = document.getElementById('photo-preview');
+    const previewGrid = document.getElementById('preview-grid');
+    
+    if (photoInput) {
+        photoInput.addEventListener('change', handlePhotoSelect);
+        
+        // Drag and drop
+        photoZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            photoZone.classList.add('dragover');
+        });
+        
+        photoZone.addEventListener('dragleave', () => {
+            photoZone.classList.remove('dragover');
+        });
+        
+        photoZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            photoZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                photoInput.files = e.dataTransfer.files;
+                handlePhotoSelect({ target: photoInput });
+            }
+        });
+    }
+    
+    function handlePhotoSelect(e) {
+        const files = Array.from(e.target.files);
+        
+        files.forEach((file, idx) => {
+            if (file.type.startsWith('image/')) {
+                uploadedPhotos.push(file);
+            }
+        });
+        
+        updatePhotoPreview();
+        updateSubmitButton();
+    }
+    
+    function updatePhotoPreview() {
+        if (uploadedPhotos.length === 0) {
+            photoPreview.style.display = 'none';
+            photoZone.classList.remove('has-files');
+            return;
+        }
+        
+        photoPreview.style.display = 'block';
+        photoZone.classList.add('has-files');
+        previewGrid.innerHTML = '';
+        
+        uploadedPhotos.forEach((file, idx) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const div = document.createElement('div');
+                div.className = 'preview-item';
+                div.innerHTML = `
+                    <img src="${e.target.result}" alt="Page ${idx + 1}">
+                    <span class="page-num">Page ${idx + 1}</span>
+                    <button type="button" class="remove-btn" onclick="removePhoto(${idx})">×</button>
+                `;
+                previewGrid.appendChild(div);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    function removePhoto(index) {
+        uploadedPhotos.splice(index, 1);
+        updatePhotoPreview();
+        updateSubmitButton();
+    }
+    
+    // PDF input handling
+    const pdfInput = document.getElementById('pdf-input');
+    const pdfZone = document.getElementById('pdf-zone');
+    const pdfPreview = document.getElementById('pdf-preview');
+    
+    if (pdfInput) {
+        pdfInput.addEventListener('change', handlePdfSelect);
+        
+        pdfZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            pdfZone.classList.add('dragover');
+        });
+        
+        pdfZone.addEventListener('dragleave', () => {
+            pdfZone.classList.remove('dragover');
+        });
+        
+        pdfZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            pdfZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length && e.dataTransfer.files[0].type === 'application/pdf') {
+                pdfInput.files = e.dataTransfer.files;
+                handlePdfSelect({ target: pdfInput });
+            }
+        });
+    }
+    
+    function handlePdfSelect(e) {
+        const file = e.target.files[0];
+        if (file && file.type === 'application/pdf') {
+            uploadedPdf = file;
+            pdfZone.classList.add('has-files');
+            pdfPreview.style.display = 'block';
+            document.getElementById('pdf-filename').textContent = file.name;
+            updateSubmitButton();
+        }
+    }
+    
+    function clearPdf() {
+        uploadedPdf = null;
+        pdfInput.value = '';
+        pdfZone.classList.remove('has-files');
+        pdfPreview.style.display = 'none';
+        updateSubmitButton();
+    }
+    
+    function updateSubmitButton() {
+        const submitBtn = document.getElementById('submit-btn');
+        if (submitBtn) {
+            submitBtn.disabled = uploadedPhotos.length === 0 && !uploadedPdf;
+        }
+    }
+    
+    // Form submission
+    const form = document.getElementById('submission-form');
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (uploadedPhotos.length === 0 && !uploadedPdf) {
+                alert('Please upload photos or a PDF of your work.');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to submit? You cannot change your answers after submission.')) {
+                return;
+            }
+            
+            const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
+            loadingModal.show();
+            
+            const formData = new FormData();
+            formData.append('assignment_id', '{{ assignment.assignment_id }}');
+            
+            if (uploadedPhotos.length > 0) {
+                uploadedPhotos.forEach((photo, idx) => {
+                    formData.append('files', photo, `page_${idx + 1}.jpg`);
+                });
+                formData.append('file_type', 'images');
+            } else if (uploadedPdf) {
+                formData.append('files', uploadedPdf);
+                formData.append('file_type', 'pdf');
+            }
+            
+            try {
+                const response = await fetch('/student/submit', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                loadingModal.hide();
+                
+                if (result.success) {
+                    // Show success and redirect
+                    alert('Assignment submitted successfully! AI is generating feedback...');
+                    window.location.href = result.redirect || '/student/submissions';
+                } else {
+                    alert(result.error || 'Submission failed. Please try again.');
+                }
+            } catch (error) {
+                loadingModal.hide();
+                alert('Error submitting. Please try again.');
+                console.error(error);
+            }
+        });
+    }
 </script>
 {% endblock %}
