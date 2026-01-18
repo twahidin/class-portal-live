@@ -28,9 +28,7 @@
     <div class="row g-4 mb-5">
         <div class="col-md-4 col-lg">
             <div class="stat-card stat-primary">
-                <div class="stat-icon">
-                    <i class="bi bi-people"></i>
-                </div>
+                <div class="stat-icon"><i class="bi bi-people"></i></div>
                 <div class="stat-info">
                     <h3>{{ stats.students }}</h3>
                     <p>Students</p>
@@ -39,9 +37,7 @@
         </div>
         <div class="col-md-4 col-lg">
             <div class="stat-card stat-success">
-                <div class="stat-icon">
-                    <i class="bi bi-person-workspace"></i>
-                </div>
+                <div class="stat-icon"><i class="bi bi-person-workspace"></i></div>
                 <div class="stat-info">
                     <h3>{{ stats.teachers }}</h3>
                     <p>Teachers</p>
@@ -50,9 +46,7 @@
         </div>
         <div class="col-md-4 col-lg">
             <div class="stat-card stat-info">
-                <div class="stat-icon">
-                    <i class="bi bi-collection"></i>
-                </div>
+                <div class="stat-icon"><i class="bi bi-collection"></i></div>
                 <div class="stat-info">
                     <h3>{{ stats.classes }}</h3>
                     <p>Classes</p>
@@ -61,9 +55,7 @@
         </div>
         <div class="col-md-4 col-lg">
             <div class="stat-card stat-warning">
-                <div class="stat-icon">
-                    <i class="bi bi-journal-text"></i>
-                </div>
+                <div class="stat-icon"><i class="bi bi-journal-text"></i></div>
                 <div class="stat-info">
                     <h3>{{ stats.assignments }}</h3>
                     <p>Assignments</p>
@@ -72,9 +64,7 @@
         </div>
         <div class="col-md-4 col-lg">
             <div class="stat-card stat-secondary">
-                <div class="stat-icon">
-                    <i class="bi bi-check2-square"></i>
-                </div>
+                <div class="stat-icon"><i class="bi bi-check2-square"></i></div>
                 <div class="stat-info">
                     <h3>{{ stats.submissions }}</h3>
                     <p>Submissions</p>
@@ -82,20 +72,89 @@
             </div>
         </div>
     </div>
-    
-    <div class="row g-4">
-        <!-- Import Students -->
-        <div class="col-lg-6">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Import Students</h5>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted">Import multiple students at once using JSON format.</p>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Student Data (JSON)</label>
-                        <textarea class="form-control font-monospace" id="students-json" rows="8" placeholder='[
+
+    <!-- Tabs Navigation -->
+    <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="students-tab" data-bs-toggle="tab" data-bs-target="#students" type="button">
+                <i class="bi bi-people me-1"></i>Students
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="teachers-tab" data-bs-toggle="tab" data-bs-target="#teachers" type="button">
+                <i class="bi bi-person-workspace me-1"></i>Teachers
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="classes-tab" data-bs-toggle="tab" data-bs-target="#classes" type="button">
+                <i class="bi bi-collection me-1"></i>Classes
+            </button>
+        </li>
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content" id="adminTabsContent">
+        <!-- Students Tab -->
+        <div class="tab-pane fade show active" id="students" role="tabpanel">
+            <div class="row g-4">
+                <!-- Import Students -->
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Import Students</h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Import Method Tabs -->
+                            <ul class="nav nav-pills mb-3" id="importMethod" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#excel-paste">
+                                        <i class="bi bi-table me-1"></i>Excel Paste
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" data-bs-toggle="pill" data-bs-target="#csv-upload">
+                                        <i class="bi bi-file-earmark-csv me-1"></i>CSV Upload
+                                    </button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" data-bs-toggle="pill" data-bs-target="#json-import">
+                                        <i class="bi bi-code me-1"></i>JSON
+                                    </button>
+                                </li>
+                            </ul>
+
+                            <div class="tab-content">
+                                <!-- Excel Paste -->
+                                <div class="tab-pane fade show active" id="excel-paste">
+                                    <p class="text-muted small">Copy from Excel/Google Sheets. Format: <code>student_id, name, class, password, teachers</code></p>
+                                    <p class="text-muted small">Example row: <code>S001, John Doe, 10A, password123, T001</code></p>
+                                    <textarea class="form-control font-monospace" id="excel-data" rows="8" 
+                                        placeholder="Paste data here (one student per line)...
+S001, John Doe, 10A, student123, T001
+S002, Jane Smith, 10A, student123, T001
+S003, Bob Wilson, 10B, student123, T001;T002"></textarea>
+                                    <button class="btn btn-primary mt-3" id="import-excel-btn">
+                                        <i class="bi bi-upload me-1"></i>Import from Paste
+                                    </button>
+                                </div>
+
+                                <!-- CSV Upload -->
+                                <div class="tab-pane fade" id="csv-upload">
+                                    <p class="text-muted small">Upload a CSV file with headers: <code>student_id, name, class, password, teachers</code></p>
+                                    <div class="mb-3">
+                                        <input type="file" class="form-control" id="csv-file" accept=".csv">
+                                    </div>
+                                    <button class="btn btn-primary" id="import-csv-btn">
+                                        <i class="bi bi-upload me-1"></i>Import CSV
+                                    </button>
+                                    <a href="#" class="btn btn-outline-secondary" id="download-template">
+                                        <i class="bi bi-download me-1"></i>Download Template
+                                    </a>
+                                </div>
+
+                                <!-- JSON Import -->
+                                <div class="tab-pane fade" id="json-import">
+                                    <textarea class="form-control font-monospace" id="students-json" rows="8" placeholder='[
   {
     "student_id": "S001",
     "name": "John Doe",
@@ -104,202 +163,551 @@
     "teachers": ["T001"]
   }
 ]'></textarea>
+                                    <button class="btn btn-primary mt-3" id="import-json-btn">
+                                        <i class="bi bi-upload me-1"></i>Import JSON
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="import-result" class="mt-3" style="display: none;"></div>
+                        </div>
                     </div>
-                    
-                    <button class="btn btn-primary" id="import-students-btn">
-                        <i class="bi bi-upload me-1"></i>Import Students
-                    </button>
-                    
-                    <div id="import-result" class="mt-3" style="display: none;"></div>
+                </div>
+
+                <!-- Manage Students -->
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="bi bi-people me-2"></i>Manage Students</h5>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-danger" id="delete-selected-students" disabled>
+                                    <i class="bi bi-trash me-1"></i>Delete Selected
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <!-- Filter -->
+                            <div class="row mb-3">
+                                <div class="col">
+                                    <select class="form-select form-select-sm" id="filter-class">
+                                        <option value="">All Classes</option>
+                                        {% for c in classes %}
+                                        <option value="{{ c.class_id }}">{{ c.name or c.class_id }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-auto">
+                                    <button class="btn btn-outline-danger btn-sm" id="delete-by-class" disabled>
+                                        <i class="bi bi-trash me-1"></i>Delete Class
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Students Table -->
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-hover" id="students-table">
+                                    <thead class="sticky-top bg-white">
+                                        <tr>
+                                            <th><input type="checkbox" id="select-all-students"></th>
+                                            <th>ID</th>
+                                            <th>Name</th>
+                                            <th>Class</th>
+                                            <th>Teachers</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="students-tbody">
+                                        <tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
-        
-        <!-- Add Teacher -->
-        <div class="col-lg-6">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Add Teacher</h5>
+
+        <!-- Teachers Tab -->
+        <div class="tab-pane fade" id="teachers" role="tabpanel">
+            <div class="row g-4">
+                <!-- Add Teacher -->
+                <div class="col-lg-5">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Add Teacher</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="add-teacher-form">
+                                <div class="mb-3">
+                                    <label class="form-label">Teacher ID *</label>
+                                    <input type="text" class="form-control" id="teacher_id" placeholder="e.g., T001" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Name *</label>
+                                    <input type="text" class="form-control" id="teacher_name" placeholder="Full name" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Password</label>
+                                    <input type="text" class="form-control" id="teacher_password" placeholder="Default: teacher123">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Subjects (comma-separated)</label>
+                                    <input type="text" class="form-control" id="teacher_subjects" placeholder="e.g., Math, Physics">
+                                </div>
+                                <button type="submit" class="btn btn-success">
+                                    <i class="bi bi-plus-circle me-1"></i>Add Teacher
+                                </button>
+                            </form>
+                            <div id="add-teacher-result" class="mt-3" style="display: none;"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <form id="add-teacher-form">
-                        <div class="mb-3">
-                            <label class="form-label">Teacher ID *</label>
-                            <input type="text" class="form-control" id="teacher_id" placeholder="e.g., T001" required>
+
+                <!-- Manage Teachers -->
+                <div class="col-lg-7">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="bi bi-person-workspace me-2"></i>Manage Teachers</h5>
+                            <button class="btn btn-outline-danger btn-sm" id="delete-selected-teachers" disabled>
+                                <i class="bi bi-trash me-1"></i>Delete Selected
+                            </button>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Name *</label>
-                            <input type="text" class="form-control" id="teacher_name" placeholder="Full name" required>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="teachers-table">
+                                    <thead>
+                                        <tr>
+                                            <th><input type="checkbox" id="select-all-teachers"></th>
+                                            <th>ID</th>
+                                            <th>Name</th>
+                                            <th>Subjects</th>
+                                            <th>Telegram</th>
+                                            <th>Students</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for t in teachers %}
+                                        <tr data-id="{{ t.teacher_id }}">
+                                            <td><input type="checkbox" class="teacher-checkbox" value="{{ t.teacher_id }}"></td>
+                                            <td><code>{{ t.teacher_id }}</code></td>
+                                            <td>{{ t.name }}</td>
+                                            <td>{{ t.subjects | join(', ') if t.subjects else '-' }}</td>
+                                            <td>
+                                                {% if t.telegram_id %}
+                                                <span class="badge bg-success"><i class="bi bi-check"></i></span>
+                                                {% else %}
+                                                <span class="badge bg-secondary">-</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ t.student_count or 0 }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Password</label>
-                            <input type="text" class="form-control" id="teacher_password" placeholder="Default: teacher123">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Subjects (comma-separated)</label>
-                            <input type="text" class="form-control" id="teacher_subjects" placeholder="e.g., Math, Physics">
-                        </div>
-                        <button type="submit" class="btn btn-success">
-                            <i class="bi bi-plus-circle me-1"></i>Add Teacher
-                        </button>
-                    </form>
-                    
-                    <div id="add-teacher-result" class="mt-3" style="display: none;"></div>
+                    </div>
                 </div>
             </div>
         </div>
-        
-        <!-- Add Class -->
-        <div class="col-lg-6">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-collection me-2"></i>Add Class</h5>
-                </div>
-                <div class="card-body">
-                    <form id="add-class-form">
-                        <div class="mb-3">
-                            <label class="form-label">Class ID *</label>
-                            <input type="text" class="form-control" id="class_id" placeholder="e.g., 10A" required>
+
+        <!-- Classes Tab -->
+        <div class="tab-pane fade" id="classes" role="tabpanel">
+            <div class="row g-4">
+                <!-- Add Class -->
+                <div class="col-lg-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-collection me-2"></i>Add Class</h5>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Class Name</label>
-                            <input type="text" class="form-control" id="class_name" placeholder="e.g., Year 10 Class A">
+                        <div class="card-body">
+                            <form id="add-class-form">
+                                <div class="mb-3">
+                                    <label class="form-label">Class ID *</label>
+                                    <input type="text" class="form-control" id="class_id" placeholder="e.g., 10A" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Class Name</label>
+                                    <input type="text" class="form-control" id="class_name" placeholder="e.g., Year 10 Class A">
+                                </div>
+                                <button type="submit" class="btn btn-info">
+                                    <i class="bi bi-plus-circle me-1"></i>Add Class
+                                </button>
+                            </form>
+                            <div id="add-class-result" class="mt-3" style="display: none;"></div>
                         </div>
-                        <button type="submit" class="btn btn-info">
-                            <i class="bi bi-plus-circle me-1"></i>Add Class
-                        </button>
-                    </form>
-                    
-                    <div id="add-class-result" class="mt-3" style="display: none;"></div>
+                    </div>
                 </div>
-            </div>
-        </div>
-        
-        <!-- Assign Teacher -->
-        <div class="col-lg-6">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-link me-2"></i>Assign Teacher to Class</h5>
-                </div>
-                <div class="card-body">
-                    <form id="assign-teacher-form">
-                        <div class="mb-3">
-                            <label class="form-label">Teacher *</label>
-                            <select class="form-select" id="assign_teacher_id" required>
-                                <option value="">Select teacher...</option>
-                                {% for t in teachers %}
-                                <option value="{{ t.teacher_id }}">{{ t.name }} ({{ t.teacher_id }})</option>
-                                {% endfor %}
-                            </select>
+
+                <!-- Assign Teacher to Class -->
+                <div class="col-lg-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-link me-2"></i>Assign Teacher to Class</h5>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Class *</label>
-                            <select class="form-select" id="assign_class_id" required>
-                                <option value="">Select class...</option>
+                        <div class="card-body">
+                            <form id="assign-teacher-form">
+                                <div class="mb-3">
+                                    <label class="form-label">Teacher *</label>
+                                    <select class="form-select" id="assign_teacher_id" required>
+                                        <option value="">Select teacher...</option>
+                                        {% for t in teachers %}
+                                        <option value="{{ t.teacher_id }}">{{ t.name }} ({{ t.teacher_id }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Class *</label>
+                                    <select class="form-select" id="assign_class_id" required>
+                                        <option value="">Select class...</option>
+                                        {% for c in classes %}
+                                        <option value="{{ c.class_id }}">{{ c.name or c.class_id }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn btn-warning">
+                                    <i class="bi bi-link me-1"></i>Assign Teacher
+                                </button>
+                            </form>
+                            <div id="assign-result" class="mt-3" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Classes List -->
+                <div class="col-lg-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-list me-2"></i>Classes</h5>
+                        </div>
+                        <div class="card-body">
+                            <ul class="list-group">
                                 {% for c in classes %}
-                                <option value="{{ c.class_id }}">{{ c.name or c.class_id }}</option>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>{{ c.class_id }}</strong>
+                                        {% if c.name and c.name != c.class_id %}
+                                        <small class="text-muted d-block">{{ c.name }}</small>
+                                        {% endif %}
+                                    </div>
+                                    <span class="badge bg-primary">{{ c.student_count or 0 }} students</span>
+                                </li>
+                                {% else %}
+                                <li class="list-group-item text-muted">No classes yet</li>
                                 {% endfor %}
-                            </select>
+                            </ul>
                         </div>
-                        <button type="submit" class="btn btn-warning">
-                            <i class="bi bi-link me-1"></i>Assign Teacher
-                        </button>
-                    </form>
-                    
-                    <div id="assign-result" class="mt-3" style="display: none;"></div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-    
-    <!-- Teachers List -->
-    {% if teachers %}
-    <div class="card mt-4">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="bi bi-people me-2"></i>Teachers</h5>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Name</th>
-                            <th>Subjects</th>
-                            <th>Telegram</th>
-                            <th>API Key</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for t in teachers %}
-                        <tr>
-                            <td><code>{{ t.teacher_id }}</code></td>
-                            <td>{{ t.name }}</td>
-                            <td>{{ t.subjects | join(', ') if t.subjects else '-' }}</td>
-                            <td>
-                                {% if t.telegram_id %}
-                                <span class="badge bg-success"><i class="bi bi-check"></i> Connected</span>
-                                {% else %}
-                                <span class="badge bg-secondary">Not connected</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if t.anthropic_api_key %}
-                                <span class="badge bg-info">Configured</span>
-                                {% else %}
-                                <span class="badge bg-secondary">Default</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="delete-modal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Confirm Delete</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="delete-message">Are you sure you want to delete the selected items?</p>
+                <p class="text-danger mb-0"><strong>This action cannot be undone.</strong></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
             </div>
         </div>
     </div>
-    {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // Import Students
-    document.getElementById('import-students-btn').addEventListener('click', async () => {
-        const jsonText = document.getElementById('students-json').value;
-        const resultDiv = document.getElementById('import-result');
+    // Load students on page load
+    loadStudents();
+
+    // ================== STUDENT IMPORT ==================
+
+    // Excel/Paste Import
+    document.getElementById('import-excel-btn').addEventListener('click', async () => {
+        const data = document.getElementById('excel-data').value.trim();
+        if (!data) {
+            showResult('import-result', 'Please paste some data', 'warning');
+            return;
+        }
+
+        const students = [];
+        const lines = data.split('\n');
         
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            const parts = line.split(',').map(p => p.trim());
+            if (parts.length >= 3) {
+                students.push({
+                    student_id: parts[0],
+                    name: parts[1],
+                    class: parts[2],
+                    password: parts[3] || 'student123',
+                    teachers: parts[4] ? parts[4].split(';').map(t => t.trim()) : []
+                });
+            }
+        }
+
+        if (students.length === 0) {
+            showResult('import-result', 'No valid student data found', 'warning');
+            return;
+        }
+
+        await importStudents(students);
+    });
+
+    // CSV Import
+    document.getElementById('import-csv-btn').addEventListener('click', async () => {
+        const fileInput = document.getElementById('csv-file');
+        const file = fileInput.files[0];
+        
+        if (!file) {
+            showResult('import-result', 'Please select a CSV file', 'warning');
+            return;
+        }
+
+        const text = await file.text();
+        const lines = text.split('\n');
+        const students = [];
+        
+        // Skip header row
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            const parts = line.split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
+            if (parts.length >= 3) {
+                students.push({
+                    student_id: parts[0],
+                    name: parts[1],
+                    class: parts[2],
+                    password: parts[3] || 'student123',
+                    teachers: parts[4] ? parts[4].split(';').map(t => t.trim()) : []
+                });
+            }
+        }
+
+        if (students.length === 0) {
+            showResult('import-result', 'No valid student data found in CSV', 'warning');
+            return;
+        }
+
+        await importStudents(students);
+    });
+
+    // JSON Import
+    document.getElementById('import-json-btn').addEventListener('click', async () => {
+        const jsonText = document.getElementById('students-json').value;
         try {
             const students = JSON.parse(jsonText);
-            
+            await importStudents(students);
+        } catch (e) {
+            showResult('import-result', 'Invalid JSON format', 'danger');
+        }
+    });
+
+    // Download CSV Template
+    document.getElementById('download-template').addEventListener('click', (e) => {
+        e.preventDefault();
+        const csv = 'student_id,name,class,password,teachers\nS001,John Doe,10A,student123,T001\nS002,Jane Smith,10A,student123,T001;T002';
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'students_template.csv';
+        a.click();
+    });
+
+    async function importStudents(students) {
+        try {
             const response = await fetch('/admin/import_students', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ students })
             });
-            
             const data = await response.json();
             
-            resultDiv.style.display = 'block';
             if (data.success) {
-                resultDiv.className = 'mt-3 alert alert-success';
-                resultDiv.innerHTML = `<i class="bi bi-check-circle me-2"></i>Imported ${data.imported} students.` +
-                    (data.errors.length ? `<br><small class="text-muted">Errors: ${data.errors.join(', ')}</small>` : '');
+                showResult('import-result', `Imported ${data.imported} students` + 
+                    (data.errors.length ? `. Errors: ${data.errors.join(', ')}` : ''), 
+                    data.errors.length ? 'warning' : 'success');
+                loadStudents();
             } else {
-                resultDiv.className = 'mt-3 alert alert-danger';
-                resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>${data.error}`;
+                showResult('import-result', data.error, 'danger');
             }
-        } catch (error) {
-            resultDiv.style.display = 'block';
-            resultDiv.className = 'mt-3 alert alert-danger';
-            resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>Invalid JSON format`;
+        } catch (e) {
+            showResult('import-result', 'Import failed', 'danger');
+        }
+    }
+
+    // ================== STUDENT MANAGEMENT ==================
+
+    async function loadStudents() {
+        try {
+            const response = await fetch('/admin/api/students');
+            const data = await response.json();
+            
+            const tbody = document.getElementById('students-tbody');
+            if (data.students.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No students found</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = data.students.map(s => `
+                <tr data-id="${s.student_id}">
+                    <td><input type="checkbox" class="student-checkbox" value="${s.student_id}"></td>
+                    <td><code>${s.student_id}</code></td>
+                    <td>${s.name}</td>
+                    <td>${s.class || '-'}</td>
+                    <td>${(s.teachers || []).join(', ') || '-'}</td>
+                </tr>
+            `).join('');
+            
+            updateDeleteButtons();
+        } catch (e) {
+            console.error('Failed to load students:', e);
+        }
+    }
+
+    // Filter by class
+    document.getElementById('filter-class').addEventListener('change', async (e) => {
+        const classId = e.target.value;
+        document.getElementById('delete-by-class').disabled = !classId;
+        
+        try {
+            const url = classId ? `/admin/api/students?class=${classId}` : '/admin/api/students';
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            const tbody = document.getElementById('students-tbody');
+            if (data.students.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No students found</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = data.students.map(s => `
+                <tr data-id="${s.student_id}">
+                    <td><input type="checkbox" class="student-checkbox" value="${s.student_id}"></td>
+                    <td><code>${s.student_id}</code></td>
+                    <td>${s.name}</td>
+                    <td>${s.class || '-'}</td>
+                    <td>${(s.teachers || []).join(', ') || '-'}</td>
+                </tr>
+            `).join('');
+        } catch (e) {
+            console.error('Failed to filter students:', e);
         }
     });
-    
-    // Add Teacher
+
+    // Select all students
+    document.getElementById('select-all-students').addEventListener('change', (e) => {
+        document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = e.target.checked);
+        updateDeleteButtons();
+    });
+
+    document.getElementById('students-tbody').addEventListener('change', updateDeleteButtons);
+
+    function updateDeleteButtons() {
+        const selectedStudents = document.querySelectorAll('.student-checkbox:checked').length;
+        document.getElementById('delete-selected-students').disabled = selectedStudents === 0;
+        
+        const selectedTeachers = document.querySelectorAll('.teacher-checkbox:checked').length;
+        document.getElementById('delete-selected-teachers').disabled = selectedTeachers === 0;
+    }
+
+    // Delete selected students
+    let deleteAction = null;
+    const deleteModal = new bootstrap.Modal(document.getElementById('delete-modal'));
+
+    document.getElementById('delete-selected-students').addEventListener('click', () => {
+        const selected = [...document.querySelectorAll('.student-checkbox:checked')].map(cb => cb.value);
+        if (selected.length === 0) return;
+        
+        document.getElementById('delete-message').textContent = `Delete ${selected.length} selected student(s)?`;
+        deleteAction = { type: 'students', ids: selected };
+        deleteModal.show();
+    });
+
+    document.getElementById('delete-by-class').addEventListener('click', () => {
+        const classId = document.getElementById('filter-class').value;
+        if (!classId) return;
+        
+        document.getElementById('delete-message').textContent = `Delete ALL students in class "${classId}"?`;
+        deleteAction = { type: 'students-class', class: classId };
+        deleteModal.show();
+    });
+
+    // ================== TEACHER MANAGEMENT ==================
+
+    document.getElementById('select-all-teachers').addEventListener('change', (e) => {
+        document.querySelectorAll('.teacher-checkbox').forEach(cb => cb.checked = e.target.checked);
+        updateDeleteButtons();
+    });
+
+    document.querySelectorAll('.teacher-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateDeleteButtons);
+    });
+
+    document.getElementById('delete-selected-teachers').addEventListener('click', () => {
+        const selected = [...document.querySelectorAll('.teacher-checkbox:checked')].map(cb => cb.value);
+        if (selected.length === 0) return;
+        
+        document.getElementById('delete-message').textContent = `Delete ${selected.length} selected teacher(s)?`;
+        deleteAction = { type: 'teachers', ids: selected };
+        deleteModal.show();
+    });
+
+    // Confirm delete
+    document.getElementById('confirm-delete-btn').addEventListener('click', async () => {
+        if (!deleteAction) return;
+        
+        try {
+            let response;
+            if (deleteAction.type === 'students') {
+                response = await fetch('/admin/delete_students', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ student_ids: deleteAction.ids })
+                });
+            } else if (deleteAction.type === 'students-class') {
+                response = await fetch('/admin/delete_students', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ class_id: deleteAction.class })
+                });
+            } else if (deleteAction.type === 'teachers') {
+                response = await fetch('/admin/delete_teachers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ teacher_ids: deleteAction.ids })
+                });
+            }
+            
+            const data = await response.json();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || 'Delete failed');
+            }
+        } catch (e) {
+            alert('Delete failed');
+        }
+        
+        deleteModal.hide();
+    });
+
+    // ================== ADD FORMS ==================
+
     document.getElementById('add-teacher-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const resultDiv = document.getElementById('add-teacher-result');
-        
         const data = {
             teacher_id: document.getElementById('teacher_id').value,
             name: document.getElementById('teacher_name').value,
@@ -313,31 +721,22 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            
             const result = await response.json();
             
-            resultDiv.style.display = 'block';
             if (result.success) {
-                resultDiv.className = 'mt-3 alert alert-success';
-                resultDiv.innerHTML = `<i class="bi bi-check-circle me-2"></i>Teacher added: ${result.teacher_id}`;
+                showResult('add-teacher-result', `Teacher added: ${result.teacher_id}`, 'success');
                 e.target.reset();
                 setTimeout(() => location.reload(), 1500);
             } else {
-                resultDiv.className = 'mt-3 alert alert-danger';
-                resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>${result.error}`;
+                showResult('add-teacher-result', result.error, 'danger');
             }
         } catch (error) {
-            resultDiv.style.display = 'block';
-            resultDiv.className = 'mt-3 alert alert-danger';
-            resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>Failed to add teacher`;
+            showResult('add-teacher-result', 'Failed to add teacher', 'danger');
         }
     });
-    
-    // Add Class
+
     document.getElementById('add-class-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const resultDiv = document.getElementById('add-class-result');
-        
         const data = {
             class_id: document.getElementById('class_id').value,
             name: document.getElementById('class_name').value || document.getElementById('class_id').value
@@ -349,31 +748,22 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            
             const result = await response.json();
             
-            resultDiv.style.display = 'block';
             if (result.success) {
-                resultDiv.className = 'mt-3 alert alert-success';
-                resultDiv.innerHTML = `<i class="bi bi-check-circle me-2"></i>Class added: ${result.class_id}`;
+                showResult('add-class-result', `Class added: ${result.class_id}`, 'success');
                 e.target.reset();
                 setTimeout(() => location.reload(), 1500);
             } else {
-                resultDiv.className = 'mt-3 alert alert-danger';
-                resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>${result.error}`;
+                showResult('add-class-result', result.error, 'danger');
             }
         } catch (error) {
-            resultDiv.style.display = 'block';
-            resultDiv.className = 'mt-3 alert alert-danger';
-            resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>Failed to add class`;
+            showResult('add-class-result', 'Failed to add class', 'danger');
         }
     });
-    
-    // Assign Teacher
+
     document.getElementById('assign-teacher-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const resultDiv = document.getElementById('assign-result');
-        
         const data = {
             teacher_id: document.getElementById('assign_teacher_id').value,
             class_id: document.getElementById('assign_class_id').value
@@ -385,23 +775,24 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
-            
             const result = await response.json();
             
-            resultDiv.style.display = 'block';
             if (result.success) {
-                resultDiv.className = 'mt-3 alert alert-success';
-                resultDiv.innerHTML = `<i class="bi bi-check-circle me-2"></i>Assigned to ${result.updated} students`;
+                showResult('assign-result', `Assigned to ${result.updated} students`, 'success');
                 e.target.reset();
             } else {
-                resultDiv.className = 'mt-3 alert alert-danger';
-                resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>${result.error}`;
+                showResult('assign-result', result.error, 'danger');
             }
         } catch (error) {
-            resultDiv.style.display = 'block';
-            resultDiv.className = 'mt-3 alert alert-danger';
-            resultDiv.innerHTML = `<i class="bi bi-exclamation-circle me-2"></i>Failed to assign`;
+            showResult('assign-result', 'Failed to assign', 'danger');
         }
     });
+
+    function showResult(elementId, message, type) {
+        const el = document.getElementById(elementId);
+        el.style.display = 'block';
+        el.className = `mt-3 alert alert-${type}`;
+        el.innerHTML = `<i class="bi bi-${type === 'success' ? 'check-circle' : type === 'warning' ? 'exclamation-triangle' : 'x-circle'} me-2"></i>${message}`;
+    }
 </script>
 {% endblock %}

@@ -28,9 +28,22 @@
     
     <div class="page-header mb-4">
         <h1><i class="bi bi-pencil me-2"></i>Edit Assignment</h1>
+        <p class="text-muted">Assignment ID: <code>{{ assignment.assignment_id }}</code></p>
     </div>
     
-    <form method="POST" id="edit-assignment-form">
+    {% if error %}
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+    </div>
+    {% endif %}
+    
+    {% if success %}
+    <div class="alert alert-success">
+        <i class="bi bi-check-circle me-2"></i>{{ success }}
+    </div>
+    {% endif %}
+    
+    <form method="POST" enctype="multipart/form-data" id="edit-assignment-form">
         <div class="row">
             <div class="col-lg-8">
                 <!-- Basic Info -->
@@ -65,6 +78,14 @@
                             </div>
                         </div>
                         
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="total_marks" class="form-label">Total Marks *</label>
+                                <input type="number" class="form-control" id="total_marks" name="total_marks" 
+                                       min="1" value="{{ assignment.total_marks or 100 }}" required>
+                            </div>
+                        </div>
+                        
                         <div class="mb-3">
                             <label for="instructions" class="form-label">Instructions (optional)</label>
                             <textarea class="form-control" id="instructions" name="instructions" rows="3">{{ assignment.instructions or '' }}</textarea>
@@ -72,40 +93,71 @@
                     </div>
                 </div>
                 
-                <!-- Questions -->
+                <!-- PDF Documents -->
                 <div class="card mb-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0"><i class="bi bi-list-ol me-2"></i>Questions</h5>
-                        <button type="button" class="btn btn-success btn-sm" id="add-question-btn">
-                            <i class="bi bi-plus me-1"></i>Add Question
-                        </button>
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-file-pdf me-2"></i>Documents</h5>
                     </div>
                     <div class="card-body">
-                        <div id="questions-container">
-                            {% for question in assignment.questions %}
-                            <div class="question-item" data-question="{{ loop.index }}">
-                                <div class="question-header">
-                                    <span class="question-label">Question {{ loop.index }}</span>
-                                    <button type="button" class="btn btn-link text-danger remove-question" {% if loop.length == 1 %}style="display: none;"{% endif %}>
-                                        <i class="bi bi-trash"></i>
-                                    </button>
+                        <div class="row">
+                            <!-- Question Paper -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Question Paper</label>
+                                {% if assignment.question_paper_id %}
+                                <div class="current-file mb-2">
+                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
+                                       target="_blank" class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-file-earmark-pdf me-1"></i>
+                                        {{ assignment.question_paper_name or 'question_paper.pdf' }}
+                                    </a>
                                 </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Question Text *</label>
-                                    <textarea class="form-control" name="question_{{ loop.index }}" rows="2" required>{{ question.question }}</textarea>
-                                </div>
-                                <div class="row">
-                                    <div class="col-md-4 mb-3">
-                                        <label class="form-label">Marks *</label>
-                                        <input type="number" class="form-control marks-input" name="marks_{{ loop.index }}" value="{{ question.marks }}" min="1" required>
-                                    </div>
-                                    <div class="col-md-8 mb-3">
-                                        <label class="form-label">Model Answer (for AI marking)</label>
-                                        <textarea class="form-control" name="model_answer_{{ loop.index }}" rows="2">{{ question.model_answer or '' }}</textarea>
-                                    </div>
+                                {% endif %}
+                                <div class="upload-zone {% if assignment.question_paper_id %}has-file{% endif %}" id="question-zone">
+                                    <input type="file" class="form-control d-none" id="question_paper" name="question_paper" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'question')">
+                                    <label for="question_paper" class="upload-label">
+                                        <div class="upload-icon">
+                                            <i class="bi bi-file-earmark-text"></i>
+                                        </div>
+                                        <p class="mb-0 small">{% if assignment.question_paper_id %}Replace file{% else %}Upload PDF{% endif %}</p>
+                                        <span class="file-name" id="question-filename">
+                                            {% if assignment.question_paper_id %}Click to replace{% else %}Click to upload{% endif %}
+                                        </span>
+                                    </label>
                                 </div>
                             </div>
-                            {% endfor %}
+                            
+                            <!-- Answer Key -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Answer Key</label>
+                                {% if assignment.answer_key_id %}
+                                <div class="current-file mb-2">
+                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='answer_key') }}" 
+                                       target="_blank" class="btn btn-outline-success btn-sm">
+                                        <i class="bi bi-file-earmark-check me-1"></i>
+                                        {{ assignment.answer_key_name or 'answer_key.pdf' }}
+                                    </a>
+                                </div>
+                                {% endif %}
+                                <div class="upload-zone {% if assignment.answer_key_id %}has-file{% endif %}" id="answer-zone">
+                                    <input type="file" class="form-control d-none" id="answer_key" name="answer_key" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'answer')">
+                                    <label for="answer_key" class="upload-label">
+                                        <div class="upload-icon answer">
+                                            <i class="bi bi-file-earmark-check"></i>
+                                        </div>
+                                        <p class="mb-0 small">{% if assignment.answer_key_id %}Replace file{% else %}Upload PDF{% endif %}</p>
+                                        <span class="file-name" id="answer-filename">
+                                            {% if assignment.answer_key_id %}Click to replace{% else %}Click to upload{% endif %}
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info mt-3 mb-0">
+                            <i class="bi bi-info-circle me-2"></i>
+                            Leave fields empty to keep existing files. Upload new files to replace them.
                         </div>
                     </div>
                 </div>
@@ -118,12 +170,38 @@
                     </div>
                     <div class="card-body">
                         <div class="summary-item">
-                            <span>Questions:</span>
-                            <strong id="question-count">{{ assignment.questions|length }}</strong>
+                            <span>Question Paper:</span>
+                            <strong id="summary-question">
+                                {% if assignment.question_paper_id %}
+                                <span class="text-success"><i class="bi bi-check-circle"></i></span>
+                                {% else %}
+                                <span class="text-danger">Missing</span>
+                                {% endif %}
+                            </strong>
+                        </div>
+                        <div class="summary-item">
+                            <span>Answer Key:</span>
+                            <strong id="summary-answer">
+                                {% if assignment.answer_key_id %}
+                                <span class="text-success"><i class="bi bi-check-circle"></i></span>
+                                {% else %}
+                                <span class="text-danger">Missing</span>
+                                {% endif %}
+                            </strong>
                         </div>
                         <div class="summary-item">
                             <span>Total Marks:</span>
-                            <strong id="total-marks">{{ assignment.total_marks }}</strong>
+                            <strong id="summary-marks">{{ assignment.total_marks or 100 }}</strong>
+                        </div>
+                        <div class="summary-item">
+                            <span>Status:</span>
+                            <strong>
+                                {% if assignment.status == 'published' %}
+                                <span class="badge bg-success">Published</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Draft</span>
+                                {% endif %}
+                            </strong>
                         </div>
                         
                         <hr>
@@ -150,100 +228,132 @@
         </div>
     </form>
 </div>
+
+<style>
+.upload-zone {
+    border: 2px dashed #dee2e6;
+    border-radius: 12px;
+    padding: 15px;
+    text-align: center;
+    transition: all 0.3s ease;
+    background: #fafafa;
+}
+
+.upload-zone:hover,
+.upload-zone.dragover {
+    border-color: var(--teacher-primary);
+    background: #f0f7ff;
+}
+
+.upload-zone.has-file {
+    border-color: #28a745;
+    background: #f0fff4;
+}
+
+.upload-label {
+    cursor: pointer;
+    display: block;
+    margin: 0;
+}
+
+.upload-icon {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #0d6efd, #0a58ca);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 10px;
+}
+
+.upload-icon.answer {
+    background: linear-gradient(135deg, #198754, #146c43);
+}
+
+.upload-icon i {
+    font-size: 18px;
+    color: white;
+}
+
+.file-name {
+    display: block;
+    margin-top: 5px;
+    font-size: 0.8rem;
+    color: #6c757d;
+    word-break: break-all;
+}
+
+.upload-zone.has-file .file-name {
+    color: #28a745;
+    font-weight: 500;
+}
+
+.current-file {
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.summary-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.summary-item:last-child {
+    border-bottom: none;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    let questionCount = {{ assignment.questions|length }};
-    
-    document.getElementById('add-question-btn').addEventListener('click', () => {
-        questionCount++;
-        const container = document.getElementById('questions-container');
+    function handleFileSelect(input, type) {
+        const zone = document.getElementById(type + '-zone');
+        const filename = document.getElementById(type + '-filename');
+        const summary = document.getElementById('summary-' + type);
         
-        const questionHtml = `
-            <div class="question-item" data-question="${questionCount}">
-                <div class="question-header">
-                    <span class="question-label">Question ${questionCount}</span>
-                    <button type="button" class="btn btn-link text-danger remove-question">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Question Text *</label>
-                    <textarea class="form-control" name="question_${questionCount}" rows="2" required
-                              placeholder="Enter your question..."></textarea>
-                </div>
-                <div class="row">
-                    <div class="col-md-4 mb-3">
-                        <label class="form-label">Marks *</label>
-                        <input type="number" class="form-control marks-input" name="marks_${questionCount}" value="10" min="1" required>
-                    </div>
-                    <div class="col-md-8 mb-3">
-                        <label class="form-label">Model Answer (for AI marking)</label>
-                        <textarea class="form-control" name="model_answer_${questionCount}" rows="2"
-                                  placeholder="Optional: Provide an ideal answer for AI reference"></textarea>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        container.insertAdjacentHTML('beforeend', questionHtml);
-        updateSummary();
-        updateRemoveButtons();
-    });
-    
-    document.getElementById('questions-container').addEventListener('click', (e) => {
-        if (e.target.closest('.remove-question')) {
-            e.target.closest('.question-item').remove();
-            renumberQuestions();
-            updateSummary();
-            updateRemoveButtons();
+        if (input.files && input.files[0]) {
+            const file = input.files[0];
+            zone.classList.add('has-file');
+            filename.textContent = file.name;
+            summary.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> New</span>';
         }
-    });
-    
-    document.getElementById('questions-container').addEventListener('input', (e) => {
-        if (e.target.classList.contains('marks-input') || e.target.name?.startsWith('marks_')) {
-            updateSummary();
-        }
-    });
-    
-    function renumberQuestions() {
-        const items = document.querySelectorAll('.question-item');
-        items.forEach((item, index) => {
-            const num = index + 1;
-            item.dataset.question = num;
-            item.querySelector('.question-label').textContent = `Question ${num}`;
-            
-            const textarea = item.querySelector('textarea[name^="question_"]');
-            textarea.name = `question_${num}`;
-            
-            const marks = item.querySelector('input[name^="marks_"]');
-            marks.name = `marks_${num}`;
-            
-            const modelAnswer = item.querySelector('textarea[name^="model_answer_"]');
-            modelAnswer.name = `model_answer_${num}`;
-        });
-        questionCount = items.length;
     }
     
-    function updateSummary() {
-        const items = document.querySelectorAll('.question-item');
-        document.getElementById('question-count').textContent = items.length;
+    // Update marks summary
+    document.getElementById('total_marks').addEventListener('input', function() {
+        document.getElementById('summary-marks').textContent = this.value || '0';
+    });
+    
+    // Drag and drop
+    ['question-zone', 'answer-zone'].forEach(zoneId => {
+        const zone = document.getElementById(zoneId);
+        const input = zone.querySelector('input[type="file"]');
         
-        let total = 0;
-        items.forEach(item => {
-            const marks = item.querySelector('input[name^="marks_"]');
-            total += parseInt(marks.value) || 0;
+        ['dragenter', 'dragover'].forEach(eventName => {
+            zone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
         });
-        document.getElementById('total-marks').textContent = total;
-    }
-    
-    function updateRemoveButtons() {
-        const items = document.querySelectorAll('.question-item');
-        const buttons = document.querySelectorAll('.remove-question');
-        buttons.forEach(btn => {
-            btn.style.display = items.length > 1 ? 'block' : 'none';
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            zone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+            });
         });
-    }
+        
+        zone.addEventListener('drop', (e) => {
+            const files = e.dataTransfer.files;
+            if (files.length && files[0].type === 'application/pdf') {
+                input.files = files;
+                input.dispatchEvent(new Event('change'));
+            }
+        });
+    });
 </script>
 {% endblock %}

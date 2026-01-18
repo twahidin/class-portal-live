@@ -747,26 +747,45 @@ def create_assignment():
         try:
             data = request.form
             
-            # Parse questions from form
-            questions = []
-            i = 1
-            while f'question_{i}' in data:
-                q_text = data.get(f'question_{i}', '').strip()
-                if q_text:
-                    questions.append({
-                        'question': q_text,
-                        'marks': int(data.get(f'marks_{i}', 10)),
-                        'model_answer': data.get(f'model_answer_{i}', '').strip()
-                    })
-                i += 1
+            # Get uploaded files
+            question_paper = request.files.get('question_paper')
+            answer_key = request.files.get('answer_key')
             
-            if not questions:
+            if not question_paper or not answer_key:
                 return render_template('teacher_create_assignment.html',
                                      teacher=teacher,
-                                     error='At least one question is required')
+                                     error='Both question paper and answer key PDFs are required')
+            
+            # Validate file types
+            if not question_paper.filename.lower().endswith('.pdf') or not answer_key.filename.lower().endswith('.pdf'):
+                return render_template('teacher_create_assignment.html',
+                                     teacher=teacher,
+                                     error='Only PDF files are allowed')
             
             assignment_id = generate_assignment_id()
-            total_marks = sum(q['marks'] for q in questions)
+            total_marks = int(data.get('total_marks', 100))
+            
+            # Store files in GridFS
+            from gridfs import GridFS
+            fs = GridFS(db.db)
+            
+            # Save question paper
+            question_paper_id = fs.put(
+                question_paper.read(),
+                filename=f"{assignment_id}_question.pdf",
+                content_type='application/pdf',
+                assignment_id=assignment_id,
+                file_type='question_paper'
+            )
+            
+            # Save answer key
+            answer_key_id = fs.put(
+                answer_key.read(),
+                filename=f"{assignment_id}_answer.pdf",
+                content_type='application/pdf',
+                assignment_id=assignment_id,
+                file_type='answer_key'
+            )
             
             Assignment.insert_one({
                 'assignment_id': assignment_id,
@@ -774,8 +793,11 @@ def create_assignment():
                 'title': data.get('title', 'Untitled'),
                 'subject': data.get('subject', 'General'),
                 'instructions': data.get('instructions', ''),
-                'questions': questions,
                 'total_marks': total_marks,
+                'question_paper_id': question_paper_id,
+                'answer_key_id': answer_key_id,
+                'question_paper_name': question_paper.filename,
+                'answer_key_name': answer_key.filename,
                 'due_date': data.get('due_date') or None,
                 'status': 'published' if data.get('publish') else 'draft',
                 'created_at': datetime.utcnow(),
@@ -788,7 +810,7 @@ def create_assignment():
             logger.error(f"Error creating assignment: {e}")
             return render_template('teacher_create_assignment.html',
                                  teacher=teacher,
-                                 error='Failed to create assignment')
+                                 error=f'Failed to create assignment: {str(e)}')
     
     return render_template('teacher_create_assignment.html', teacher=teacher)
 
@@ -809,33 +831,65 @@ def edit_assignment(assignment_id):
         try:
             data = request.form
             
-            # Parse questions
-            questions = []
-            i = 1
-            while f'question_{i}' in data:
-                q_text = data.get(f'question_{i}', '').strip()
-                if q_text:
-                    questions.append({
-                        'question': q_text,
-                        'marks': int(data.get(f'marks_{i}', 10)),
-                        'model_answer': data.get(f'model_answer_{i}', '').strip()
-                    })
-                i += 1
+            update_data = {
+                'title': data.get('title', assignment['title']),
+                'subject': data.get('subject', assignment['subject']),
+                'instructions': data.get('instructions', ''),
+                'total_marks': int(data.get('total_marks', assignment.get('total_marks', 100))),
+                'due_date': data.get('due_date') or None,
+                'status': 'published' if data.get('publish') else 'draft',
+                'updated_at': datetime.utcnow()
+            }
             
-            total_marks = sum(q['marks'] for q in questions) if questions else assignment['total_marks']
+            # Handle new file uploads
+            from gridfs import GridFS
+            fs = GridFS(db.db)
+            
+            question_paper = request.files.get('question_paper')
+            if question_paper and question_paper.filename:
+                if question_paper.filename.lower().endswith('.pdf'):
+                    # Delete old file if exists
+                    if assignment.get('question_paper_id'):
+                        try:
+                            fs.delete(assignment['question_paper_id'])
+                        except:
+                            pass
+                    
+                    # Save new file
+                    question_paper_id = fs.put(
+                        question_paper.read(),
+                        filename=f"{assignment_id}_question.pdf",
+                        content_type='application/pdf',
+                        assignment_id=assignment_id,
+                        file_type='question_paper'
+                    )
+                    update_data['question_paper_id'] = question_paper_id
+                    update_data['question_paper_name'] = question_paper.filename
+            
+            answer_key = request.files.get('answer_key')
+            if answer_key and answer_key.filename:
+                if answer_key.filename.lower().endswith('.pdf'):
+                    # Delete old file if exists
+                    if assignment.get('answer_key_id'):
+                        try:
+                            fs.delete(assignment['answer_key_id'])
+                        except:
+                            pass
+                    
+                    # Save new file
+                    answer_key_id = fs.put(
+                        answer_key.read(),
+                        filename=f"{assignment_id}_answer.pdf",
+                        content_type='application/pdf',
+                        assignment_id=assignment_id,
+                        file_type='answer_key'
+                    )
+                    update_data['answer_key_id'] = answer_key_id
+                    update_data['answer_key_name'] = answer_key.filename
             
             Assignment.update_one(
                 {'assignment_id': assignment_id},
-                {'$set': {
-                    'title': data.get('title', assignment['title']),
-                    'subject': data.get('subject', assignment['subject']),
-                    'instructions': data.get('instructions', ''),
-                    'questions': questions if questions else assignment['questions'],
-                    'total_marks': total_marks,
-                    'due_date': data.get('due_date') or None,
-                    'status': 'published' if data.get('publish') else 'draft',
-                    'updated_at': datetime.utcnow()
-                }}
+                {'$set': update_data}
             )
             
             return redirect(url_for('teacher_assignments'))
@@ -846,6 +900,41 @@ def edit_assignment(assignment_id):
     return render_template('teacher_edit_assignment.html',
                          teacher=teacher,
                          assignment=assignment)
+
+@app.route('/teacher/assignments/<assignment_id>/file/<file_type>')
+@teacher_required
+def download_assignment_file(assignment_id, file_type):
+    """Download assignment PDF file"""
+    from gridfs import GridFS
+    from flask import Response
+    
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    
+    if not assignment:
+        return 'Assignment not found', 404
+    
+    file_id_field = f"{file_type}_id"
+    file_name_field = f"{file_type}_name"
+    
+    if file_id_field not in assignment:
+        return 'File not found', 404
+    
+    fs = GridFS(db.db)
+    try:
+        file_data = fs.get(assignment[file_id_field])
+        return Response(
+            file_data.read(),
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'inline; filename="{assignment.get(file_name_field, "document.pdf")}"'
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error downloading file: {e}")
+        return 'File not found', 404
 
 @app.route('/teacher/assignments/<assignment_id>/delete', methods=['POST'])
 @teacher_required
@@ -1192,6 +1281,14 @@ def admin_dashboard():
     teachers = list(Teacher.find({}))
     classes = list(Class.find({}))
     
+    # Add student counts to teachers
+    for t in teachers:
+        t['student_count'] = Student.count({'teachers': t['teacher_id']})
+    
+    # Add student counts to classes
+    for c in classes:
+        c['student_count'] = Student.count({'class': c['class_id']})
+    
     return render_template('admin_dashboard.html',
                          stats=stats,
                          teachers=teachers,
@@ -1350,6 +1447,85 @@ def add_class():
         
     except Exception as e:
         logger.error(f"Error adding class: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/api/students')
+@admin_required
+def get_students():
+    """Get list of students with optional class filter"""
+    try:
+        class_filter = request.args.get('class', '')
+        
+        query = {}
+        if class_filter:
+            query['class'] = class_filter
+        
+        students = list(Student.find(query))
+        
+        return jsonify({
+            'success': True,
+            'students': [{
+                'student_id': s.get('student_id'),
+                'name': s.get('name'),
+                'class': s.get('class'),
+                'teachers': s.get('teachers', [])
+            } for s in students]
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting students: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/delete_students', methods=['POST'])
+@admin_required
+def delete_students():
+    """Delete students by IDs or by class"""
+    try:
+        data = request.get_json()
+        student_ids = data.get('student_ids', [])
+        class_id = data.get('class_id')
+        
+        deleted = 0
+        
+        if class_id:
+            # Delete all students in class
+            result = db.db.students.delete_many({'class': class_id})
+            deleted = result.deleted_count
+        elif student_ids:
+            # Delete specific students
+            result = db.db.students.delete_many({'student_id': {'$in': student_ids}})
+            deleted = result.deleted_count
+        
+        return jsonify({'success': True, 'deleted': deleted})
+        
+    except Exception as e:
+        logger.error(f"Error deleting students: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/admin/delete_teachers', methods=['POST'])
+@admin_required
+def delete_teachers():
+    """Delete teachers by IDs"""
+    try:
+        data = request.get_json()
+        teacher_ids = data.get('teacher_ids', [])
+        
+        if not teacher_ids:
+            return jsonify({'error': 'No teachers specified'}), 400
+        
+        # Remove teacher from all students
+        Student.update_many(
+            {'teachers': {'$in': teacher_ids}},
+            {'$pull': {'teachers': {'$in': teacher_ids}}}
+        )
+        
+        # Delete teachers
+        result = db.db.teachers.delete_many({'teacher_id': {'$in': teacher_ids}})
+        
+        return jsonify({'success': True, 'deleted': result.deleted_count})
+        
+    except Exception as e:
+        logger.error(f"Error deleting teachers: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ============================================================================
