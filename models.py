@@ -8,9 +8,19 @@ class Database:
         self.db = None
     
     def init_app(self, app):
-        mongodb_uri = app.config.get('MONGODB_URI')
+        # Support Railway's MONGO_URL or standard MONGODB_URI
+        mongodb_uri = (
+            app.config.get('MONGODB_URI') or 
+            os.getenv('MONGO_URL') or 
+            os.getenv('MONGODB_URI')
+        )
+        if not mongodb_uri:
+            raise ValueError("No MongoDB connection string found. Set MONGODB_URI or MONGO_URL.")
+        
         self.client = MongoClient(mongodb_uri)
-        self.db = self.client.get_database()
+        # Get database name from URI or use default
+        db_name = app.config.get('MONGODB_DB', 'school_portal')
+        self.db = self.client.get_database(db_name)
         self._create_indexes()
     
     def _create_indexes(self):

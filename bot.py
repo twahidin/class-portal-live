@@ -21,12 +21,15 @@ db = None
 
 def init_db():
     global client, db
-    if MONGODB_URI:
-        client = MongoClient(MONGODB_URI)
-        db = client.get_database()
+    # Support Railway's MONGO_URL or standard MONGODB_URI
+    mongo_uri = MONGODB_URI or os.getenv('MONGO_URL')
+    if mongo_uri:
+        client = MongoClient(mongo_uri)
+        db_name = os.getenv('MONGODB_DB', 'school_portal')
+        db = client.get_database(db_name)
         logger.info("Connected to MongoDB")
     else:
-        logger.error("MONGODB_URI not set")
+        logger.error("MONGODB_URI or MONGO_URL not set")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome message and show Telegram ID"""

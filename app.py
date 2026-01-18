@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'change-this-in-production-please')
-app.config['MONGODB_URI'] = os.getenv('MONGODB_URI')
+app.config['MONGODB_URI'] = os.getenv('MONGODB_URI') or os.getenv('MONGO_URL')
+app.config['MONGODB_DB'] = os.getenv('MONGODB_DB', 'school_portal')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
 
 # Initialize database
