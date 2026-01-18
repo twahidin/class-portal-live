@@ -47,7 +47,14 @@
     <!-- Welcome Section -->
     <div class="welcome-section mb-4">
         <h1 class="mb-1">Hello, {{ student.name }}! 👋</h1>
-        <p class="text-muted">Class {{ student.class }} • Student ID: {{ student.student_id }}</p>
+        <p class="text-muted">
+            {% if student.classes %}
+            Classes: {{ student.classes | join(', ') }}
+            {% elif student.class %}
+            Class {{ student.class }}
+            {% endif %}
+            • Student ID: {{ student.student_id }}
+        </p>
     </div>
     
     <!-- Quick Stats -->
@@ -105,13 +112,18 @@
                 </div>
                 <div class="teacher-info">
                     <h5>{{ teacher.name }}</h5>
-                    <p class="subjects">
+                    <p class="subjects mb-1">
                         {% if teacher.subjects %}
                         {{ teacher.subjects | join(', ') }}
                         {% else %}
                         <span class="text-muted">No subjects assigned</span>
                         {% endif %}
                     </p>
+                    {% if teacher.shared_classes %}
+                    <p class="classes mb-1">
+                        <small><i class="bi bi-collection me-1"></i>{{ teacher.shared_classes | join(', ') }}</small>
+                    </p>
+                    {% endif %}
                     {% if teacher.telegram_id %}
                     <span class="status-badge online">
                         <i class="bi bi-telegram me-1"></i>Connected

@@ -182,11 +182,16 @@ def dashboard():
         session.clear()
         return redirect(url_for('login'))
     
+    # Get student's classes (support both 'class' and 'classes' fields)
+    student_classes = student.get('classes', [])
+    if not student_classes and student.get('class'):
+        student_classes = [student.get('class')]
+    
     # Get assigned teachers
     teacher_ids = student.get('teachers', [])
     teachers = list(Teacher.find({'teacher_id': {'$in': teacher_ids}}))
     
-    # Get unread message counts for each teacher
+    # Get unread message counts and shared classes for each teacher
     for t in teachers:
         unread = Message.count({
             'student_id': session['student_id'],
@@ -195,6 +200,11 @@ def dashboard():
             'read': False
         })
         t['unread_count'] = unread
+        
+        # Find shared classes between student and teacher
+        teacher_classes = t.get('classes', [])
+        shared_classes = list(set(student_classes) & set(teacher_classes))
+        t['shared_classes'] = shared_classes
     
     return render_template('dashboard.html', 
                          student=student, 
