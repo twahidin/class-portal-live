@@ -9,6 +9,50 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
+
+def get_service_account_email() -> str:
+    """
+    Get the service account email address that needs to be granted
+    access to Google Drive folders.
+    
+    Returns:
+        The service account email or None if not configured
+    """
+    try:
+        # Try file-based credentials
+        creds_file = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE')
+        if creds_file and os.path.exists(creds_file):
+            import json
+            with open(creds_file, 'r') as f:
+                creds_info = json.load(f)
+                return creds_info.get('client_email')
+        
+        # Try JSON credentials from environment
+        creds_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+        if creds_json:
+            import json
+            creds_info = json.loads(creds_json)
+            return creds_info.get('client_email')
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error getting service account email: {e}")
+        return None
+
+
+def is_drive_configured() -> bool:
+    """Check if Google Drive is configured with service account credentials"""
+    creds_file = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE')
+    creds_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+    
+    if creds_file and os.path.exists(creds_file):
+        return True
+    if creds_json:
+        return True
+    return False
+
+
 def get_drive_service():
     """Get Google Drive service using service account credentials"""
     try:

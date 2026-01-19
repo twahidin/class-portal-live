@@ -1973,6 +1973,25 @@ def teacher_change_password():
         logger.error(f"Error changing teacher password: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/drive/service-account-info')
+@teacher_required
+def get_drive_service_account_info():
+    """Get Google Drive service account information for folder sharing"""
+    try:
+        from utils.google_drive import get_service_account_email, is_drive_configured
+        
+        configured = is_drive_configured()
+        email = get_service_account_email() if configured else None
+        
+        return jsonify({
+            'configured': configured,
+            'email': email,
+            'message': 'Share your Google Drive folder with this email address and grant Editor access.' if email else 'Google Drive service account not configured. Contact your administrator.'
+        })
+    except Exception as e:
+        logger.error(f"Error getting service account info: {e}")
+        return jsonify({'error': str(e), 'configured': False}), 500
+
 @app.route('/teacher/assign_class', methods=['POST'])
 @teacher_required
 def teacher_assign_class():
