@@ -157,3 +157,148 @@ def upload_assignment_file(file_path: str, assignment: dict, teacher: dict) -> d
         return manager.upload_file(file_path, folder_id=folder_id)
     
     return manager.upload_file(file_path)
+
+
+def create_assignment_folder_structure(teacher: dict, assignment_title: str, assignment_id: str) -> dict:
+    """
+    Create the folder structure for an assignment in Google Drive.
+    
+    Structure:
+    Teacher's Folder/
+    └── [Assignment Title]/
+        ├── Question Papers/
+        └── Submissions/
+    
+    Returns:
+        dict with folder IDs: {
+            'assignment_folder_id': '...',
+            'question_papers_folder_id': '...',
+            'submissions_folder_id': '...'
+        }
+        or None if failed
+    """
+    manager = get_teacher_drive_manager(teacher)
+    if not manager:
+        logger.warning("Drive manager not available for folder creation")
+        return None
+    
+    try:
+        # Sanitize folder name
+        safe_title = "".join(c for c in assignment_title if c.isalnum() or c in (' ', '-', '_')).strip()
+        folder_name = f"{safe_title} ({assignment_id})"
+        
+        # Create main assignment folder
+        assignment_folder_id = manager.create_folder(folder_name)
+        if not assignment_folder_id:
+            logger.error("Failed to create assignment folder")
+            return None
+        
+        # Create Question Papers subfolder
+        question_papers_folder_id = manager.create_folder("Question Papers", parent_id=assignment_folder_id)
+        
+        # Create Submissions subfolder
+        submissions_folder_id = manager.create_folder("Submissions", parent_id=assignment_folder_id)
+        
+        logger.info(f"Created folder structure for assignment {assignment_id}")
+        
+        return {
+            'assignment_folder_id': assignment_folder_id,
+            'question_papers_folder_id': question_papers_folder_id,
+            'submissions_folder_id': submissions_folder_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating assignment folder structure: {e}")
+        return None
+
+
+def upload_question_papers(teacher: dict, question_papers_folder_id: str, 
+                           question_paper_content: bytes, question_paper_name: str,
+                           answer_key_content: bytes, answer_key_name: str) -> dict:
+    """
+    Upload question paper and answer key to the Question Papers folder.
+    
+    Returns:
+        dict with file info or None if failed
+    """
+    manager = get_teacher_drive_manager(teacher)
+    if not manager:
+        logger.warning("Drive manager not available")
+        return None
+    
+    try:
+        result = {}
+        
+        # Upload question paper
+        if question_paper_content:
+            qp_result = manager.upload_content(
+                question_paper_content,
+                question_paper_name or "Question_Paper.pdf",
+                mime_type='application/pdf',
+                folder_id=question_papers_folder_id
+            )
+            if qp_result:
+                result['question_paper'] = qp_result
+        
+        # Upload answer key
+        if answer_key_content:
+            ak_result = manager.upload_content(
+                answer_key_content,
+                answer_key_name or "Answer_Key.pdf",
+                mime_type='application/pdf',
+                folder_id=question_papers_folder_id
+            )
+            if ak_result:
+                result['answer_key'] = ak_result
+        
+        return result if result else None
+        
+    except Exception as e:
+        logger.error(f"Error uploading question papers: {e}")
+        return None
+
+
+def upload_student_submission(teacher: dict, submissions_folder_id: str,
+                              submission_content: bytes, filename: str,
+                              student_name: str = None, student_id: str = None) -> dict:
+    """
+    Upload a student submission to the Submissions folder.
+    
+    Args:
+        teacher: Teacher document
+        submissions_folder_id: The ID of the Submissions folder
+        submission_content: PDF content bytes
+        filename: Original filename
+        student_name: Student's name for folder organization
+        student_id: Student ID
+    
+    Returns:
+        dict with file info or None if failed
+    """
+    manager = get_teacher_drive_manager(teacher)
+    if not manager:
+        logger.warning("Drive manager not available")
+        return None
+    
+    try:
+        # Create a meaningful filename
+        if student_name and student_id:
+            safe_name = "".join(c for c in student_name if c.isalnum() or c in (' ', '-', '_')).strip()
+            upload_name = f"{student_id}_{safe_name}_{filename}"
+        elif student_id:
+            upload_name = f"{student_id}_{filename}"
+        else:
+            upload_name = filename
+        
+        result = manager.upload_content(
+            submission_content,
+            upload_name,
+            mime_type='application/pdf',
+            folder_id=submissions_folder_id
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error uploading student submission: {e}")
+        return None

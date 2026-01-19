@@ -719,6 +719,92 @@ def get_grade(percentage: float) -> str:
     else:
         return 'F'
 
+def generate_submission_pdf(pages: list, submission_id: str) -> bytes:
+    """
+    Generate a PDF from submission images.
+    
+    Args:
+        pages: List of page dictionaries with 'type' and 'data' keys
+        submission_id: The submission ID for reference
+    
+    Returns:
+        PDF content as bytes, or None if failed
+    """
+    from PIL import Image
+    from reportlab.lib.utils import ImageReader
+    
+    try:
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=0.5*cm,
+            leftMargin=0.5*cm,
+            topMargin=0.5*cm,
+            bottomMargin=0.5*cm
+        )
+        
+        story = []
+        styles = get_styles()
+        
+        # Add header with submission ID
+        story.append(Paragraph(f"Submission: {submission_id}", styles['Footer']))
+        story.append(Spacer(1, 10))
+        
+        for i, page in enumerate(pages):
+            if i > 0:
+                story.append(PageBreak())
+            
+            if page['type'] == 'image':
+                # Convert image bytes to PIL Image
+                img_buffer = io.BytesIO(page['data'])
+                img = Image.open(img_buffer)
+                
+                # Convert to RGB if necessary (for JPEG compatibility)
+                if img.mode in ('RGBA', 'P'):
+                    img = img.convert('RGB')
+                
+                # Calculate dimensions to fit page
+                page_width = A4[0] - 1*cm  # Account for margins
+                page_height = A4[1] - 2*cm  # Account for margins and header
+                
+                img_width, img_height = img.size
+                aspect = img_height / img_width
+                
+                # Scale to fit page while maintaining aspect ratio
+                if img_width / img_height > page_width / page_height:
+                    # Image is wider, scale by width
+                    display_width = page_width
+                    display_height = page_width * aspect
+                else:
+                    # Image is taller, scale by height
+                    display_height = page_height
+                    display_width = page_height / aspect
+                
+                # Save resized image to buffer
+                img_output = io.BytesIO()
+                img.save(img_output, format='JPEG', quality=85)
+                img_output.seek(0)
+                
+                # Create image for ReportLab
+                from reportlab.platypus import Image as RLImage
+                rl_image = RLImage(img_output, width=display_width, height=display_height)
+                story.append(rl_image)
+                
+            elif page['type'] == 'pdf':
+                # For PDFs, we'll just add a placeholder note
+                # Full PDF merging would require PyPDF2
+                story.append(Paragraph(f"Page {i+1}: PDF document (see original files)", styles['Body_Custom']))
+        
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+        
+    except Exception as e:
+        logger.error(f"Error generating submission PDF: {e}")
+        return None
+
+
 def generate_assignment_pdf(assignment: dict, teacher: dict = None) -> bytes:
     """
     Generate a PDF version of an assignment (for printing/distribution)

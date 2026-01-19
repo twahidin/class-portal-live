@@ -816,6 +816,35 @@ def student_submit_files():
         except Exception as e:
             logger.warning(f"Notification error: {e}")
         
+        # Upload to Google Drive if teacher has it configured and assignment has Drive folders
+        if teacher.get('google_drive_folder_id') and assignment.get('drive_folders', {}).get('submissions_folder_id'):
+            try:
+                from utils.google_drive import upload_student_submission
+                from utils.pdf_generator import generate_submission_pdf
+                
+                # Generate a PDF of the submission for upload
+                try:
+                    submission_pdf = generate_submission_pdf(pages, submission_id)
+                    if submission_pdf:
+                        drive_result = upload_student_submission(
+                            teacher=teacher,
+                            submissions_folder_id=assignment['drive_folders']['submissions_folder_id'],
+                            submission_content=submission_pdf,
+                            filename=f"submission_{submission_id}.pdf",
+                            student_name=student.get('name'),
+                            student_id=session['student_id']
+                        )
+                        if drive_result:
+                            Submission.update_one(
+                                {'submission_id': submission_id},
+                                {'$set': {'drive_file': drive_result}}
+                            )
+                            logger.info(f"Uploaded submission {submission_id} to Google Drive")
+                except Exception as pdf_error:
+                    logger.warning(f"Could not generate/upload submission PDF: {pdf_error}")
+            except Exception as drive_error:
+                logger.warning(f"Google Drive upload failed: {drive_error}")
+        
         return jsonify({
             'success': True,
             'submission_id': submission_id,
@@ -1285,6 +1314,13 @@ def create_assignment():
             
             assignment_id = generate_assignment_id()
             total_marks = int(data.get('total_marks', 100))
+            assignment_title = data.get('title', 'Untitled')
+            
+            # Read file contents (need to read before storing in GridFS since we also upload to Drive)
+            question_paper_content = question_paper.read()
+            question_paper.seek(0)  # Reset for GridFS
+            answer_key_content = answer_key.read()
+            answer_key.seek(0)  # Reset for GridFS
             
             # Store files in GridFS
             from gridfs import GridFS
@@ -1292,7 +1328,7 @@ def create_assignment():
             
             # Save question paper
             question_paper_id = fs.put(
-                question_paper.read(),
+                question_paper_content,
                 filename=f"{assignment_id}_question.pdf",
                 content_type='application/pdf',
                 assignment_id=assignment_id,
@@ -1301,17 +1337,48 @@ def create_assignment():
             
             # Save answer key
             answer_key_id = fs.put(
-                answer_key.read(),
+                answer_key_content,
                 filename=f"{assignment_id}_answer.pdf",
                 content_type='application/pdf',
                 assignment_id=assignment_id,
                 file_type='answer_key'
             )
             
-            Assignment.insert_one({
+            # Initialize Google Drive folder IDs
+            drive_folders = None
+            drive_files = None
+            
+            # Create Google Drive folder structure if teacher has Drive configured
+            if teacher.get('google_drive_folder_id'):
+                try:
+                    from utils.google_drive import create_assignment_folder_structure, upload_question_papers
+                    
+                    # Create folder structure
+                    drive_folders = create_assignment_folder_structure(
+                        teacher=teacher,
+                        assignment_title=assignment_title,
+                        assignment_id=assignment_id
+                    )
+                    
+                    # Upload question papers to Drive
+                    if drive_folders and drive_folders.get('question_papers_folder_id'):
+                        drive_files = upload_question_papers(
+                            teacher=teacher,
+                            question_papers_folder_id=drive_folders['question_papers_folder_id'],
+                            question_paper_content=question_paper_content,
+                            question_paper_name=question_paper.filename,
+                            answer_key_content=answer_key_content,
+                            answer_key_name=answer_key.filename
+                        )
+                        logger.info(f"Uploaded question papers to Google Drive for assignment {assignment_id}")
+                except Exception as drive_error:
+                    logger.warning(f"Google Drive upload failed (continuing anyway): {drive_error}")
+            
+            # Build assignment document
+            assignment_doc = {
                 'assignment_id': assignment_id,
                 'teacher_id': session['teacher_id'],
-                'title': data.get('title', 'Untitled'),
+                'title': assignment_title,
                 'subject': data.get('subject', 'General'),
                 'instructions': data.get('instructions', ''),
                 'total_marks': total_marks,
@@ -1323,7 +1390,15 @@ def create_assignment():
                 'status': 'published' if data.get('publish') else 'draft',
                 'created_at': datetime.utcnow(),
                 'updated_at': datetime.utcnow()
-            })
+            }
+            
+            # Add Google Drive folder IDs if created
+            if drive_folders:
+                assignment_doc['drive_folders'] = drive_folders
+            if drive_files:
+                assignment_doc['drive_files'] = drive_files
+            
+            Assignment.insert_one(assignment_doc)
             
             return redirect(url_for('teacher_assignments'))
             
