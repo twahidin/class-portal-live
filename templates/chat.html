@@ -108,10 +108,10 @@
             if (data.hours_enabled && !data.available) {
                 // Teacher is outside available hours
                 banner.classList.remove('d-none');
-                message.innerHTML = `<strong>${teacherName}</strong> is currently unavailable (Available: ${formatTime(data.start_time)} - ${formatTime(data.end_time)}). <br>${data.message}`;
+                message.innerHTML = `<strong>${teacherName}</strong> is currently unavailable (Available: ${formatTime(data.start_time)} - ${formatTime(data.end_time)} SGT). <br>${data.message}<br><small class="text-muted">Current time: ${formatTime(data.current_time)} SGT</small>`;
                 
                 // Update status
-                status.innerHTML = `<i class="bi bi-moon-fill text-warning me-1"></i>Away (${formatTime(data.start_time)} - ${formatTime(data.end_time)})`;
+                status.innerHTML = `<i class="bi bi-moon-fill text-warning me-1"></i>Away (${formatTime(data.start_time)} - ${formatTime(data.end_time)} SGT)`;
             } else if (data.available) {
                 banner.classList.add('d-none');
             }

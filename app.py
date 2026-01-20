@@ -573,7 +573,7 @@ def get_question_help_api():
 @app.route('/api/teacher/<teacher_id>/availability')
 @login_required
 def get_teacher_availability(teacher_id):
-    """Check if teacher is available based on their messaging hours"""
+    """Check if teacher is available based on their messaging hours (Singapore timezone)"""
     try:
         teacher = Teacher.find_one({'teacher_id': teacher_id})
         if not teacher:
@@ -595,10 +595,11 @@ def get_teacher_availability(teacher_id):
         outside_message = teacher.get('outside_hours_message', 
             'I am currently unavailable. I will respond to your message during my available hours.')
         
-        # Get current time (use server time, could be adjusted for timezone later)
-        from datetime import datetime
-        now = datetime.now()
-        current_time = now.strftime('%H:%M')
+        # Get current time in Singapore timezone (UTC+8)
+        from datetime import datetime, timezone, timedelta
+        singapore_tz = timezone(timedelta(hours=8))
+        now_sg = datetime.now(singapore_tz)
+        current_time = now_sg.strftime('%H:%M')
         
         # Check if current time is within available hours
         is_available = start_time <= current_time <= end_time
@@ -608,6 +609,8 @@ def get_teacher_availability(teacher_id):
             'hours_enabled': True,
             'start_time': start_time,
             'end_time': end_time,
+            'current_time': current_time,
+            'timezone': 'Asia/Singapore (UTC+8)',
             'message': outside_message if not is_available else None,
             'teacher_name': teacher.get('name', 'Teacher')
         })
