@@ -2487,14 +2487,20 @@ def get_students():
         
         query = {}
         if class_filter == '__unassigned__':
-            # Find students with no class or empty class
-            query['$or'] = [
-                {'class': {'$exists': False}},
-                {'class': None},
-                {'class': ''},
-                {'classes': {'$exists': False}},
-                {'classes': []},
-                {'classes': None}
+            # Find students with no class assigned
+            # Must have BOTH: no 'class' value AND no 'classes' value
+            query['$and'] = [
+                {'$or': [
+                    {'class': {'$exists': False}},
+                    {'class': None},
+                    {'class': ''}
+                ]},
+                {'$or': [
+                    {'classes': {'$exists': False}},
+                    {'classes': None},
+                    {'classes': []},
+                    {'classes': {'$size': 0}}
+                ]}
             ]
         elif class_filter:
             query['$or'] = [
