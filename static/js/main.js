@@ -105,6 +105,9 @@ function addMessage(text, isSent) {
     container.scrollTop = container.scrollHeight;
 }
 
+// Callback for when new messages are received (can be overridden)
+window.onNewMessageReceived = null;
+
 function startPolling(teacherId, lastTime) {
     let since = lastTime || '';
     
@@ -122,6 +125,11 @@ function startPolling(teacherId, lastTime) {
                 data.messages.forEach(msg => {
                     if (!msg.from_student) {
                         addMessage(msg.text, false);
+                        
+                        // Trigger notification callback if set
+                        if (window.onNewMessageReceived) {
+                            window.onNewMessageReceived(msg.text, teacherId);
+                        }
                     }
                     since = msg.timestamp;
                 });

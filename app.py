@@ -570,6 +570,52 @@ def get_question_help_api():
         logger.error(f"Error getting question help: {e}")
         return jsonify({'error': 'Failed to get help. Please try again.'}), 500
 
+@app.route('/api/teacher/<teacher_id>/availability')
+@login_required
+def get_teacher_availability(teacher_id):
+    """Check if teacher is available based on their messaging hours"""
+    try:
+        teacher = Teacher.find_one({'teacher_id': teacher_id})
+        if not teacher:
+            return jsonify({'error': 'Teacher not found'}), 404
+        
+        # Check if messaging hours are enabled
+        hours_enabled = teacher.get('messaging_hours_enabled', True)
+        
+        if not hours_enabled:
+            return jsonify({
+                'available': True,
+                'hours_enabled': False,
+                'message': None
+            })
+        
+        # Get messaging hours
+        start_time = teacher.get('messaging_start_time', '07:00')
+        end_time = teacher.get('messaging_end_time', '19:00')
+        outside_message = teacher.get('outside_hours_message', 
+            'I am currently unavailable. I will respond to your message during my available hours.')
+        
+        # Get current time (use server time, could be adjusted for timezone later)
+        from datetime import datetime
+        now = datetime.now()
+        current_time = now.strftime('%H:%M')
+        
+        # Check if current time is within available hours
+        is_available = start_time <= current_time <= end_time
+        
+        return jsonify({
+            'available': is_available,
+            'hours_enabled': True,
+            'start_time': start_time,
+            'end_time': end_time,
+            'message': outside_message if not is_available else None,
+            'teacher_name': teacher.get('name', 'Teacher')
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking teacher availability: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/assignments/<assignment_id>/submit', methods=['POST'])
 @login_required
 @limiter.limit("10 per hour")
@@ -1909,6 +1955,15 @@ def teacher_settings():
                 update_data['subjects'] = subjects
             elif 'subjects' in data:
                 update_data['subjects'] = []
+            
+            # Update messaging hours settings
+            update_data['messaging_hours_enabled'] = 'messaging_hours_enabled' in data
+            if data.get('messaging_start_time'):
+                update_data['messaging_start_time'] = data['messaging_start_time']
+            if data.get('messaging_end_time'):
+                update_data['messaging_end_time'] = data['messaging_end_time']
+            if data.get('outside_hours_message'):
+                update_data['outside_hours_message'] = data['outside_hours_message'].strip()
             
             if update_data:
                 update_data['updated_at'] = datetime.utcnow()

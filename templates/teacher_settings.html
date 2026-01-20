@@ -127,6 +127,42 @@
                     </div>
                 </div>
                 
+                <!-- Messaging Hours -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-clock me-2"></i>Messaging Hours</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small">Set the hours when students can expect you to respond to messages. Outside these hours, students will see a notice.</p>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="messaging_hours_enabled" name="messaging_hours_enabled"
+                                   {% if teacher.get('messaging_hours_enabled', True) %}checked{% endif %}>
+                            <label class="form-check-label" for="messaging_hours_enabled">Enable messaging hours</label>
+                        </div>
+                        
+                        <div class="row mb-3" id="messaging-hours-inputs">
+                            <div class="col-md-6">
+                                <label class="form-label">Available From</label>
+                                <input type="time" class="form-control" name="messaging_start_time" 
+                                       value="{{ teacher.get('messaging_start_time', '07:00') }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Available Until</label>
+                                <input type="time" class="form-control" name="messaging_end_time" 
+                                       value="{{ teacher.get('messaging_end_time', '19:00') }}">
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Outside Hours Message</label>
+                            <textarea class="form-control" name="outside_hours_message" rows="2" 
+                                      placeholder="Message shown to students outside your available hours">{{ teacher.get('outside_hours_message', 'I am currently unavailable. I will respond to your message during my available hours.') }}</textarea>
+                            <small class="text-muted">This message will be shown to students when they try to message you outside your available hours.</small>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Telegram Integration -->
                 <div class="card mb-4">
                     <div class="card-header">

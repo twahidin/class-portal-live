@@ -30,7 +30,7 @@
             </div>
             <div>
                 <h5>{{ teacher.name }}</h5>
-                <span class="status">
+                <span class="status" id="teacher-status">
                     {% if teacher.telegram_id %}
                     <i class="bi bi-circle-fill text-success me-1"></i>Online via Telegram
                     {% else %}
@@ -39,6 +39,17 @@
                 </span>
             </div>
         </div>
+        <!-- Notification Bell -->
+        <button class="btn btn-link text-white ms-auto" id="notification-btn" title="Enable notifications" style="display: none;">
+            <i class="bi bi-bell"></i>
+        </button>
+    </div>
+    
+    <!-- Availability Banner -->
+    <div id="availability-banner" class="alert alert-warning mb-0 rounded-0 small d-none">
+        <i class="bi bi-clock me-2"></i>
+        <span id="availability-message"></span>
+        <button type="button" class="btn-close btn-sm float-end" onclick="this.parentElement.classList.add('d-none')"></button>
     </div>
     
     <!-- Messages Area -->
@@ -80,7 +91,117 @@
 {% block scripts %}
 <script>
     const teacherId = '{{ teacher.teacher_id }}';
+    const teacherName = '{{ teacher.name }}';
     let lastMessageTime = '{{ messages[-1].timestamp.isoformat() if messages else "" }}';
+    let notificationsEnabled = false;
+    
+    // Check teacher availability
+    async function checkTeacherAvailability() {
+        try {
+            const response = await fetch(`/api/teacher/${teacherId}/availability`);
+            const data = await response.json();
+            
+            const banner = document.getElementById('availability-banner');
+            const message = document.getElementById('availability-message');
+            const status = document.getElementById('teacher-status');
+            
+            if (data.hours_enabled && !data.available) {
+                // Teacher is outside available hours
+                banner.classList.remove('d-none');
+                message.innerHTML = `<strong>${teacherName}</strong> is currently unavailable (Available: ${formatTime(data.start_time)} - ${formatTime(data.end_time)}). <br>${data.message}`;
+                
+                // Update status
+                status.innerHTML = `<i class="bi bi-moon-fill text-warning me-1"></i>Away (${formatTime(data.start_time)} - ${formatTime(data.end_time)})`;
+            } else if (data.available) {
+                banner.classList.add('d-none');
+            }
+        } catch (e) {
+            console.error('Error checking availability:', e);
+        }
+    }
+    
+    function formatTime(time24) {
+        const [hours, minutes] = time24.split(':');
+        const h = parseInt(hours);
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 || 12;
+        return `${h12}:${minutes} ${ampm}`;
+    }
+    
+    // Request notification permission
+    async function requestNotificationPermission() {
+        if (!('Notification' in window)) {
+            console.log('Notifications not supported');
+            return;
+        }
+        
+        if (Notification.permission === 'granted') {
+            notificationsEnabled = true;
+            updateNotificationButton();
+        } else if (Notification.permission !== 'denied') {
+            const permission = await Notification.requestPermission();
+            notificationsEnabled = permission === 'granted';
+            updateNotificationButton();
+        }
+    }
+    
+    function updateNotificationButton() {
+        const btn = document.getElementById('notification-btn');
+        if ('Notification' in window) {
+            btn.style.display = 'block';
+            if (Notification.permission === 'granted') {
+                btn.innerHTML = '<i class="bi bi-bell-fill"></i>';
+                btn.title = 'Notifications enabled';
+                btn.classList.add('text-warning');
+            } else if (Notification.permission === 'denied') {
+                btn.innerHTML = '<i class="bi bi-bell-slash"></i>';
+                btn.title = 'Notifications blocked';
+            } else {
+                btn.innerHTML = '<i class="bi bi-bell"></i>';
+                btn.title = 'Click to enable notifications';
+            }
+        }
+    }
+    
+    function showNotification(title, message) {
+        if (notificationsEnabled && document.hidden) {
+            const notification = new Notification(title, {
+                body: message,
+                icon: '/static/favicon.ico',
+                tag: 'teacher-message'
+            });
+            
+            notification.onclick = function() {
+                window.focus();
+                notification.close();
+            };
+            
+            // Auto close after 5 seconds
+            setTimeout(() => notification.close(), 5000);
+        }
+    }
+    
+    // Set up callback for new messages to trigger notifications
+    window.onNewMessageReceived = function(messageText, tid) {
+        showNotification(`Message from ${teacherName}`, messageText);
+        
+        // Play notification sound if available
+        try {
+            const audio = new Audio('/static/notification.mp3');
+            audio.volume = 0.5;
+            audio.play().catch(() => {}); // Ignore if autoplay blocked
+        } catch (e) {}
+    };
+    
+    // Setup notification button click
+    document.getElementById('notification-btn').addEventListener('click', requestNotificationPermission);
+    
+    // Check availability on load and every 5 minutes
+    checkTeacherAvailability();
+    setInterval(checkTeacherAvailability, 5 * 60 * 1000);
+    
+    // Update notification button state
+    updateNotificationButton();
     
     // Initialize chat
     initChat(teacherId, lastMessageTime);
