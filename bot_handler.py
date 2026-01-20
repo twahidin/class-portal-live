@@ -37,7 +37,7 @@ def send_notification(telegram_id: int, notification_type: str, data: dict):
     if not bot:
         logger.error("Bot token not configured")
         return False
-    
+     
     try:
         if notification_type == 'new_submission':
             web_url = os.getenv('WEB_URL', 'http://localhost:5000')

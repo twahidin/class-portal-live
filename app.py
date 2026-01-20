@@ -2486,8 +2486,21 @@ def get_students():
         class_filter = request.args.get('class', '')
         
         query = {}
-        if class_filter:
-            query['class'] = class_filter
+        if class_filter == '__unassigned__':
+            # Find students with no class or empty class
+            query['$or'] = [
+                {'class': {'$exists': False}},
+                {'class': None},
+                {'class': ''},
+                {'classes': {'$exists': False}},
+                {'classes': []},
+                {'classes': None}
+            ]
+        elif class_filter:
+            query['$or'] = [
+                {'class': class_filter},
+                {'classes': class_filter}
+            ]
         
         students = list(Student.find(query))
         
@@ -2496,7 +2509,7 @@ def get_students():
             'students': [{
                 'student_id': s.get('student_id'),
                 'name': s.get('name'),
-                'class': s.get('class'),
+                'class': s.get('class') or (s.get('classes', [None])[0] if s.get('classes') else ''),
                 'teachers': s.get('teachers', [])
             } for s in students]
         })
@@ -2610,6 +2623,7 @@ def admin_update_teacher():
         teacher_id = data.get('teacher_id')
         name = data.get('name')
         subjects = data.get('subjects', [])
+        new_classes = data.get('classes', [])
         
         if not teacher_id:
             return jsonify({'error': 'Teacher ID required'}), 400
@@ -2622,10 +2636,20 @@ def admin_update_teacher():
         if not teacher:
             return jsonify({'error': 'Teacher not found'}), 404
         
+        # Get old classes for comparison
+        old_classes = set(teacher.get('classes', []))
+        new_classes_set = set(new_classes)
+        
+        # Classes that were removed
+        removed_classes = old_classes - new_classes_set
+        # Classes that were added
+        added_classes = new_classes_set - old_classes
+        
         # Update teacher
         update_data = {
             'name': name.strip(),
             'subjects': subjects,
+            'classes': new_classes,
             'updated_at': datetime.utcnow()
         }
         
@@ -2633,6 +2657,28 @@ def admin_update_teacher():
             {'teacher_id': teacher_id},
             {'$set': update_data}
         )
+        
+        # Update student-teacher relationships for removed classes
+        if removed_classes:
+            # Remove teacher from students in removed classes
+            Student.update_many(
+                {'$or': [
+                    {'class': {'$in': list(removed_classes)}},
+                    {'classes': {'$in': list(removed_classes)}}
+                ]},
+                {'$pull': {'teachers': teacher_id}}
+            )
+        
+        # Update student-teacher relationships for added classes
+        if added_classes:
+            # Add teacher to students in added classes
+            Student.update_many(
+                {'$or': [
+                    {'class': {'$in': list(added_classes)}},
+                    {'classes': {'$in': list(added_classes)}}
+                ]},
+                {'$addToSet': {'teachers': teacher_id}}
+            )
         
         return jsonify({
             'success': True,

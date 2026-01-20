@@ -119,6 +119,7 @@
                                 <div class="col">
                                     <select class="form-select form-select-sm" id="filter-class">
                                         <option value="">All Classes</option>
+                                        <option value="__unassigned__">Unassigned (No Class)</option>
                                         {% for c in classes %}
                                         <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %}</option>
                                         {% endfor %}
@@ -344,6 +345,7 @@
                                                         data-teacher-id="{{ t.teacher_id }}" 
                                                         data-teacher-name="{{ t.name }}"
                                                         data-teacher-subjects="{{ t.subjects | join(', ') if t.subjects else '' }}"
+                                                        data-teacher-classes="{{ t.classes | join(', ') if t.classes else '' }}"
                                                         title="Edit Teacher">
                                                     <i class="bi bi-pencil"></i>
                                                 </button>
@@ -562,6 +564,11 @@
                     <div class="mb-3">
                         <label class="form-label">Subjects (comma-separated)</label>
                         <input type="text" class="form-control" id="edit-teacher-subjects" placeholder="e.g., Math, Physics">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Classes (comma-separated)</label>
+                        <input type="text" class="form-control" id="edit-teacher-classes" placeholder="e.g., S3C1, S3I4">
+                        <small class="text-muted">Enter class IDs the teacher should teach, separated by commas</small>
                     </div>
                 </form>
             </div>
@@ -1068,10 +1075,16 @@
     // Filter by class
     document.getElementById('filter-class').addEventListener('change', async (e) => {
         const classId = e.target.value;
-        document.getElementById('delete-by-class').disabled = !classId;
+        // Disable delete class button for unassigned filter or no selection
+        document.getElementById('delete-by-class').disabled = !classId || classId === '__unassigned__';
         
         try {
-            const url = classId ? `/admin/api/students?class=${classId}` : '/admin/api/students';
+            let url = '/admin/api/students';
+            if (classId === '__unassigned__') {
+                url = '/admin/api/students?class=__unassigned__';
+            } else if (classId) {
+                url = `/admin/api/students?class=${classId}`;
+            }
             const response = await fetch(url);
             const data = await response.json();
             
@@ -1418,11 +1431,13 @@
             const teacherId = btn.dataset.teacherId;
             const teacherName = btn.dataset.teacherName;
             const teacherSubjects = btn.dataset.teacherSubjects;
+            const teacherClasses = btn.dataset.teacherClasses;
             
             document.getElementById('edit-teacher-id').value = teacherId;
             document.getElementById('edit-teacher-id-display').value = teacherId;
             document.getElementById('edit-teacher-name').value = teacherName;
             document.getElementById('edit-teacher-subjects').value = teacherSubjects;
+            document.getElementById('edit-teacher-classes').value = teacherClasses;
             
             editTeacherModal.show();
         });
@@ -1432,6 +1447,7 @@
         const teacherId = document.getElementById('edit-teacher-id').value;
         const name = document.getElementById('edit-teacher-name').value.trim();
         const subjects = document.getElementById('edit-teacher-subjects').value;
+        const classes = document.getElementById('edit-teacher-classes').value;
         
         if (!name) {
             alert('Name is required');
@@ -1445,7 +1461,8 @@
                 body: JSON.stringify({
                     teacher_id: teacherId,
                     name: name,
-                    subjects: subjects.split(',').map(s => s.trim()).filter(s => s)
+                    subjects: subjects.split(',').map(s => s.trim()).filter(s => s),
+                    classes: classes.split(',').map(s => s.trim()).filter(s => s)
                 })
             });
             
