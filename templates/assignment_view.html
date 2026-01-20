@@ -236,7 +236,7 @@
             <!-- Review My Work Section -->
             <div class="card mb-4">
                 <div class="card-header bg-info text-white">
-                    <h5 class="mb-0"><i class="bi bi-search me-2"></i>Review My Work (Get AI Feedback)</h5>
+                    <h5 class="mb-0"><i class="bi bi-search me-2"></i>Review My Work</h5>
                 </div>
                 <div class="card-body">
                     <p class="text-muted small mb-3">Upload your work to get AI feedback <strong>before</strong> final submission. This won't count as your submission.</p>
@@ -325,6 +325,10 @@
                                     </button>
                                     <button type="button" class="btn-close btn-close-sm" onclick="closeFeedback()"></button>
                                 </div>
+                            </div>
+                            <div class="alert alert-warning small mb-0 rounded-0 border-start-0 border-end-0">
+                                <i class="bi bi-exclamation-triangle me-1"></i>
+                                <strong>Note:</strong> AI feedback may contain errors. Verify with your notes or teacher.
                             </div>
                             <div class="card-body" id="ai-feedback-content">
                                 <!-- Feedback will be inserted here -->
@@ -607,7 +611,6 @@
     margin-top: 0.5rem;
 }
 </style>
-{% endblock %}
 
 <!-- Feedback Detail Modal -->
 <div class="modal fade" id="feedbackModal" tabindex="-1" aria-labelledby="feedbackModalLabel" aria-hidden="true">
@@ -631,6 +634,7 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
 {% block scripts %}
 <script>
@@ -842,10 +846,28 @@
     }
     
     // === AI FEEDBACK FUNCTION ===
+    // Track if user has acknowledged the AI warning
+    let aiWarningAcknowledged = false;
+    
     async function getAIFeedback(feedbackType) {
         if (reviewPhotos.length === 0 && !reviewPdf) {
             alert('Please upload your work first to get AI feedback.');
             return;
+        }
+        
+        // Show AI warning if not already acknowledged
+        if (!aiWarningAcknowledged) {
+            const confirmed = confirm(
+                '⚠️ AI Feedback Warning\n\n' +
+                'AI responses are generative in nature and may contain errors. ' +
+                'Always verify the feedback against your notes, textbook, or ask your teacher.\n\n' +
+                'Use this as a learning tool, not the final answer.\n\n' +
+                'Click OK to continue.'
+            );
+            if (!confirmed) {
+                return;
+            }
+            aiWarningAcknowledged = true;
         }
         
         const feedbackResult = document.getElementById('ai-feedback-result');
