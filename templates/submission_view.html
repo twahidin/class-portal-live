@@ -62,11 +62,11 @@
                     </div>
                 </div>
                 <div class="col-md-4 text-md-end mt-3 mt-md-0">
-                    {% if submission.final_marks is not none %}
+                    {% if submission.get('final_marks') is not none %}
                     <div class="score-box">
-                        <div class="score-value">{{ submission.final_marks }}<span class="score-total">/{{ assignment.total_marks }}</span></div>
+                        <div class="score-value">{{ submission.get('final_marks', 0) }}<span class="score-total">/{{ assignment.get('total_marks', 100) }}</span></div>
                         <div class="score-label">Your Score</div>
-                        {% set percentage = (submission.final_marks / assignment.total_marks * 100) if assignment.total_marks > 0 else 0 %}
+                        {% set percentage = (submission.get('final_marks', 0) / assignment.get('total_marks', 100) * 100) if assignment.get('total_marks', 100) > 0 else 0 %}
                         <div class="progress mt-2" style="height: 8px;">
                             <div class="progress-bar {% if percentage >= 70 %}bg-success{% elif percentage >= 50 %}bg-warning{% else %}bg-danger{% endif %}" 
                                  style="width: {{ percentage }}%"></div>
