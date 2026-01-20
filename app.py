@@ -2218,7 +2218,7 @@ def teacher_purge_conversation(student_id):
             return jsonify({'error': 'Student not found'}), 404
         
         # Delete all messages between this teacher and student
-        result = Message.delete_many({
+        result = db.db.messages.delete_many({
             'student_id': student_id,
             'teacher_id': session['teacher_id']
         })
@@ -2893,13 +2893,13 @@ def delete_teachers():
         )
         
         # Delete all messages involving these teachers
-        Message.delete_many({'teacher_id': {'$in': teacher_ids}})
+        db.db.messages.delete_many({'teacher_id': {'$in': teacher_ids}})
         
         # Delete all assignments by these teachers
-        Assignment.delete_many({'teacher_id': {'$in': teacher_ids}})
+        db.db.assignments.delete_many({'teacher_id': {'$in': teacher_ids}})
         
         # Delete all submissions for those assignments
-        Submission.delete_many({'teacher_id': {'$in': teacher_ids}})
+        db.db.submissions.delete_many({'teacher_id': {'$in': teacher_ids}})
         
         # Delete teachers (this also removes their telegram_id association)
         result = db.db.teachers.delete_many({'teacher_id': {'$in': teacher_ids}})
