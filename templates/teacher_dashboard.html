@@ -122,7 +122,7 @@
     
     <!-- Quick Actions -->
     <div class="row g-4 mb-5">
-        <div class="col-md-6">
+        <div class="col-md-4">
             <a href="{{ url_for('create_assignment') }}" class="action-card">
                 <div class="action-icon">
                     <i class="bi bi-plus-circle"></i>
@@ -133,7 +133,18 @@
                 </div>
             </a>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
+            <a href="{{ url_for('teacher_assignments') }}" class="action-card">
+                <div class="action-icon" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">
+                    <i class="bi bi-journal-text"></i>
+                </div>
+                <div class="action-info">
+                    <h5>My Assignments</h5>
+                    <p>{{ stats.assignments }} assignment(s) created</p>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-4">
             <a href="{{ url_for('teacher_submissions', status='pending') }}" class="action-card">
                 <div class="action-icon">
                     <i class="bi bi-inbox"></i>
