@@ -37,7 +37,7 @@
                     <button class="btn btn-success" onclick="sendFeedback()">
                         <i class="bi bi-send me-1"></i>Send Feedback
                     </button>
-                    <button class="btn btn-outline-primary" onclick="downloadPDF()">
+                    <button class="btn btn-outline-primary" onclick="downloadPDF()" title="Download PDF with current feedback (works at any time)">
                         <i class="bi bi-file-pdf me-1"></i>Download PDF
                     </button>
                 </div>
@@ -497,12 +497,19 @@
         }
     }
     
-    // Download PDF report
+    // Download PDF report - can be used at any time, even before sending feedback
     async function downloadPDF() {
-        // Save first
-        await saveFeedback();
+        // Save current feedback state first to preserve any edits
+        // This doesn't require feedback to be sent, just saves the current state
+        try {
+            await saveFeedback();
+        } catch (e) {
+            // Continue even if save fails - PDF generation will use existing data
+            console.warn('Could not save before download, continuing anyway:', e);
+        }
         
-        // Trigger download
+        // Trigger download - works at any time, even if no feedback has been entered
+        // The PDF will include AI feedback and any teacher edits that have been made
         window.open(`/teacher/review/${submissionId}/pdf`, '_blank');
     }
     

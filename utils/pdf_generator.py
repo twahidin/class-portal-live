@@ -201,7 +201,8 @@ def generate_review_pdf(submission: dict, assignment: dict, student: dict, teach
             correct_answer = teacher_q.get('correct_answer', q.get('correct_answer', ''))
             feedback = teacher_q.get('feedback', q.get('feedback', ''))
             marks = teacher_q.get('marks', q.get('marks_awarded', ''))
-            marks_total = q.get('marks_total', '?')
+            # Use teacher's marks_total if available, otherwise use question's marks_total
+            marks_total = teacher_q.get('marks_total') or q.get('marks_total', '?')
             
             # Status indicator
             if q.get('is_correct') == True:
