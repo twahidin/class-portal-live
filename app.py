@@ -1183,16 +1183,40 @@ def teacher_dashboard():
         'read': False
     })
     
+    # Get teacher's classes with students
+    teacher_classes = teacher.get('classes', [])
+    classes_data = []
+    for class_id in teacher_classes:
+        class_info = Class.find_one({'class_id': class_id}) or {'class_id': class_id}
+        students = list(Student.find({'class': class_id}))
+        classes_data.append({
+            'class_id': class_id,
+            'name': class_info.get('name', class_id),
+            'students': students,
+            'student_count': len(students)
+        })
+    
+    # Get teacher's teaching groups with students
+    teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
+    for group in teaching_groups:
+        students = list(Student.find({'student_id': {'$in': group.get('student_ids', [])}}))
+        group['students'] = students
+        group['student_count'] = len(students)
+    
     return render_template('teacher_dashboard.html',
                          teacher=teacher,
                          stats={
                              'total_assignments': len(assignments),
+                             'assignments': len(assignments),
                              'pending_submissions': pending_submissions,
                              'approved_submissions': approved_submissions,
                              'unread_messages': unread_messages
                          },
+                         assignments=assignments,
                          recent_pending=recent_pending,
-                         students_with_messages=students_with_messages)
+                         students_with_messages=students_with_messages,
+                         classes=classes_data,
+                         teaching_groups=teaching_groups)
 
 @app.route('/teacher/assignments')
 @teacher_required
@@ -1227,6 +1251,48 @@ def teacher_assignments():
     return render_template('teacher_assignments.html',
                          teacher=teacher,
                          assignments=assignments)
+
+@app.route('/teacher/api/student-statuses')
+@teacher_required
+def get_student_statuses():
+    """Get submission statuses for students by assignment"""
+    assignment_id = request.args.get('assignment_id')
+    student_ids = request.args.getlist('student_ids[]')
+    
+    if not assignment_id or not student_ids:
+        return jsonify({'error': 'Missing parameters'}), 400
+    
+    # Verify teacher owns this assignment
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    
+    if not assignment:
+        return jsonify({'error': 'Assignment not found'}), 404
+    
+    # Get submissions for these students
+    statuses = {}
+    for student_id in student_ids:
+        submission = Submission.find_one({
+            'assignment_id': assignment_id,
+            'student_id': student_id
+        })
+        
+        if submission:
+            status = submission.get('status', 'submitted')
+            if status == 'ai_reviewed':
+                statuses[student_id] = {'status': 'ai_reviewed', 'label': 'AI Feedback', 'class': 'info'}
+            elif status in ['submitted']:
+                statuses[student_id] = {'status': 'pending', 'label': 'Pending Review', 'class': 'warning'}
+            elif status in ['reviewed', 'approved']:
+                statuses[student_id] = {'status': 'returned', 'label': 'Returned', 'class': 'success'}
+            else:
+                statuses[student_id] = {'status': status, 'label': status.title(), 'class': 'secondary'}
+        else:
+            statuses[student_id] = {'status': 'none', 'label': 'No Submission', 'class': 'light'}
+    
+    return jsonify({'success': True, 'statuses': statuses})
 
 @app.route('/teacher/assignment/<assignment_id>/summary')
 @teacher_required
