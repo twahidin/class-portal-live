@@ -30,7 +30,7 @@
                     <p class="text-muted mb-0">
                         <strong>{{ student.name }}</strong> ({{ student.student_id }}) 
                         | {{ assignment.subject }}
-                        | Submitted: {{ submission.submitted_at.strftime('%d %b %Y %H:%M') if submission.submitted_at else 'N/A' }}
+                        | Submitted: {{ (submission.submitted_at|sgt).strftime('%d %b %Y %H:%M') if submission.submitted_at else 'N/A' }} SGT
                     </p>
                 </div>
                 <div class="btn-group">
@@ -126,12 +126,12 @@
                                         </td>
                                         <td class="small">
                                             <textarea class="form-control form-control-sm" 
-                                                      name="correct_{{ q.question_num }}" rows="2"
+                                                      name="correct_{{ q.question_num }}" rows="3"
                                                       placeholder="Correct answer">{{ q.correct_answer or '' }}</textarea>
                                         </td>
                                         <td>
                                             <textarea class="form-control form-control-sm feedback-input" 
-                                                      name="feedback_{{ q.question_num }}" rows="2"
+                                                      name="feedback_{{ q.question_num }}" rows="5"
                                                       placeholder="{% if q.needs_review %}Enter feedback...{% else %}{{ q.feedback }}{% endif %}">{{ q.feedback if not q.needs_review else '' }}</textarea>
                                             {% if q.improvement %}
                                             <small class="text-muted d-block mt-1">💡 {{ q.improvement }}</small>
@@ -144,7 +144,12 @@
                                                        value="{{ q.marks_awarded if q.marks_awarded is not none and not q.needs_review else '' }}"
                                                        min="0" max="{{ q.marks_total or 10 }}"
                                                        placeholder="?">
-                                                <span class="input-group-text">/{{ q.marks_total or '?' }}</span>
+                                                <span class="input-group-text">/</span>
+                                                <input type="number" class="form-control marks-total-input" 
+                                                       name="marks_total_{{ q.question_num }}" 
+                                                       value="{{ q.marks_total or '' }}"
+                                                       min="0"
+                                                       placeholder="?">
                                             </div>
                                         </td>
                                     </tr>
@@ -164,9 +169,14 @@
                                     <td>
                                         <div class="input-group input-group-sm">
                                             <input type="number" class="form-control fw-bold" id="total-marks" 
+                                                   name="total_marks"
                                                    value="{{ ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '' }}"
-                                                   readonly>
-                                            <span class="input-group-text">/{{ assignment.total_marks or 100 }}</span>
+                                                   min="0">
+                                            <span class="input-group-text">/</span>
+                                            <input type="number" class="form-control fw-bold" id="total-marks-max" 
+                                                   name="total_marks_max"
+                                                   value="{{ assignment.total_marks or 100 }}"
+                                                   min="0">
                                         </div>
                                     </td>
                                 </tr>
@@ -217,10 +227,17 @@
 
 #feedback-table textarea {
     font-size: 0.85rem;
+    min-height: 100px;
+    resize: vertical;
+}
+
+#feedback-table .feedback-input {
+    min-height: 120px;
 }
 
 #feedback-table td {
     vertical-align: top;
+    padding: 8px;
 }
 
 /* Fullscreen styles */
@@ -387,13 +404,30 @@
         input.addEventListener('input', calculateTotal);
     });
     
+    // Update max values when marks_total changes
+    document.querySelectorAll('.marks-total-input').forEach(input => {
+        input.addEventListener('input', function() {
+            const qNum = this.name.replace('marks_total_', '');
+            const marksInput = document.querySelector(`input[name="marks_${qNum}"]`);
+            if (marksInput && this.value) {
+                marksInput.max = this.value;
+            }
+        });
+    });
+    
     function calculateTotal() {
         let total = 0;
         document.querySelectorAll('.marks-input').forEach(input => {
             const val = parseFloat(input.value) || 0;
             total += val;
         });
-        document.getElementById('total-marks').value = total;
+        const totalMarksInput = document.getElementById('total-marks');
+        if (totalMarksInput) {
+            // Only auto-update if empty, otherwise let user edit manually
+            if (!totalMarksInput.value || totalMarksInput.value == '0') {
+                totalMarksInput.value = total;
+            }
+        }
     }
     
     // Save feedback
@@ -412,10 +446,14 @@
                 data.questions[qNum] = {
                     correct_answer: formData.get(`correct_${qNum}`),
                     feedback: formData.get(`feedback_${qNum}`),
-                    marks: formData.get(`marks_${qNum}`)
+                    marks: formData.get(`marks_${qNum}`),
+                    marks_total: formData.get(`marks_total_${qNum}`)
                 };
             }
         });
+        
+        // Include total marks max
+        data.total_marks_max = document.getElementById('total-marks-max').value;
         
         try {
             const response = await fetch(`/teacher/review/${submissionId}/save`, {

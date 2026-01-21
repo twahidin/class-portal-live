@@ -85,7 +85,7 @@
                     {% if existing_submission %}
                     <div class="alert alert-success mt-4">
                         <h6 class="alert-heading"><i class="bi bi-check-circle me-2"></i>Already Submitted</h6>
-                        <p class="mb-2">You submitted this assignment on {{ existing_submission.submitted_at.strftime('%d %B %Y at %H:%M') }}</p>
+                        <p class="mb-2">You submitted this assignment on {{ (existing_submission.submitted_at|sgt).strftime('%d %B %Y at %H:%M') }} SGT</p>
                         <hr>
                         <div class="d-flex gap-2">
                             <a href="{{ url_for('view_submission', submission_id=existing_submission.submission_id) }}" class="btn btn-success btn-sm">

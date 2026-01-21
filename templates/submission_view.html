@@ -49,7 +49,7 @@
                     <h4 class="mb-1">{{ assignment.title }}</h4>
                     <p class="text-muted mb-2">
                         <span class="badge bg-primary me-2">{{ assignment.subject }}</span>
-                        Submitted: {{ submission.submitted_at.strftime('%d %B %Y, %H:%M') if submission.submitted_at else 'N/A' }}
+                        Submitted: {{ (submission.submitted_at|sgt).strftime('%d %B %Y, %H:%M') if submission.submitted_at else 'N/A' }} SGT
                     </p>
                     <div>
                         {% if submission.status == 'reviewed' %}

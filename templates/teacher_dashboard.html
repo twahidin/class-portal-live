@@ -172,7 +172,7 @@
                         <br><small class="text-muted">{{ sub.student.student_id if sub.student else '' }}</small>
                     </td>
                     <td>{{ sub.assignment.title if sub.assignment else 'Unknown' }}</td>
-                    <td>{{ sub.submitted_at.strftime('%d %b, %H:%M') if sub.submitted_at else 'N/A' }}</td>
+                    <td>{{ (sub.submitted_at|sgt).strftime('%d %b, %H:%M') if sub.submitted_at else 'N/A' }} SGT</td>
                     <td>
                         {% if sub.status == 'ai_reviewed' %}
                         <span class="badge bg-info"><i class="bi bi-robot me-1"></i>AI Reviewed</span>

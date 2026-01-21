@@ -68,7 +68,7 @@
                 <div class="submission-meta">
                     <span><i class="bi bi-journal me-1"></i>{{ submission.assignment.subject if submission.assignment else 'N/A' }}</span>
                     {% if submission.submitted_at %}
-                    <span><i class="bi bi-clock me-1"></i>Submitted: {{ submission.submitted_at.strftime('%d %b %Y, %H:%M') }}</span>
+                    <span><i class="bi bi-clock me-1"></i>Submitted: {{ (submission.submitted_at|sgt).strftime('%d %b %Y, %H:%M') }} SGT</span>
                     {% endif %}
                     {% if submission.teacher_review and submission.teacher_review.final_score is defined %}
                     <span class="score"><i class="bi bi-star-fill me-1"></i>Score: {{ submission.teacher_review.final_score }}/{{ submission.assignment.total_marks if submission.assignment else '?' }}</span>

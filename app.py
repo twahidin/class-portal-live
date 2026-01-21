@@ -4,7 +4,7 @@ from flask_limiter.util import get_remote_address
 from functools import wraps
 import os
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models import db, Student, Teacher, Message, Class, Assignment, Submission
 from utils.auth import hash_password, verify_password, generate_assignment_id, generate_submission_id, encrypt_api_key, decrypt_api_key
 from utils.ai_marking import get_teacher_ai_service, mark_submission
@@ -30,6 +30,26 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
 
 # Initialize database
 db.init_app(app)
+
+# ============================================================================
+# JINJA2 FILTERS
+# ============================================================================
+
+# Singapore timezone (UTC+8)
+SGT = timezone(timedelta(hours=8))
+
+@app.template_filter('sgt')
+def sgt_filter(dt):
+    """Convert UTC datetime to Singapore time (SGT, UTC+8)"""
+    if dt is None:
+        return None
+    if isinstance(dt, datetime):
+        # If datetime is naive (no timezone), assume it's UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        # Convert to Singapore time
+        return dt.astimezone(SGT)
+    return dt
 
 # Initialize rate limiter
 limiter = Limiter(
@@ -1760,6 +1780,7 @@ def save_review_feedback(submission_id):
             'questions': data.get('questions', {}),
             'overall_feedback': data.get('overall_feedback', ''),
             'total_marks': data.get('total_marks'),
+            'total_marks_max': data.get('total_marks_max'),
             'edited_at': datetime.utcnow(),
             'edited_by': session['teacher_id']
         }
