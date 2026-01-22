@@ -1071,3 +1071,355 @@ def generate_assignment_pdf(assignment: dict, teacher: dict = None) -> bytes:
     except Exception as e:
         logger.error(f"Error generating assignment PDF: {e}")
         return None
+
+
+def generate_class_student_list_pdf(class_id: str, class_name: str, students: list, teacher: dict = None) -> bytes:
+    """
+    Generate a PDF with student ID and name for a class (no passwords).
+    This is for teachers to share with their class.
+    
+    Args:
+        class_id: The class ID
+        class_name: The class name/level
+        students: List of student documents with student_id and name
+        teacher: Optional teacher document
+    
+    Returns:
+        PDF content as bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+    
+    styles = get_styles()
+    story = []
+    
+    # Title
+    story.append(Paragraph(f"Student List - {class_id}", styles['Title_Custom']))
+    if class_name and class_name != class_id:
+        story.append(Paragraph(f"Level: {class_name}", styles['Body_Custom']))
+    story.append(Spacer(1, 5))
+    
+    # Info box
+    info_data = [
+        ['Class:', class_id, 'Total Students:', str(len(students))],
+        ['Generated:', datetime.utcnow().strftime('%d %B %Y'), 'Teacher:', teacher.get('name', 'N/A') if teacher else 'N/A'],
+    ]
+    
+    info_table = Table(info_data, colWidths=[2.5*cm, 5.5*cm, 3*cm, 5*cm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('TEXTCOLOR', (0, 0), (-1, -1), TEXT_COLOR),
+        ('BACKGROUND', (0, 0), (-1, -1), LIGHT_GRAY),
+        ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+        ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+        ('PADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 20))
+    
+    # Student list table
+    story.append(Paragraph("Student List", styles['Heading_Custom']))
+    
+    # Sort students by name
+    sorted_students = sorted(students, key=lambda s: s.get('name', '').lower())
+    
+    # Table headers
+    table_data = [['#', 'Student ID', 'Name']]
+    
+    # Add rows for each student
+    for idx, student in enumerate(sorted_students, 1):
+        table_data.append([
+            str(idx),
+            student.get('student_id', 'N/A'),
+            student.get('name', 'Unknown')
+        ])
+    
+    # Create table
+    student_table = Table(table_data, colWidths=[1.5*cm, 4*cm, 10.5*cm])
+    student_table.setStyle(TableStyle([
+        # Header row
+        ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        # Data rows
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, LIGHT_GRAY]),
+        # Borders
+        ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+        ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+        # Alignment
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        # Padding
+        ('PADDING', (0, 0), (-1, -1), 8),
+    ]))
+    story.append(student_table)
+    
+    # Footer
+    story.append(Spacer(1, 30))
+    story.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR))
+    story.append(Spacer(1, 5))
+    story.append(Paragraph(
+        f"Generated: {datetime.utcnow().strftime('%d %B %Y, %H:%M UTC')} | This list contains Student ID and Name only - no passwords included",
+        styles['Footer']
+    ))
+    
+    try:
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Error generating class student list PDF: {e}")
+        raise
+
+
+def generate_duplicate_report_pdf(duplicates: list, resolved_mappings: list = None) -> bytes:
+    """
+    Generate a PDF report showing duplicate students and their resolution.
+    
+    Args:
+        duplicates: List of duplicate groups, each containing students with same name
+        resolved_mappings: Optional list of resolved ID mappings (old_id -> new_id)
+    
+    Returns:
+        PDF content as bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+    
+    styles = get_styles()
+    story = []
+    
+    # Title
+    story.append(Paragraph("Duplicate Students Report", styles['Title_Custom']))
+    story.append(Spacer(1, 5))
+    
+    # Summary
+    total_duplicates = sum(len(group) for group in duplicates)
+    story.append(Paragraph(f"Total duplicate entries found: {total_duplicates}", styles['Body_Custom']))
+    story.append(Paragraph(f"Number of duplicate name groups: {len(duplicates)}", styles['Body_Custom']))
+    story.append(Paragraph(f"Generated: {datetime.utcnow().strftime('%d %B %Y, %H:%M UTC')}", styles['Body_Custom']))
+    story.append(Spacer(1, 15))
+    
+    if not duplicates:
+        story.append(Paragraph("No duplicate students found.", styles['Heading_Custom']))
+    else:
+        story.append(Paragraph("Duplicate Groups", styles['Heading_Custom']))
+        
+        for i, group in enumerate(duplicates, 1):
+            # Group header
+            name = group[0].get('name', 'Unknown') if group else 'Unknown'
+            story.append(Paragraph(f"Group {i}: {name} ({len(group)} accounts)", styles['SubHeading']))
+            
+            # Table for this group
+            table_data = [['Student ID', 'Name', 'Class', 'Created At', 'Status']]
+            
+            # Sort by created_at to show oldest first
+            sorted_group = sorted(group, key=lambda s: s.get('created_at', datetime.min))
+            
+            for idx, student in enumerate(sorted_group):
+                created = student.get('created_at')
+                if isinstance(created, datetime):
+                    created_str = created.strftime('%Y-%m-%d %H:%M')
+                else:
+                    created_str = 'Unknown'
+                
+                status = 'KEEP (Oldest)' if idx == 0 else 'Duplicate'
+                
+                table_data.append([
+                    student.get('student_id', 'N/A'),
+                    student.get('name', 'Unknown'),
+                    student.get('class', '-'),
+                    created_str,
+                    status
+                ])
+            
+            group_table = Table(table_data, colWidths=[3*cm, 4.5*cm, 2*cm, 4*cm, 2.5*cm])
+            group_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+                ('TEXTCOLOR', (0, 0), (-1, 0), white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, LIGHT_GRAY]),
+                ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+                ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('PADDING', (0, 0), (-1, -1), 5),
+                # Highlight the "KEEP" row
+                ('BACKGROUND', (-1, 1), (-1, 1), HexColor('#d4edda')),
+            ]))
+            story.append(group_table)
+            story.append(Spacer(1, 15))
+    
+    # Resolved mappings section if provided
+    if resolved_mappings:
+        story.append(PageBreak())
+        story.append(Paragraph("Resolved ID Mappings", styles['Heading_Custom']))
+        story.append(Paragraph(
+            "The following student IDs have been merged. The older ID is now the active account.",
+            styles['Body_Custom']
+        ))
+        story.append(Spacer(1, 10))
+        
+        mapping_data = [['Student Name', 'Kept ID (Older)', 'Removed ID (Newer)']]
+        for mapping in resolved_mappings:
+            mapping_data.append([
+                mapping.get('name', 'Unknown'),
+                mapping.get('kept_id', 'N/A'),
+                mapping.get('removed_id', 'N/A')
+            ])
+        
+        mapping_table = Table(mapping_data, colWidths=[6*cm, 5*cm, 5*cm])
+        mapping_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), SUCCESS_COLOR),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, HexColor('#d4edda')]),
+            ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+            ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('PADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(mapping_table)
+    
+    # Footer
+    story.append(Spacer(1, 30))
+    story.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR))
+    story.append(Spacer(1, 5))
+    story.append(Paragraph(
+        f"Generated: {datetime.utcnow().strftime('%d %B %Y, %H:%M UTC')}",
+        styles['Footer']
+    ))
+    
+    try:
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Error generating duplicate report PDF: {e}")
+        raise
+
+
+def generate_affected_teachers_report_pdf(affected_teachers: list, resolved_mappings: list) -> bytes:
+    """
+    Generate a PDF report for teachers affected by duplicate student resolution.
+    
+    Args:
+        affected_teachers: List of teacher documents
+        resolved_mappings: List of resolved ID mappings with student info
+    
+    Returns:
+        PDF content as bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+    
+    styles = get_styles()
+    story = []
+    
+    # Title
+    story.append(Paragraph("Student ID Update Notice", styles['Title_Custom']))
+    story.append(Spacer(1, 5))
+    
+    story.append(Paragraph(
+        "The following students had duplicate accounts that have been merged. "
+        "Please use the 'Current ID' for all future reference.",
+        styles['Body_Custom']
+    ))
+    story.append(Spacer(1, 15))
+    
+    # Affected teachers list
+    if affected_teachers:
+        teacher_names = [t.get('name', t.get('teacher_id', 'Unknown')) for t in affected_teachers]
+        story.append(Paragraph(f"Affected Teachers: {', '.join(teacher_names)}", styles['Body_Custom']))
+        story.append(Spacer(1, 15))
+    
+    # Resolved mappings table
+    story.append(Paragraph("Updated Student IDs", styles['Heading_Custom']))
+    
+    table_data = [['Student Name', 'Current ID', 'Old ID (No longer valid)', 'Class']]
+    for mapping in resolved_mappings:
+        table_data.append([
+            mapping.get('name', 'Unknown'),
+            mapping.get('kept_id', 'N/A'),
+            mapping.get('removed_id', 'N/A'),
+            mapping.get('class', '-')
+        ])
+    
+    update_table = Table(table_data, colWidths=[5*cm, 3.5*cm, 4*cm, 3.5*cm])
+    update_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, LIGHT_GRAY]),
+        ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+        ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+        ('ALIGN', (1, 0), (2, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('PADDING', (0, 0), (-1, -1), 6),
+        # Highlight the kept ID column
+        ('BACKGROUND', (1, 1), (1, -1), HexColor('#d4edda')),
+        # Strikethrough effect for old IDs
+        ('TEXTCOLOR', (2, 1), (2, -1), HexColor('#999999')),
+    ]))
+    story.append(update_table)
+    
+    # Important note
+    story.append(Spacer(1, 20))
+    note_data = [[Paragraph(
+        "<b>Important:</b> Students should now use their <b>Current ID</b> to log in. "
+        "The old ID will no longer work. Student passwords remain unchanged.",
+        styles['Body_Custom']
+    )]]
+    note_table = Table(note_data, colWidths=[16*cm])
+    note_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), HexColor('#fff3cd')),
+        ('BOX', (0, 0), (-1, -1), 1, WARNING_COLOR),
+        ('PADDING', (0, 0), (-1, -1), 10),
+    ]))
+    story.append(note_table)
+    
+    # Footer
+    story.append(Spacer(1, 30))
+    story.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR))
+    story.append(Spacer(1, 5))
+    story.append(Paragraph(
+        f"Generated: {datetime.utcnow().strftime('%d %B %Y, %H:%M UTC')}",
+        styles['Footer']
+    ))
+    
+    try:
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Error generating affected teachers report PDF: {e}")
+        raise

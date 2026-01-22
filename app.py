@@ -3978,6 +3978,515 @@ def reset_prompts():
 
 
 # ============================================================================
+# ADMIN REPORTS AND DUPLICATE MANAGEMENT
+# ============================================================================
+
+@app.route('/admin/api/class-report/<class_id>/pdf')
+@admin_required
+def generate_class_student_list(class_id):
+    """Generate a PDF report with student ID and name for a class"""
+    try:
+        from utils.pdf_generator import generate_class_student_list_pdf
+        
+        # Get class info
+        class_doc = Class.find_one({'class_id': class_id})
+        if not class_doc:
+            return jsonify({'error': 'Class not found'}), 404
+        
+        # Get students in this class
+        students = list(Student.find({'class': class_id}))
+        
+        if not students:
+            return jsonify({'error': 'No students found in this class'}), 404
+        
+        # Get optional teacher info (from query param)
+        teacher = None
+        teacher_id = request.args.get('teacher_id')
+        if teacher_id:
+            teacher = Teacher.find_one({'teacher_id': teacher_id})
+        
+        # Generate PDF
+        pdf_bytes = generate_class_student_list_pdf(
+            class_id=class_id,
+            class_name=class_doc.get('name', ''),
+            students=students,
+            teacher=teacher
+        )
+        
+        # Return PDF as download
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename=class_{class_id}_students.pdf'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating class report: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/api/teaching-group-report/<group_id>/pdf')
+@admin_required
+def generate_teaching_group_student_list(group_id):
+    """Generate a PDF report with student ID and name for a teaching group"""
+    try:
+        from utils.pdf_generator import generate_class_student_list_pdf
+        
+        # Get teaching group
+        group = TeachingGroup.find_one({'group_id': group_id})
+        if not group:
+            return jsonify({'error': 'Teaching group not found'}), 404
+        
+        # Get students in this group
+        student_ids = group.get('student_ids', [])
+        students = list(Student.find({'student_id': {'$in': student_ids}}))
+        
+        if not students:
+            return jsonify({'error': 'No students found in this teaching group'}), 404
+        
+        # Get teacher info
+        teacher = Teacher.find_one({'teacher_id': group.get('teacher_id')})
+        
+        # Generate PDF using the same function but with group name
+        pdf_bytes = generate_class_student_list_pdf(
+            class_id=group.get('name', group_id),
+            class_name=f"Teaching Group - {group.get('class_id', '')}",
+            students=students,
+            teacher=teacher
+        )
+        
+        # Return PDF as download
+        safe_name = group.get('name', group_id).replace(' ', '_')
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': f'attachment; filename=teaching_group_{safe_name}_students.pdf'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating teaching group report: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/api/duplicates')
+@admin_required
+def get_duplicate_students():
+    """Find students with duplicate names"""
+    try:
+        # Aggregate to find duplicate names
+        pipeline = [
+            {
+                '$group': {
+                    '_id': {'$toLower': '$name'},
+                    'students': {'$push': {
+                        'student_id': '$student_id',
+                        'name': '$name',
+                        'class': '$class',
+                        'teachers': '$teachers',
+                        'created_at': '$created_at'
+                    }},
+                    'count': {'$sum': 1}
+                }
+            },
+            {
+                '$match': {'count': {'$gt': 1}}
+            },
+            {
+                '$sort': {'count': -1}
+            }
+        ]
+        
+        duplicates = list(db.db.students.aggregate(pipeline))
+        
+        # Format the response
+        duplicate_groups = []
+        for dup in duplicates:
+            # Sort students by created_at (oldest first)
+            students = dup['students']
+            students.sort(key=lambda s: s.get('created_at') or datetime.min)
+            duplicate_groups.append({
+                'name': dup['_id'],
+                'count': dup['count'],
+                'students': students
+            })
+        
+        return jsonify({
+            'success': True,
+            'total_groups': len(duplicate_groups),
+            'duplicates': duplicate_groups
+        })
+        
+    except Exception as e:
+        logger.error(f"Error finding duplicates: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/api/duplicates/report/pdf')
+@admin_required
+def generate_duplicate_report():
+    """Generate a PDF report of duplicate students"""
+    try:
+        from utils.pdf_generator import generate_duplicate_report_pdf
+        
+        # Get duplicates
+        pipeline = [
+            {
+                '$group': {
+                    '_id': {'$toLower': '$name'},
+                    'students': {'$push': {
+                        'student_id': '$student_id',
+                        'name': '$name',
+                        'class': '$class',
+                        'teachers': '$teachers',
+                        'created_at': '$created_at'
+                    }},
+                    'count': {'$sum': 1}
+                }
+            },
+            {
+                '$match': {'count': {'$gt': 1}}
+            },
+            {
+                '$sort': {'count': -1}
+            }
+        ]
+        
+        duplicates = list(db.db.students.aggregate(pipeline))
+        
+        # Format for PDF
+        duplicate_groups = [dup['students'] for dup in duplicates]
+        
+        # Generate PDF
+        pdf_bytes = generate_duplicate_report_pdf(duplicate_groups)
+        
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': 'attachment; filename=duplicate_students_report.pdf'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating duplicate report: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/api/duplicates/resolve', methods=['POST'])
+@admin_required
+def resolve_duplicates():
+    """
+    Resolve duplicate students by keeping the older account and removing newer ones.
+    Updates all references (submissions, messages, teaching groups) to use the kept ID.
+    """
+    try:
+        data = request.get_json()
+        duplicate_groups = data.get('groups', [])
+        
+        if not duplicate_groups:
+            return jsonify({'error': 'No duplicate groups provided'}), 400
+        
+        resolved_mappings = []
+        affected_teacher_ids = set()
+        
+        for group in duplicate_groups:
+            if len(group) < 2:
+                continue
+            
+            # Sort by created_at to find the oldest (the one to keep)
+            sorted_group = sorted(group, key=lambda s: s.get('created_at') or datetime.min)
+            keep_student = sorted_group[0]
+            remove_students = sorted_group[1:]
+            
+            keep_id = keep_student.get('student_id')
+            
+            for remove_student in remove_students:
+                remove_id = remove_student.get('student_id')
+                
+                if not remove_id or not keep_id:
+                    continue
+                
+                # Track affected teachers
+                teachers = remove_student.get('teachers', [])
+                for t in teachers:
+                    affected_teacher_ids.add(t)
+                
+                # Also add teachers from the kept student
+                keep_teachers = keep_student.get('teachers', [])
+                for t in keep_teachers:
+                    affected_teacher_ids.add(t)
+                
+                # Update submissions to use the kept ID
+                Submission.update_many(
+                    {'student_id': remove_id},
+                    {'$set': {'student_id': keep_id, 'original_student_id': remove_id}}
+                )
+                
+                # Update messages
+                Message.update_many(
+                    {'student_id': remove_id},
+                    {'$set': {'student_id': keep_id}}
+                )
+                
+                # Update teaching groups
+                db.db.teaching_groups.update_many(
+                    {'student_ids': remove_id},
+                    {'$set': {'student_ids.$': keep_id}}
+                )
+                
+                # Merge teachers list to the kept account
+                Student.update_one(
+                    {'student_id': keep_id},
+                    {'$addToSet': {'teachers': {'$each': teachers}}}
+                )
+                
+                # Delete the duplicate student account
+                db.db.students.delete_one({'student_id': remove_id})
+                
+                resolved_mappings.append({
+                    'name': remove_student.get('name'),
+                    'kept_id': keep_id,
+                    'removed_id': remove_id,
+                    'class': remove_student.get('class', '')
+                })
+        
+        # Get affected teachers for the report
+        affected_teachers = list(Teacher.find({'teacher_id': {'$in': list(affected_teacher_ids)}}))
+        
+        return jsonify({
+            'success': True,
+            'resolved_count': len(resolved_mappings),
+            'resolved_mappings': resolved_mappings,
+            'affected_teachers': [{'teacher_id': t['teacher_id'], 'name': t.get('name')} for t in affected_teachers]
+        })
+        
+    except Exception as e:
+        logger.error(f"Error resolving duplicates: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/api/duplicates/affected-teachers-report/pdf', methods=['POST'])
+@admin_required
+def generate_affected_teachers_report():
+    """Generate a PDF report for teachers affected by duplicate resolution"""
+    try:
+        from utils.pdf_generator import generate_affected_teachers_report_pdf
+        
+        data = request.get_json()
+        resolved_mappings = data.get('resolved_mappings', [])
+        affected_teacher_ids = data.get('affected_teacher_ids', [])
+        
+        if not resolved_mappings:
+            return jsonify({'error': 'No resolved mappings provided'}), 400
+        
+        # Get teacher details
+        affected_teachers = list(Teacher.find({'teacher_id': {'$in': affected_teacher_ids}}))
+        
+        # Generate PDF
+        pdf_bytes = generate_affected_teachers_report_pdf(affected_teachers, resolved_mappings)
+        
+        return Response(
+            pdf_bytes,
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': 'attachment; filename=affected_teachers_report.pdf'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating affected teachers report: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/api/class-to-teaching-group', methods=['POST'])
+@admin_required
+def convert_class_to_teaching_group():
+    """Convert a class to a teaching group"""
+    try:
+        data = request.get_json()
+        class_id = data.get('class_id')
+        teacher_id = data.get('teacher_id')
+        group_name = data.get('group_name')
+        
+        if not class_id or not teacher_id:
+            return jsonify({'error': 'Class ID and Teacher ID are required'}), 400
+        
+        # Get class info
+        class_doc = Class.find_one({'class_id': class_id})
+        if not class_doc:
+            return jsonify({'error': 'Class not found'}), 404
+        
+        # Get teacher info
+        teacher = Teacher.find_one({'teacher_id': teacher_id})
+        if not teacher:
+            return jsonify({'error': 'Teacher not found'}), 404
+        
+        # Get all students in the class
+        students = list(Student.find({'class': class_id}))
+        if not students:
+            return jsonify({'error': 'No students found in this class'}), 404
+        
+        student_ids = [s['student_id'] for s in students]
+        
+        # Generate unique group ID
+        import uuid
+        group_id = f"TG-{uuid.uuid4().hex[:8].upper()}"
+        
+        # Use provided name or generate one
+        if not group_name:
+            group_name = f"{class_id} - {teacher.get('name', teacher_id)}"
+        
+        # Create teaching group
+        group_doc = {
+            'group_id': group_id,
+            'name': group_name,
+            'class_id': class_id,
+            'teacher_id': teacher_id,
+            'student_ids': student_ids,
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow(),
+            'converted_from_class': True
+        }
+        
+        TeachingGroup.insert_one(group_doc)
+        
+        return jsonify({
+            'success': True,
+            'group_id': group_id,
+            'group_name': group_name,
+            'student_count': len(student_ids),
+            'message': f'Teaching group "{group_name}" created with {len(student_ids)} students from class {class_id}'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error converting class to teaching group: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/import_students_with_reconciliation', methods=['POST'])
+@admin_required
+def import_students_with_reconciliation():
+    """
+    Import students with duplicate name detection.
+    If a student with the same name exists, use the existing (older) ID instead of creating a new one.
+    """
+    try:
+        data = request.get_json()
+        students_data = data.get('students', [])
+        reconcile_by_name = data.get('reconcile_by_name', True)
+        
+        if not students_data:
+            return jsonify({'error': 'No student data provided'}), 400
+        
+        imported = 0
+        updated = 0
+        reconciled = []
+        errors = []
+        
+        for s in students_data:
+            try:
+                student_id = s.get('student_id', '').upper().strip()
+                name = s.get('name', '').strip()
+                
+                if not student_id:
+                    errors.append(f"Missing student_id for {name or 'unknown'}")
+                    continue
+                
+                if not name:
+                    errors.append(f"Missing name for {student_id}")
+                    continue
+                
+                # Check if student ID already exists
+                existing_by_id = Student.find_one({'student_id': student_id})
+                
+                if existing_by_id:
+                    # Student ID exists, update if needed
+                    update_fields = {}
+                    if s.get('class'):
+                        update_fields['class'] = s.get('class')
+                    if s.get('teachers'):
+                        update_fields['teachers'] = s.get('teachers', [])
+                    
+                    if update_fields:
+                        Student.update_one(
+                            {'student_id': student_id},
+                            {'$set': update_fields}
+                        )
+                        updated += 1
+                    else:
+                        errors.append(f"{student_id} already exists (no updates)")
+                    continue
+                
+                # Check for existing student with same name (for reconciliation)
+                if reconcile_by_name:
+                    existing_by_name = Student.find_one({
+                        'name': {'$regex': f'^{name}$', '$options': 'i'}
+                    })
+                    
+                    if existing_by_name:
+                        # Found existing student with same name - reconcile
+                        existing_id = existing_by_name['student_id']
+                        
+                        # Update the existing student's class/teachers if provided
+                        update_fields = {}
+                        if s.get('class') and s.get('class') != existing_by_name.get('class'):
+                            update_fields['class'] = s.get('class')
+                        if s.get('teachers'):
+                            # Merge teachers
+                            existing_teachers = existing_by_name.get('teachers', [])
+                            new_teachers = list(set(existing_teachers + s.get('teachers', [])))
+                            if new_teachers != existing_teachers:
+                                update_fields['teachers'] = new_teachers
+                        
+                        if update_fields:
+                            Student.update_one(
+                                {'student_id': existing_id},
+                                {'$set': update_fields}
+                            )
+                        
+                        reconciled.append({
+                            'attempted_id': student_id,
+                            'existing_id': existing_id,
+                            'name': name
+                        })
+                        continue
+                
+                # No conflicts - create new student
+                password = s.get('password', 'student123')
+                
+                Student.insert_one({
+                    'student_id': student_id,
+                    'name': name,
+                    'class': s.get('class', ''),
+                    'password_hash': hash_password(password),
+                    'teachers': s.get('teachers', []),
+                    'created_at': datetime.utcnow()
+                })
+                
+                imported += 1
+                
+            except Exception as e:
+                errors.append(f"Error with {s.get('student_id', 'unknown')}: {str(e)}")
+        
+        return jsonify({
+            'success': True,
+            'imported': imported,
+            'updated': updated,
+            'reconciled': reconciled,
+            'reconciled_count': len(reconciled),
+            'errors': errors
+        })
+        
+    except Exception as e:
+        logger.error(f"Error importing students with reconciliation: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
 # PWA AND PUSH NOTIFICATION ROUTES
 # ============================================================================
 

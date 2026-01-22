@@ -100,6 +100,11 @@
                 <i class="bi bi-robot me-1"></i>AI Prompts
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="reports-tab" data-bs-toggle="tab" data-bs-target="#reports" type="button">
+                <i class="bi bi-file-earmark-pdf me-1"></i>Reports & Tools
+            </button>
+        </li>
     </ul>
 
     <!-- Tab Content -->
@@ -454,11 +459,19 @@
                                         {% endif %}
                                         <small class="text-primary d-block">{{ c.student_count or 0 }} students</small>
                                     </div>
-                                    <button type="button" class="btn btn-outline-danger btn-sm delete-class-btn" 
-                                            data-class-id="{{ c.class_id }}"
-                                            data-student-count="{{ c.student_count or 0 }}">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
+                                    <div class="btn-group btn-group-sm">
+                                        <button type="button" class="btn btn-outline-primary download-class-pdf-btn" 
+                                                data-class-id="{{ c.class_id }}"
+                                                title="Download Student List PDF">
+                                            <i class="bi bi-file-pdf"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger delete-class-btn" 
+                                                data-class-id="{{ c.class_id }}"
+                                                data-student-count="{{ c.student_count or 0 }}"
+                                                title="Delete Class">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 {% else %}
                                 <div class="list-group-item text-muted text-center">No classes yet</div>
@@ -591,6 +604,169 @@
                             </div>
                             
                             <div id="prompts-result" class="mt-3" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Reports & Tools Tab -->
+        <div class="tab-pane fade" id="reports" role="tabpanel">
+            <div class="row g-4">
+                <!-- Class Student List PDF -->
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Generate Class Student List</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Generate a PDF with student IDs and names for a class. No passwords included - safe to share with students.
+                            </p>
+                            <form id="class-report-form">
+                                <div class="mb-3">
+                                    <label class="form-label">Select Class *</label>
+                                    <select class="form-select" id="report_class_id" required>
+                                        <option value="">Choose a class...</option>
+                                        {% for c in classes %}
+                                        <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %} - {{ c.student_count or 0 }} students</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Teacher (optional)</label>
+                                    <select class="form-select" id="report_teacher_id">
+                                        <option value="">No teacher specified</option>
+                                        {% for t in teachers %}
+                                        <option value="{{ t.teacher_id }}">{{ t.name }} ({{ t.teacher_id }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-download me-1"></i>Download PDF
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Teaching Group Student List PDF -->
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>Generate Teaching Group List</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Generate a PDF with student IDs and names for a teaching group.
+                            </p>
+                            <form id="tg-report-form">
+                                <div class="mb-3">
+                                    <label class="form-label">Select Teaching Group *</label>
+                                    <select class="form-select" id="report_tg_id" required>
+                                        <option value="">Loading teaching groups...</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-download me-1"></i>Download PDF
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Convert Class to Teaching Group -->
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Convert Class to Teaching Group</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Create a teaching group from all students in a class. The original class remains unchanged.
+                            </p>
+                            <form id="convert-class-form">
+                                <div class="mb-3">
+                                    <label class="form-label">Select Class *</label>
+                                    <select class="form-select" id="convert_class_id" required>
+                                        <option value="">Choose a class...</option>
+                                        {% for c in classes %}
+                                        <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %} - {{ c.student_count or 0 }} students</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Assign to Teacher *</label>
+                                    <select class="form-select" id="convert_teacher_id" required>
+                                        <option value="">Select a teacher...</option>
+                                        {% for t in teachers %}
+                                        <option value="{{ t.teacher_id }}">{{ t.name }} ({{ t.teacher_id }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Group Name (optional)</label>
+                                    <input type="text" class="form-control" id="convert_group_name" placeholder="Auto-generated if empty">
+                                </div>
+                                <button type="submit" class="btn btn-warning">
+                                    <i class="bi bi-arrow-repeat me-1"></i>Create Teaching Group
+                                </button>
+                            </form>
+                            <div id="convert-class-result" class="mt-3" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Duplicate Students Detection -->
+                <div class="col-lg-6">
+                    <div class="card border-warning">
+                        <div class="card-header bg-warning text-dark">
+                            <h5 class="mb-0"><i class="bi bi-people me-2"></i>Duplicate Student Detection</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Find students with the same name who may have been imported multiple times with different IDs.
+                            </p>
+                            <div class="d-flex gap-2 mb-3">
+                                <button class="btn btn-outline-warning" id="scan-duplicates-btn">
+                                    <i class="bi bi-search me-1"></i>Scan for Duplicates
+                                </button>
+                                <button class="btn btn-outline-secondary" id="download-duplicates-report-btn" disabled>
+                                    <i class="bi bi-file-pdf me-1"></i>Download Report
+                                </button>
+                            </div>
+                            <div id="duplicates-result" style="display: none;">
+                                <div class="alert alert-info mb-3">
+                                    <strong id="duplicates-count">0</strong> duplicate name groups found
+                                </div>
+                                <div id="duplicates-list" class="border rounded" style="max-height: 300px; overflow-y: auto;">
+                                    <!-- Duplicates will be listed here -->
+                                </div>
+                                <div class="mt-3">
+                                    <button class="btn btn-danger" id="resolve-duplicates-btn" disabled>
+                                        <i class="bi bi-check2-all me-1"></i>Resolve All Duplicates (Keep Oldest IDs)
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Import with Reconciliation Info -->
+                <div class="col-12">
+                    <div class="card border-info">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Smart Import with Duplicate Prevention</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="mb-2">
+                                When importing students, use <strong>"Import with Reconciliation"</strong> in the Students tab to automatically:
+                            </p>
+                            <ul class="mb-0">
+                                <li>Detect if a student with the same name already exists</li>
+                                <li>Use the existing (older) student ID instead of creating a duplicate</li>
+                                <li>Merge class assignments and teacher associations</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
@@ -1399,6 +1575,14 @@
 
     // ================== CLASS MANAGEMENT ==================
     
+    // Download class student list PDF
+    document.querySelectorAll('.download-class-pdf-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const classId = btn.dataset.classId;
+            window.open(`/admin/api/class-report/${classId}/pdf`, '_blank');
+        });
+    });
+    
     document.querySelectorAll('.delete-class-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const classId = btn.dataset.classId;
@@ -2073,6 +2257,9 @@
                         <span class="badge bg-primary">${g.student_count || g.student_ids?.length || 0} students</span>
                     </td>
                     <td>
+                        <button class="btn btn-outline-primary btn-sm download-tg-pdf-btn me-1" data-group-id="${g.group_id}" title="Download Student List PDF">
+                            <i class="bi bi-file-pdf"></i>
+                        </button>
                         <button class="btn btn-outline-info btn-sm view-tg-btn me-1" data-group-id="${g.group_id}" title="View Students">
                             <i class="bi bi-eye"></i>
                         </button>
@@ -2091,6 +2278,14 @@
     }
     
     function attachTeachingGroupListeners() {
+        // Download PDF for teaching group
+        document.querySelectorAll('.download-tg-pdf-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const groupId = btn.dataset.groupId;
+                window.open(`/admin/api/teaching-group-report/${groupId}/pdf`, '_blank');
+            });
+        });
+        
         // View students in teaching group
         document.querySelectorAll('.view-tg-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
@@ -2140,5 +2335,303 @@
     if (window.location.hash === '#teaching-groups') {
         document.getElementById('teaching-groups-tab').click();
     }
+
+    // ================== REPORTS & TOOLS ==================
+    
+    // Load teaching groups for report dropdown when tab is shown
+    document.getElementById('reports-tab').addEventListener('shown.bs.tab', loadTeachingGroupsForReport);
+    
+    async function loadTeachingGroupsForReport() {
+        const select = document.getElementById('report_tg_id');
+        try {
+            const response = await fetch('/admin/api/teaching-groups');
+            const data = await response.json();
+            
+            if (data.groups && data.groups.length > 0) {
+                select.innerHTML = '<option value="">Choose a teaching group...</option>' +
+                    data.groups.map(g => `<option value="${g.group_id}">${g.name} (${g.student_count || 0} students)</option>`).join('');
+            } else {
+                select.innerHTML = '<option value="">No teaching groups available</option>';
+            }
+        } catch (e) {
+            select.innerHTML = '<option value="">Error loading teaching groups</option>';
+        }
+    }
+    
+    // Generate Class Student List PDF
+    document.getElementById('class-report-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const classId = document.getElementById('report_class_id').value;
+        const teacherId = document.getElementById('report_teacher_id').value;
+        
+        if (!classId) {
+            alert('Please select a class');
+            return;
+        }
+        
+        let url = `/admin/api/class-report/${classId}/pdf`;
+        if (teacherId) {
+            url += `?teacher_id=${teacherId}`;
+        }
+        
+        window.open(url, '_blank');
+    });
+    
+    // Generate Teaching Group Student List PDF
+    document.getElementById('tg-report-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const groupId = document.getElementById('report_tg_id').value;
+        
+        if (!groupId) {
+            alert('Please select a teaching group');
+            return;
+        }
+        
+        window.open(`/admin/api/teaching-group-report/${groupId}/pdf`, '_blank');
+    });
+    
+    // Convert Class to Teaching Group
+    document.getElementById('convert-class-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const classId = document.getElementById('convert_class_id').value;
+        const teacherId = document.getElementById('convert_teacher_id').value;
+        const groupName = document.getElementById('convert_group_name').value.trim();
+        
+        if (!classId || !teacherId) {
+            showResult('convert-class-result', 'Please select both a class and a teacher', 'warning');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/admin/api/class-to-teaching-group', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    class_id: classId,
+                    teacher_id: teacherId,
+                    group_name: groupName || null
+                })
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                showResult('convert-class-result', 
+                    `Teaching group "${data.group_name}" created with ${data.student_count} students!`, 'success');
+                document.getElementById('convert-class-form').reset();
+                // Refresh teaching groups dropdown
+                loadTeachingGroupsForReport();
+            } else {
+                showResult('convert-class-result', data.error || 'Failed to create teaching group', 'danger');
+            }
+        } catch (e) {
+            showResult('convert-class-result', 'Error creating teaching group', 'danger');
+        }
+    });
+    
+    // ================== DUPLICATE DETECTION ==================
+    
+    let currentDuplicates = [];
+    
+    document.getElementById('scan-duplicates-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('scan-duplicates-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Scanning...';
+        
+        try {
+            const response = await fetch('/admin/api/duplicates');
+            const data = await response.json();
+            
+            if (data.success) {
+                currentDuplicates = data.duplicates;
+                displayDuplicates(data.duplicates);
+                document.getElementById('duplicates-result').style.display = 'block';
+                document.getElementById('download-duplicates-report-btn').disabled = data.duplicates.length === 0;
+                document.getElementById('resolve-duplicates-btn').disabled = data.duplicates.length === 0;
+            } else {
+                alert(data.error || 'Error scanning for duplicates');
+            }
+        } catch (e) {
+            alert('Error scanning for duplicates');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-search me-1"></i>Scan for Duplicates';
+        }
+    });
+    
+    function displayDuplicates(duplicates) {
+        const countEl = document.getElementById('duplicates-count');
+        const listEl = document.getElementById('duplicates-list');
+        
+        countEl.textContent = duplicates.length;
+        
+        if (duplicates.length === 0) {
+            listEl.innerHTML = '<div class="p-3 text-center text-success"><i class="bi bi-check-circle me-2"></i>No duplicate students found!</div>';
+            return;
+        }
+        
+        listEl.innerHTML = duplicates.map((group, idx) => `
+            <div class="border-bottom p-2 ${idx % 2 === 0 ? 'bg-light' : ''}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <strong>${escapeHtml(group.name)}</strong>
+                    <span class="badge bg-warning text-dark">${group.count} accounts</span>
+                </div>
+                <div class="small text-muted mt-1">
+                    ${group.students.map((s, i) => `
+                        <span class="${i === 0 ? 'text-success fw-bold' : 'text-danger'}">
+                            ${s.student_id}${i === 0 ? ' (KEEP)' : ''}
+                        </span>
+                    `).join(' | ')}
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    // Download duplicates report PDF
+    document.getElementById('download-duplicates-report-btn').addEventListener('click', () => {
+        window.open('/admin/api/duplicates/report/pdf', '_blank');
+    });
+    
+    // Resolve duplicates
+    document.getElementById('resolve-duplicates-btn').addEventListener('click', async () => {
+        if (currentDuplicates.length === 0) {
+            alert('No duplicates to resolve');
+            return;
+        }
+        
+        const totalDuplicates = currentDuplicates.reduce((sum, g) => sum + g.count - 1, 0);
+        
+        if (!confirm(`This will:\n\n• Keep the OLDEST account for each student\n• Remove ${totalDuplicates} duplicate account(s)\n• Transfer all submissions and messages to the kept account\n\nThis cannot be undone. Continue?`)) {
+            return;
+        }
+        
+        const btn = document.getElementById('resolve-duplicates-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Resolving...';
+        
+        try {
+            // Format groups for the API
+            const groups = currentDuplicates.map(g => g.students);
+            
+            const response = await fetch('/admin/api/duplicates/resolve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ groups })
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                alert(`Successfully resolved ${data.resolved_count} duplicate(s)!\n\nAffected teachers: ${data.affected_teachers.map(t => t.name).join(', ') || 'None'}`);
+                
+                // Offer to download affected teachers report
+                if (data.resolved_mappings.length > 0 && data.affected_teachers.length > 0) {
+                    if (confirm('Would you like to download a report for affected teachers?')) {
+                        downloadAffectedTeachersReport(data.resolved_mappings, data.affected_teachers.map(t => t.teacher_id));
+                    }
+                }
+                
+                // Refresh the scan
+                document.getElementById('scan-duplicates-btn').click();
+                // Refresh student list
+                loadStudents();
+            } else {
+                alert(data.error || 'Error resolving duplicates');
+            }
+        } catch (e) {
+            alert('Error resolving duplicates');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check2-all me-1"></i>Resolve All Duplicates (Keep Oldest IDs)';
+        }
+    });
+    
+    async function downloadAffectedTeachersReport(resolvedMappings, affectedTeacherIds) {
+        try {
+            const response = await fetch('/admin/api/duplicates/affected-teachers-report/pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    resolved_mappings: resolvedMappings,
+                    affected_teacher_ids: affectedTeacherIds
+                })
+            });
+            
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'affected_teachers_report.pdf';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+            } else {
+                alert('Error downloading report');
+            }
+        } catch (e) {
+            alert('Error downloading report');
+        }
+    }
+    
+    // ================== IMPORT WITH RECONCILIATION ==================
+    
+    // Add reconciliation checkbox to import section
+    document.addEventListener('DOMContentLoaded', () => {
+        const importBtn = document.getElementById('import-excel-btn');
+        if (importBtn) {
+            const reconcileDiv = document.createElement('div');
+            reconcileDiv.className = 'form-check mt-2';
+            reconcileDiv.innerHTML = `
+                <input type="checkbox" class="form-check-input" id="reconcile-by-name" checked>
+                <label class="form-check-label small" for="reconcile-by-name">
+                    <i class="bi bi-shield-check me-1"></i>Reconcile duplicates by name (use existing student ID if name matches)
+                </label>
+            `;
+            importBtn.parentNode.insertBefore(reconcileDiv, importBtn);
+        }
+    });
+    
+    // Override the import function to support reconciliation
+    const originalImportStudents = window.importStudents;
+    window.importStudents = async function(students) {
+        const reconcile = document.getElementById('reconcile-by-name')?.checked ?? true;
+        
+        try {
+            const endpoint = reconcile ? '/admin/import_students_with_reconciliation' : '/admin/import_students';
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ students, reconcile_by_name: reconcile })
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                let message = `Imported ${data.imported} students`;
+                if (data.updated > 0) {
+                    message += `, updated ${data.updated}`;
+                }
+                if (data.reconciled_count > 0) {
+                    message += `, reconciled ${data.reconciled_count} duplicates`;
+                    // Show reconciled details
+                    const reconciled = data.reconciled;
+                    if (reconciled && reconciled.length > 0) {
+                        const details = reconciled.map(r => `${r.name}: used existing ID ${r.existing_id} instead of ${r.attempted_id}`).join('\n');
+                        console.log('Reconciled students:\n' + details);
+                    }
+                }
+                if (data.errors.length > 0) {
+                    message += `. Errors: ${data.errors.slice(0, 3).join(', ')}${data.errors.length > 3 ? '...' : ''}`;
+                }
+                
+                showResult('import-result', message, data.errors.length ? 'warning' : 'success');
+                loadStudents();
+            } else {
+                showResult('import-result', data.error, 'danger');
+            }
+        } catch (e) {
+            showResult('import-result', 'Import failed', 'danger');
+        }
+    };
 </script>
 {% endblock %}
