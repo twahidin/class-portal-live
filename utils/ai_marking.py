@@ -35,8 +35,8 @@ def analyze_submission_images(pages: list, assignment: dict, answer_key_content:
     
     Args:
         pages: List of page dictionaries with 'type' and 'data' keys
-        assignment: Assignment document with details
-        answer_key_content: Optional bytes of answer key PDF
+        assignment: Assignment document with details (including extracted text fields)
+        answer_key_content: Optional bytes of answer key PDF (fallback if no extracted text)
         teacher: Teacher document for API key
     
     Returns:
@@ -54,14 +54,45 @@ def analyze_submission_images(pages: list, assignment: dict, answer_key_content:
         # Build content array with images
         content = []
         
+        # Build additional context from reference materials and rubrics
+        additional_context = ""
+        
+        # Add reference materials text if available (for literature, history, etc.)
+        reference_materials_text = assignment.get('reference_materials_text', '')
+        if reference_materials_text:
+            additional_context += f"""
+
+REFERENCE MATERIALS (use this content to evaluate student answers):
+{reference_materials_text}
+"""
+        
+        # Add rubrics text if available (for essays, subjective answers)
+        rubrics_text = assignment.get('rubrics_text', '')
+        if rubrics_text:
+            additional_context += f"""
+
+GRADING RUBRICS (use these criteria to evaluate and score answers):
+{rubrics_text}
+"""
+        
+        # Add teacher's custom instructions
+        feedback_instructions = assignment.get('feedback_instructions', '')
+        grading_instructions = assignment.get('grading_instructions', '')
+        custom_instructions = ""
+        if feedback_instructions:
+            custom_instructions += f"\n\nFEEDBACK STYLE INSTRUCTIONS: {feedback_instructions}"
+        if grading_instructions:
+            custom_instructions += f"\n\nGRADING INSTRUCTIONS: {grading_instructions}"
+        
         # System context
         system_prompt = f"""You are an experienced teacher marking student assignments.
 
 Assignment: {assignment.get('title', 'Assignment')}
 Subject: {assignment.get('subject', 'General')}
 Total Marks: {assignment.get('total_marks', 100)}
-
+{additional_context}
 Your task is to analyze the student's handwritten/typed submission and provide detailed feedback.
+{custom_instructions}
 
 IMPORTANT RULES:
 1. If handwriting is unclear or illegible, mark that question as "needs_review": true and leave feedback blank
@@ -69,6 +100,8 @@ IMPORTANT RULES:
 3. Be constructive and encouraging in feedback
 4. Compare against the answer key if provided
 5. Award partial marks where appropriate
+6. If rubrics are provided, use them to evaluate subjective answers (essays, literature, etc.)
+7. If reference materials are provided, use them to verify factual accuracy and context
 
 Respond ONLY with valid JSON in this exact format:
 {{
@@ -90,14 +123,16 @@ Respond ONLY with valid JSON in this exact format:
     "review_notes": "notes for teacher about unclear sections"
 }}"""
 
-        # Add answer key if available
+        # Add answer key - ALWAYS use PDF vision for accuracy (critical for marking)
+        # Extracted text is stored but not used here to ensure we don't miss 
+        # formulas, diagrams, tables, or complex layouts in the answer key
         if answer_key_content:
             content.append({
                 "type": "text",
                 "text": "ANSWER KEY (use for marking):"
             })
             
-            # If PDF, encode as base64 for vision
+            # Always use PDF vision for answer key - accuracy over cost savings
             answer_key_b64 = base64.standard_b64encode(answer_key_content).decode('utf-8')
             content.append({
                 "type": "document",
@@ -107,6 +142,7 @@ Respond ONLY with valid JSON in this exact format:
                     "data": answer_key_b64
                 }
             })
+            logger.info("Using PDF vision for answer key (prioritizing accuracy for marking)")
         
         content.append({
             "type": "text",

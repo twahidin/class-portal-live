@@ -93,6 +93,134 @@
                     </div>
                 </div>
                 
+                <!-- Upload Documents - Between Basic Info and Assign To -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-file-pdf me-2"></i>Upload Documents</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <!-- Question Paper -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Question Paper *</label>
+                                {% if assignment.question_paper_id %}
+                                <div class="current-file mb-2">
+                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
+                                       target="_blank" class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-file-earmark-pdf me-1"></i>
+                                        {{ assignment.question_paper_name or 'question_paper.pdf' }}
+                                    </a>
+                                </div>
+                                {% endif %}
+                                <div class="upload-zone {% if assignment.question_paper_id %}has-file{% endif %}" id="question-zone">
+                                    <input type="file" class="form-control d-none" id="question_paper" name="question_paper" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'question')">
+                                    <label for="question_paper" class="upload-label">
+                                        <div class="upload-icon">
+                                            <i class="bi bi-file-earmark-text"></i>
+                                        </div>
+                                        <p class="mb-0 small">{% if assignment.question_paper_id %}Replace file{% else %}Upload PDF{% endif %}</p>
+                                        <span class="file-name" id="question-filename">
+                                            {% if assignment.question_paper_id %}Click to replace{% else %}Click to upload{% endif %}
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Answer Key -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Answer Key *</label>
+                                {% if assignment.answer_key_id %}
+                                <div class="current-file mb-2">
+                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='answer_key') }}" 
+                                       target="_blank" class="btn btn-outline-success btn-sm">
+                                        <i class="bi bi-file-earmark-check me-1"></i>
+                                        {{ assignment.answer_key_name or 'answer_key.pdf' }}
+                                    </a>
+                                </div>
+                                {% endif %}
+                                <div class="upload-zone {% if assignment.answer_key_id %}has-file{% endif %}" id="answer-zone">
+                                    <input type="file" class="form-control d-none" id="answer_key" name="answer_key" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'answer')">
+                                    <label for="answer_key" class="upload-label">
+                                        <div class="upload-icon answer">
+                                            <i class="bi bi-file-earmark-check"></i>
+                                        </div>
+                                        <p class="mb-0 small">{% if assignment.answer_key_id %}Replace file{% else %}Upload PDF{% endif %}</p>
+                                        <span class="file-name" id="answer-filename">
+                                            {% if assignment.answer_key_id %}Click to replace{% else %}Click to upload{% endif %}
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <!-- Reference Materials -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Reference Materials</label>
+                                {% if assignment.reference_materials_id %}
+                                <div class="current-file mb-2">
+                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='reference_materials') }}" 
+                                       target="_blank" class="btn btn-outline-purple btn-sm">
+                                        <i class="bi bi-book me-1"></i>
+                                        {{ assignment.reference_materials_name or 'reference_materials.pdf' }}
+                                    </a>
+                                </div>
+                                {% endif %}
+                                <div class="upload-zone {% if assignment.reference_materials_id %}has-file{% endif %}" id="reference-zone">
+                                    <input type="file" class="form-control d-none" id="reference_materials" name="reference_materials" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'reference')">
+                                    <label for="reference_materials" class="upload-label">
+                                        <div class="upload-icon reference">
+                                            <i class="bi bi-book"></i>
+                                        </div>
+                                        <p class="mb-0 small">{% if assignment.reference_materials_id %}Replace file{% else %}Upload PDF (optional){% endif %}</p>
+                                        <span class="file-name" id="reference-filename">
+                                            {% if assignment.reference_materials_id %}Click to replace{% else %}Click to upload{% endif %}
+                                        </span>
+                                    </label>
+                                </div>
+                                <small class="text-muted d-block mt-1">Literature, history content, passages, etc.</small>
+                            </div>
+                            
+                            <!-- Rubrics -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Rubrics</label>
+                                {% if assignment.rubrics_id %}
+                                <div class="current-file mb-2">
+                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='rubrics') }}" 
+                                       target="_blank" class="btn btn-outline-orange btn-sm">
+                                        <i class="bi bi-list-check me-1"></i>
+                                        {{ assignment.rubrics_name or 'rubrics.pdf' }}
+                                    </a>
+                                </div>
+                                {% endif %}
+                                <div class="upload-zone {% if assignment.rubrics_id %}has-file{% endif %}" id="rubrics-zone">
+                                    <input type="file" class="form-control d-none" id="rubrics" name="rubrics" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'rubrics')">
+                                    <label for="rubrics" class="upload-label">
+                                        <div class="upload-icon rubrics">
+                                            <i class="bi bi-list-check"></i>
+                                        </div>
+                                        <p class="mb-0 small">{% if assignment.rubrics_id %}Replace file{% else %}Upload PDF (optional){% endif %}</p>
+                                        <span class="file-name" id="rubrics-filename">
+                                            {% if assignment.rubrics_id %}Click to replace{% else %}Click to upload{% endif %}
+                                        </span>
+                                    </label>
+                                </div>
+                                <small class="text-muted d-block mt-1">Grading criteria for essays/subjective answers.</small>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info mt-3 mb-0">
+                            <i class="bi bi-info-circle me-2"></i>
+                            Leave fields empty to keep existing files. Upload new files to replace them.
+                            <br><small class="mt-1 d-block"><i class="bi bi-check-circle me-1"></i>Answer key uses full PDF vision for maximum accuracy. Reference materials &amp; rubrics use text extraction for efficiency.</small>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Assignment Target (Class or Teaching Group) -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -174,75 +302,6 @@
                         </div>
                     </div>
                 </div>
-                
-                <!-- PDF Documents -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-file-pdf me-2"></i>Documents</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <!-- Question Paper -->
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label fw-bold">Question Paper</label>
-                                {% if assignment.question_paper_id %}
-                                <div class="current-file mb-2">
-                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
-                                       target="_blank" class="btn btn-outline-primary btn-sm">
-                                        <i class="bi bi-file-earmark-pdf me-1"></i>
-                                        {{ assignment.question_paper_name or 'question_paper.pdf' }}
-                                    </a>
-                                </div>
-                                {% endif %}
-                                <div class="upload-zone {% if assignment.question_paper_id %}has-file{% endif %}" id="question-zone">
-                                    <input type="file" class="form-control d-none" id="question_paper" name="question_paper" 
-                                           accept=".pdf" onchange="handleFileSelect(this, 'question')">
-                                    <label for="question_paper" class="upload-label">
-                                        <div class="upload-icon">
-                                            <i class="bi bi-file-earmark-text"></i>
-                                        </div>
-                                        <p class="mb-0 small">{% if assignment.question_paper_id %}Replace file{% else %}Upload PDF{% endif %}</p>
-                                        <span class="file-name" id="question-filename">
-                                            {% if assignment.question_paper_id %}Click to replace{% else %}Click to upload{% endif %}
-                                        </span>
-                                    </label>
-                                </div>
-                            </div>
-                            
-                            <!-- Answer Key -->
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label fw-bold">Answer Key</label>
-                                {% if assignment.answer_key_id %}
-                                <div class="current-file mb-2">
-                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='answer_key') }}" 
-                                       target="_blank" class="btn btn-outline-success btn-sm">
-                                        <i class="bi bi-file-earmark-check me-1"></i>
-                                        {{ assignment.answer_key_name or 'answer_key.pdf' }}
-                                    </a>
-                                </div>
-                                {% endif %}
-                                <div class="upload-zone {% if assignment.answer_key_id %}has-file{% endif %}" id="answer-zone">
-                                    <input type="file" class="form-control d-none" id="answer_key" name="answer_key" 
-                                           accept=".pdf" onchange="handleFileSelect(this, 'answer')">
-                                    <label for="answer_key" class="upload-label">
-                                        <div class="upload-icon answer">
-                                            <i class="bi bi-file-earmark-check"></i>
-                                        </div>
-                                        <p class="mb-0 small">{% if assignment.answer_key_id %}Replace file{% else %}Upload PDF{% endif %}</p>
-                                        <span class="file-name" id="answer-filename">
-                                            {% if assignment.answer_key_id %}Click to replace{% else %}Click to upload{% endif %}
-                                        </span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="alert alert-info mt-3 mb-0">
-                            <i class="bi bi-info-circle me-2"></i>
-                            Leave fields empty to keep existing files. Upload new files to replace them.
-                        </div>
-                    </div>
-                </div>
             </div>
             
             <div class="col-lg-4">
@@ -268,6 +327,26 @@
                                 <span class="text-success"><i class="bi bi-check-circle"></i></span>
                                 {% else %}
                                 <span class="text-danger">Missing</span>
+                                {% endif %}
+                            </strong>
+                        </div>
+                        <div class="summary-item">
+                            <span>Reference Materials:</span>
+                            <strong id="summary-reference">
+                                {% if assignment.reference_materials_id %}
+                                <span class="text-success"><i class="bi bi-check-circle"></i></span>
+                                {% else %}
+                                <span class="text-muted">Optional</span>
+                                {% endif %}
+                            </strong>
+                        </div>
+                        <div class="summary-item">
+                            <span>Rubrics:</span>
+                            <strong id="summary-rubrics">
+                                {% if assignment.rubrics_id %}
+                                <span class="text-success"><i class="bi bi-check-circle"></i></span>
+                                {% else %}
+                                <span class="text-muted">Optional</span>
                                 {% endif %}
                             </strong>
                         </div>
@@ -353,6 +432,34 @@
     background: linear-gradient(135deg, #198754, #146c43);
 }
 
+.upload-icon.reference {
+    background: linear-gradient(135deg, #6f42c1, #5a32a3);
+}
+
+.upload-icon.rubrics {
+    background: linear-gradient(135deg, #fd7e14, #dc6a10);
+}
+
+.btn-outline-purple {
+    color: #6f42c1;
+    border-color: #6f42c1;
+}
+.btn-outline-purple:hover {
+    color: #fff;
+    background-color: #6f42c1;
+    border-color: #6f42c1;
+}
+
+.btn-outline-orange {
+    color: #fd7e14;
+    border-color: #fd7e14;
+}
+.btn-outline-orange:hover {
+    color: #fff;
+    background-color: #fd7e14;
+    border-color: #fd7e14;
+}
+
 .upload-icon i {
     font-size: 18px;
     color: white;
@@ -411,7 +518,7 @@
     });
     
     // Drag and drop
-    ['question-zone', 'answer-zone'].forEach(zoneId => {
+    ['question-zone', 'answer-zone', 'reference-zone', 'rubrics-zone'].forEach(zoneId => {
         const zone = document.getElementById(zoneId);
         const input = zone.querySelector('input[type="file"]');
         

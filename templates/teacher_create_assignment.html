@@ -93,6 +93,91 @@
                     </div>
                 </div>
                 
+                <!-- Upload Documents - Moved here between Basic Info and Assign To -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-file-pdf me-2"></i>Upload Documents</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <!-- Question Paper -->
+                            <div class="col-md-6 mb-3">
+                                <div class="upload-zone" id="question-zone">
+                                    <input type="file" class="form-control d-none" id="question_paper" name="question_paper" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'question')">
+                                    <label for="question_paper" class="upload-label">
+                                        <div class="upload-icon">
+                                            <i class="bi bi-file-earmark-text"></i>
+                                        </div>
+                                        <h6>Question Paper *</h6>
+                                        <p class="text-muted small mb-0">Empty paper for students</p>
+                                        <span class="file-name" id="question-filename">Click to upload PDF</span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Answer Key -->
+                            <div class="col-md-6 mb-3">
+                                <div class="upload-zone" id="answer-zone">
+                                    <input type="file" class="form-control d-none" id="answer_key" name="answer_key" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'answer')">
+                                    <label for="answer_key" class="upload-label">
+                                        <div class="upload-icon answer">
+                                            <i class="bi bi-file-earmark-check"></i>
+                                        </div>
+                                        <h6>Answer Key *</h6>
+                                        <p class="text-muted small mb-0">Questions with answers</p>
+                                        <span class="file-name" id="answer-filename">Click to upload PDF</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <!-- Reference Materials -->
+                            <div class="col-md-6 mb-3">
+                                <div class="upload-zone" id="reference-zone">
+                                    <input type="file" class="form-control d-none" id="reference_materials" name="reference_materials" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'reference')">
+                                    <label for="reference_materials" class="upload-label">
+                                        <div class="upload-icon reference">
+                                            <i class="bi bi-book"></i>
+                                        </div>
+                                        <h6>Reference Materials</h6>
+                                        <p class="text-muted small mb-0">Literature, history content, etc.</p>
+                                        <span class="file-name" id="reference-filename">Click to upload PDF (optional)</span>
+                                    </label>
+                                </div>
+                                <small class="text-muted d-block mt-1">Upload textual content, passages, or source materials the AI should reference when grading.</small>
+                            </div>
+                            
+                            <!-- Rubrics -->
+                            <div class="col-md-6 mb-3">
+                                <div class="upload-zone" id="rubrics-zone">
+                                    <input type="file" class="form-control d-none" id="rubrics" name="rubrics" 
+                                           accept=".pdf" onchange="handleFileSelect(this, 'rubrics')">
+                                    <label for="rubrics" class="upload-label">
+                                        <div class="upload-icon rubrics">
+                                            <i class="bi bi-list-check"></i>
+                                        </div>
+                                        <h6>Rubrics</h6>
+                                        <p class="text-muted small mb-0">Grading criteria for essays</p>
+                                        <span class="file-name" id="rubrics-filename">Click to upload PDF (optional)</span>
+                                    </label>
+                                </div>
+                                <small class="text-muted d-block mt-1">Upload grading rubrics for essays, literature, or subjective answers where there's no single correct answer.</small>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info mt-3 mb-0">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>Note:</strong> The answer key PDF should contain both the questions and the correct answers. 
+                            Reference materials and rubrics help the AI understand context for subjects like English/Literature where answers may vary.
+                            <br><small class="mt-1 d-block"><i class="bi bi-check-circle me-1"></i>Answer key uses full PDF vision for maximum accuracy. Reference materials &amp; rubrics use text extraction for efficiency.</small>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Assignment Target (Class or Teaching Group) -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -173,54 +258,6 @@
                         </div>
                     </div>
                 </div>
-                
-                <!-- PDF Upload -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-file-pdf me-2"></i>Upload Documents</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <!-- Question Paper -->
-                            <div class="col-md-6 mb-3">
-                                <div class="upload-zone" id="question-zone">
-                                    <input type="file" class="form-control d-none" id="question_paper" name="question_paper" 
-                                           accept=".pdf" onchange="handleFileSelect(this, 'question')">
-                                    <label for="question_paper" class="upload-label">
-                                        <div class="upload-icon">
-                                            <i class="bi bi-file-earmark-text"></i>
-                                        </div>
-                                        <h6>Question Paper *</h6>
-                                        <p class="text-muted small mb-0">Empty paper for students</p>
-                                        <span class="file-name" id="question-filename">Click to upload PDF</span>
-                                    </label>
-                                </div>
-                            </div>
-                            
-                            <!-- Answer Key -->
-                            <div class="col-md-6 mb-3">
-                                <div class="upload-zone" id="answer-zone">
-                                    <input type="file" class="form-control d-none" id="answer_key" name="answer_key" 
-                                           accept=".pdf" onchange="handleFileSelect(this, 'answer')">
-                                    <label for="answer_key" class="upload-label">
-                                        <div class="upload-icon answer">
-                                            <i class="bi bi-file-earmark-check"></i>
-                                        </div>
-                                        <h6>Answer Key *</h6>
-                                        <p class="text-muted small mb-0">Questions with answers</p>
-                                        <span class="file-name" id="answer-filename">Click to upload PDF</span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="alert alert-info mt-3 mb-0">
-                            <i class="bi bi-info-circle me-2"></i>
-                            <strong>Note:</strong> The answer key PDF should contain both the questions and the correct answers. 
-                            This will be used by the AI to mark student submissions.
-                        </div>
-                    </div>
-                </div>
             </div>
             
             <div class="col-lg-4">
@@ -237,6 +274,14 @@
                         <div class="summary-item">
                             <span>Answer Key:</span>
                             <strong id="summary-answer"><span class="text-danger">Not uploaded</span></strong>
+                        </div>
+                        <div class="summary-item">
+                            <span>Reference Materials:</span>
+                            <strong id="summary-reference"><span class="text-muted">Optional</span></strong>
+                        </div>
+                        <div class="summary-item">
+                            <span>Rubrics:</span>
+                            <strong id="summary-rubrics"><span class="text-muted">Optional</span></strong>
                         </div>
                         <div class="summary-item">
                             <span>Total Marks:</span>
@@ -310,6 +355,14 @@
     background: linear-gradient(135deg, #198754, #146c43);
 }
 
+.upload-icon.reference {
+    background: linear-gradient(135deg, #6f42c1, #5a32a3);
+}
+
+.upload-icon.rubrics {
+    background: linear-gradient(135deg, #fd7e14, #dc6a10);
+}
+
 .upload-icon i {
     font-size: 28px;
     color: white;
@@ -371,7 +424,7 @@
     });
     
     // Drag and drop
-    ['question-zone', 'answer-zone'].forEach(zoneId => {
+    ['question-zone', 'answer-zone', 'reference-zone', 'rubrics-zone'].forEach(zoneId => {
         const zone = document.getElementById(zoneId);
         const input = zone.querySelector('input[type="file"]');
         

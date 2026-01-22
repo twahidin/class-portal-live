@@ -12,6 +12,7 @@ from utils.google_drive import get_teacher_drive_manager, upload_assignment_file
 from utils.pdf_generator import generate_feedback_pdf
 from utils.notifications import notify_submission_ready
 import logging
+import PyPDF2
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -20,6 +21,43 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# PDF TEXT EXTRACTION UTILITY
+# ============================================================================
+
+def extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    """
+    Extract text content from a PDF file.
+    This allows the AI to use text instead of vision for PDFs, reducing costs.
+    
+    Args:
+        pdf_bytes: Raw bytes of the PDF file
+        
+    Returns:
+        Extracted text content as a string
+    """
+    try:
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        text_content = []
+        
+        for page_num, page in enumerate(pdf_reader.pages):
+            page_text = page.extract_text()
+            if page_text:
+                text_content.append(f"--- Page {page_num + 1} ---\n{page_text}")
+        
+        extracted_text = "\n\n".join(text_content)
+        
+        # Log extraction stats
+        if extracted_text.strip():
+            logger.info(f"Extracted {len(extracted_text)} characters from {len(pdf_reader.pages)} PDF pages")
+        else:
+            logger.warning("PDF text extraction yielded empty result - PDF may contain only images")
+        
+        return extracted_text.strip()
+    except Exception as e:
+        logger.error(f"Error extracting text from PDF: {e}")
+        return ""
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -1659,11 +1697,32 @@ def create_assignment():
             total_marks = int(data.get('total_marks', 100))
             assignment_title = data.get('title', 'Untitled')
             
+            # Get optional files
+            reference_materials = request.files.get('reference_materials')
+            rubrics = request.files.get('rubrics')
+            
             # Read file contents (need to read before storing in GridFS since we also upload to Drive)
             question_paper_content = question_paper.read()
             question_paper.seek(0)  # Reset for GridFS
             answer_key_content = answer_key.read()
             answer_key.seek(0)  # Reset for GridFS
+            
+            # Read optional file contents
+            reference_materials_content = None
+            if reference_materials and reference_materials.filename and reference_materials.filename.lower().endswith('.pdf'):
+                reference_materials_content = reference_materials.read()
+                reference_materials.seek(0)
+            
+            rubrics_content = None
+            if rubrics and rubrics.filename and rubrics.filename.lower().endswith('.pdf'):
+                rubrics_content = rubrics.read()
+                rubrics.seek(0)
+            
+            # Extract text from PDFs for cost-effective AI processing
+            question_paper_text = extract_text_from_pdf(question_paper_content)
+            answer_key_text = extract_text_from_pdf(answer_key_content)
+            reference_materials_text = extract_text_from_pdf(reference_materials_content) if reference_materials_content else ""
+            rubrics_text = extract_text_from_pdf(rubrics_content) if rubrics_content else ""
             
             # Store files in GridFS
             from gridfs import GridFS
@@ -1686,6 +1745,28 @@ def create_assignment():
                 assignment_id=assignment_id,
                 file_type='answer_key'
             )
+            
+            # Save reference materials if provided
+            reference_materials_id = None
+            if reference_materials_content:
+                reference_materials_id = fs.put(
+                    reference_materials_content,
+                    filename=f"{assignment_id}_reference.pdf",
+                    content_type='application/pdf',
+                    assignment_id=assignment_id,
+                    file_type='reference_materials'
+                )
+            
+            # Save rubrics if provided
+            rubrics_id = None
+            if rubrics_content:
+                rubrics_id = fs.put(
+                    rubrics_content,
+                    filename=f"{assignment_id}_rubrics.pdf",
+                    content_type='application/pdf',
+                    assignment_id=assignment_id,
+                    file_type='rubrics'
+                )
             
             # Initialize Google Drive folder IDs
             drive_folders = None
@@ -1739,6 +1820,16 @@ def create_assignment():
                 'answer_key_id': answer_key_id,
                 'question_paper_name': question_paper.filename,
                 'answer_key_name': answer_key.filename,
+                # New optional document fields
+                'reference_materials_id': reference_materials_id,
+                'reference_materials_name': reference_materials.filename if reference_materials_content else None,
+                'rubrics_id': rubrics_id,
+                'rubrics_name': rubrics.filename if rubrics_content else None,
+                # Extracted text for cost-effective AI processing
+                'question_paper_text': question_paper_text,
+                'answer_key_text': answer_key_text,
+                'reference_materials_text': reference_materials_text,
+                'rubrics_text': rubrics_text,
                 'due_date': data.get('due_date') or None,
                 'status': 'published' if data.get('publish') else 'draft',
                 'ai_model': ai_model,
@@ -1850,9 +1941,13 @@ def edit_assignment(assignment_id):
                         except:
                             pass
                     
+                    # Read content and extract text
+                    question_paper_content = question_paper.read()
+                    question_paper_text = extract_text_from_pdf(question_paper_content)
+                    
                     # Save new file
                     question_paper_id = fs.put(
-                        question_paper.read(),
+                        question_paper_content,
                         filename=f"{assignment_id}_question.pdf",
                         content_type='application/pdf',
                         assignment_id=assignment_id,
@@ -1860,6 +1955,7 @@ def edit_assignment(assignment_id):
                     )
                     update_data['question_paper_id'] = question_paper_id
                     update_data['question_paper_name'] = question_paper.filename
+                    update_data['question_paper_text'] = question_paper_text
             
             answer_key = request.files.get('answer_key')
             if answer_key and answer_key.filename:
@@ -1871,9 +1967,13 @@ def edit_assignment(assignment_id):
                         except:
                             pass
                     
+                    # Read content and extract text
+                    answer_key_content = answer_key.read()
+                    answer_key_text = extract_text_from_pdf(answer_key_content)
+                    
                     # Save new file
                     answer_key_id = fs.put(
-                        answer_key.read(),
+                        answer_key_content,
                         filename=f"{assignment_id}_answer.pdf",
                         content_type='application/pdf',
                         assignment_id=assignment_id,
@@ -1881,6 +1981,61 @@ def edit_assignment(assignment_id):
                     )
                     update_data['answer_key_id'] = answer_key_id
                     update_data['answer_key_name'] = answer_key.filename
+                    update_data['answer_key_text'] = answer_key_text
+            
+            # Handle reference materials upload
+            reference_materials = request.files.get('reference_materials')
+            if reference_materials and reference_materials.filename:
+                if reference_materials.filename.lower().endswith('.pdf'):
+                    # Delete old file if exists
+                    if assignment.get('reference_materials_id'):
+                        try:
+                            fs.delete(assignment['reference_materials_id'])
+                        except:
+                            pass
+                    
+                    # Read content and extract text
+                    reference_materials_content = reference_materials.read()
+                    reference_materials_text = extract_text_from_pdf(reference_materials_content)
+                    
+                    # Save new file
+                    reference_materials_id = fs.put(
+                        reference_materials_content,
+                        filename=f"{assignment_id}_reference.pdf",
+                        content_type='application/pdf',
+                        assignment_id=assignment_id,
+                        file_type='reference_materials'
+                    )
+                    update_data['reference_materials_id'] = reference_materials_id
+                    update_data['reference_materials_name'] = reference_materials.filename
+                    update_data['reference_materials_text'] = reference_materials_text
+            
+            # Handle rubrics upload
+            rubrics = request.files.get('rubrics')
+            if rubrics and rubrics.filename:
+                if rubrics.filename.lower().endswith('.pdf'):
+                    # Delete old file if exists
+                    if assignment.get('rubrics_id'):
+                        try:
+                            fs.delete(assignment['rubrics_id'])
+                        except:
+                            pass
+                    
+                    # Read content and extract text
+                    rubrics_content = rubrics.read()
+                    rubrics_text = extract_text_from_pdf(rubrics_content)
+                    
+                    # Save new file
+                    rubrics_id = fs.put(
+                        rubrics_content,
+                        filename=f"{assignment_id}_rubrics.pdf",
+                        content_type='application/pdf',
+                        assignment_id=assignment_id,
+                        file_type='rubrics'
+                    )
+                    update_data['rubrics_id'] = rubrics_id
+                    update_data['rubrics_name'] = rubrics.filename
+                    update_data['rubrics_text'] = rubrics_text
             
             Assignment.update_one(
                 {'assignment_id': assignment_id},
