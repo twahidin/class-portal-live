@@ -4102,6 +4102,48 @@ def match_students_by_name():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/admin/api/teaching-groups/<group_id>/add-students', methods=['POST'])
+@admin_required
+def add_students_to_teaching_group(group_id):
+    """Add students to an existing teaching group"""
+    try:
+        data = request.get_json()
+        student_ids = data.get('student_ids', [])
+        
+        if not student_ids:
+            return jsonify({'error': 'No students selected'}), 400
+        
+        # Get teaching group
+        group = TeachingGroup.find_one({'group_id': group_id})
+        if not group:
+            return jsonify({'error': 'Teaching group not found'}), 404
+        
+        # Get current student IDs
+        current_ids = set(group.get('student_ids', []))
+        new_ids = set(student_ids)
+        
+        # Merge and deduplicate
+        merged_ids = list(current_ids | new_ids)
+        added_count = len(new_ids - current_ids)
+        
+        # Update the teaching group
+        TeachingGroup.update_one(
+            {'group_id': group_id},
+            {'$set': {'student_ids': merged_ids, 'updated_at': datetime.utcnow()}}
+        )
+        
+        return jsonify({
+            'success': True,
+            'added': added_count,
+            'total': len(merged_ids),
+            'already_in_group': len(new_ids & current_ids)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error adding students to teaching group: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/api/bulk-assign-class', methods=['POST'])
 @admin_required
 def bulk_assign_students_to_class():

@@ -648,6 +648,83 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Add Students to Teaching Group by Name -->
+                <div class="col-12">
+                    <div class="card border-info">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Add Students to Teaching Group by Name</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Select Teaching Group *</label>
+                                    <select class="form-select" id="tg_bulk_assign_group_id">
+                                        <option value="">Choose a teaching group...</option>
+                                    </select>
+                                    <small class="text-muted d-block mt-2">Paste names from Excel. Each line = one student.</small>
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label">Paste Student Names (one name per line)</label>
+                                    <textarea class="form-control" id="tg_bulk_assign_names" rows="4" placeholder="John Doe&#10;Jane Smith&#10;Ahmad bin Ali&#10;..."></textarea>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <button class="btn btn-info" id="preview-tg-bulk-assign-btn">
+                                    <i class="bi bi-search me-1"></i>Preview & Match Students
+                                </button>
+                            </div>
+                            
+                            <!-- Preview Results -->
+                            <div id="tg-bulk-assign-preview" class="mt-4" style="display: none;">
+                                <hr>
+                                <div class="row">
+                                    <!-- Found Students -->
+                                    <div class="col-md-6">
+                                        <h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Found Students (<span id="tg-found-count">0</span>)</h6>
+                                        <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                                            <table class="table table-sm table-hover">
+                                                <thead class="table-success sticky-top">
+                                                    <tr>
+                                                        <th><input type="checkbox" id="tg-select-all-found" checked></th>
+                                                        <th>Name</th>
+                                                        <th>Student ID</th>
+                                                        <th>Class</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="tg-found-students-tbody">
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <!-- Not Found Students -->
+                                    <div class="col-md-6">
+                                        <h6 class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Not Found (<span id="tg-notfound-count">0</span>)</h6>
+                                        <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                                            <table class="table table-sm">
+                                                <thead class="table-warning sticky-top">
+                                                    <tr>
+                                                        <th>Name Entered</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="tg-notfound-students-tbody">
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mt-3">
+                                    <button class="btn btn-primary" id="confirm-tg-bulk-assign-btn" disabled>
+                                        <i class="bi bi-check2-all me-1"></i>Add <span id="tg-assign-count">0</span> Students to Group
+                                    </button>
+                                    <button class="btn btn-outline-secondary ms-2" id="cancel-tg-bulk-assign-btn">Cancel</button>
+                                </div>
+                            </div>
+                            <div id="tg-bulk-assign-result" class="mt-3" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -2598,12 +2675,193 @@
     }
     
     // Load teaching groups when tab is shown
-    document.getElementById('teaching-groups-tab').addEventListener('shown.bs.tab', loadTeachingGroups);
+    document.getElementById('teaching-groups-tab').addEventListener('shown.bs.tab', () => {
+        loadTeachingGroups();
+        loadTeachingGroupsForBulkAssign();
+    });
     
     // Also load on page load if hash is #teaching-groups
     if (window.location.hash === '#teaching-groups') {
         document.getElementById('teaching-groups-tab').click();
     }
+    
+    // ================== BULK ADD STUDENTS TO TEACHING GROUP ==================
+    
+    async function loadTeachingGroupsForBulkAssign() {
+        const select = document.getElementById('tg_bulk_assign_group_id');
+        try {
+            const response = await fetch('/admin/api/teaching-groups');
+            const data = await response.json();
+            
+            if (data.groups && data.groups.length > 0) {
+                select.innerHTML = '<option value="">Choose a teaching group...</option>' +
+                    data.groups.map(g => `<option value="${g.group_id}">${g.name} (${g.student_count || 0} students)</option>`).join('');
+            } else {
+                select.innerHTML = '<option value="">No teaching groups available</option>';
+            }
+        } catch (e) {
+            select.innerHTML = '<option value="">Error loading teaching groups</option>';
+        }
+    }
+    
+    let tgMatchedStudents = [];
+    
+    document.getElementById('preview-tg-bulk-assign-btn').addEventListener('click', async () => {
+        const groupId = document.getElementById('tg_bulk_assign_group_id').value;
+        const namesText = document.getElementById('tg_bulk_assign_names').value.trim();
+        
+        if (!groupId) {
+            alert('Please select a teaching group first');
+            return;
+        }
+        
+        if (!namesText) {
+            alert('Please enter student names');
+            return;
+        }
+        
+        // Parse names (split by newlines only - each line is one complete name)
+        const names = namesText.split(/\n/).map(n => n.trim()).filter(n => n);
+        
+        if (names.length === 0) {
+            alert('No valid names found');
+            return;
+        }
+        
+        const btn = document.getElementById('preview-tg-bulk-assign-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Matching...';
+        
+        try {
+            const response = await fetch('/admin/api/match-students-by-name', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ names })
+            });
+            const data = await response.json();
+            
+            if (!data.success) {
+                alert(data.error || 'Error matching students');
+                return;
+            }
+            
+            tgMatchedStudents = data.found;
+            displayTgMatchResults(data.found, data.not_found);
+            document.getElementById('tg-bulk-assign-preview').style.display = 'block';
+            
+        } catch (e) {
+            alert('Error matching students');
+            console.error(e);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-search me-1"></i>Preview & Match Students';
+        }
+    });
+    
+    function displayTgMatchResults(found, notFound) {
+        // Found students table
+        const foundTbody = document.getElementById('tg-found-students-tbody');
+        document.getElementById('tg-found-count').textContent = found.length;
+        
+        if (found.length === 0) {
+            foundTbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">No matching students found</td></tr>';
+        } else {
+            foundTbody.innerHTML = found.map(s => `
+                <tr>
+                    <td><input type="checkbox" class="tg-found-student-cb" value="${s.student_id}" checked></td>
+                    <td>
+                        ${escapeHtml(s.name)}
+                        ${s.partial_match ? '<span class="badge bg-info ms-1" title="Partial match">~</span>' : ''}
+                    </td>
+                    <td><code>${s.student_id}</code></td>
+                    <td>${s.class || '<span class="text-muted">-</span>'}</td>
+                </tr>
+            `).join('');
+        }
+        
+        // Not found table
+        const notFoundTbody = document.getElementById('tg-notfound-students-tbody');
+        document.getElementById('tg-notfound-count').textContent = notFound.length;
+        
+        if (notFound.length === 0) {
+            notFoundTbody.innerHTML = '<tr><td colspan="2" class="text-success text-center">All students found!</td></tr>';
+        } else {
+            notFoundTbody.innerHTML = notFound.map(s => `
+                <tr>
+                    <td>${escapeHtml(s.input_name)}</td>
+                    <td><span class="badge bg-warning text-dark">Not in system</span></td>
+                </tr>
+            `).join('');
+        }
+        
+        // Update assign button
+        updateTgBulkAssignButton();
+        
+        // Select all handler
+        document.getElementById('tg-select-all-found').addEventListener('change', (e) => {
+            document.querySelectorAll('.tg-found-student-cb').forEach(cb => cb.checked = e.target.checked);
+            updateTgBulkAssignButton();
+        });
+        
+        // Individual checkbox handlers
+        document.querySelectorAll('.tg-found-student-cb').forEach(cb => {
+            cb.addEventListener('change', updateTgBulkAssignButton);
+        });
+    }
+    
+    function updateTgBulkAssignButton() {
+        const selectedCount = document.querySelectorAll('.tg-found-student-cb:checked').length;
+        document.getElementById('tg-assign-count').textContent = selectedCount;
+        document.getElementById('confirm-tg-bulk-assign-btn').disabled = selectedCount === 0;
+    }
+    
+    document.getElementById('confirm-tg-bulk-assign-btn').addEventListener('click', async () => {
+        const groupId = document.getElementById('tg_bulk_assign_group_id').value;
+        const selectedIds = [...document.querySelectorAll('.tg-found-student-cb:checked')].map(cb => cb.value);
+        
+        if (!groupId || selectedIds.length === 0) return;
+        
+        const btn = document.getElementById('confirm-tg-bulk-assign-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding...';
+        
+        try {
+            const response = await fetch(`/admin/api/teaching-groups/${groupId}/add-students`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ student_ids: selectedIds })
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                let message = `Added ${data.added} student(s) to group. Total: ${data.total} students.`;
+                if (data.already_in_group > 0) {
+                    message += ` (${data.already_in_group} already in group)`;
+                }
+                showResult('tg-bulk-assign-result', message, 'success');
+                // Reset form
+                document.getElementById('tg_bulk_assign_names').value = '';
+                document.getElementById('tg-bulk-assign-preview').style.display = 'none';
+                tgMatchedStudents = [];
+                // Refresh teaching groups
+                loadTeachingGroups();
+                loadTeachingGroupsForBulkAssign();
+            } else {
+                showResult('tg-bulk-assign-result', data.error || 'Failed to add students', 'danger');
+            }
+        } catch (e) {
+            showResult('tg-bulk-assign-result', 'Error adding students', 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check2-all me-1"></i>Add <span id="tg-assign-count">' + selectedIds.length + '</span> Students to Group';
+        }
+    });
+    
+    document.getElementById('cancel-tg-bulk-assign-btn').addEventListener('click', () => {
+        document.getElementById('tg-bulk-assign-preview').style.display = 'none';
+        document.getElementById('tg-bulk-assign-result').style.display = 'none';
+        tgMatchedStudents = [];
+    });
 
     // ================== REPORTS & TOOLS ==================
     
