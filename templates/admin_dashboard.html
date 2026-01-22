@@ -480,6 +480,89 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Assign Students to Class by Name -->
+                <div class="col-12">
+                    <div class="card border-success">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Assign Students to Class by Name</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                Paste student names from Excel to assign existing students to a class. Students not found in the system will be shown as warnings.
+                            </p>
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Select Class *</label>
+                                    <select class="form-select" id="bulk_assign_class_id" required>
+                                        <option value="">Choose a class...</option>
+                                        {% for c in classes %}
+                                        <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label">Paste Student Names (one per line or from Excel)</label>
+                                    <textarea class="form-control" id="bulk_assign_names" rows="5" placeholder="John Doe&#10;Jane Smith&#10;Ahmad bin Ali&#10;..."></textarea>
+                                    <small class="text-muted">Tip: Copy a column of names from Excel and paste here</small>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <button class="btn btn-success" id="preview-bulk-assign-btn">
+                                    <i class="bi bi-search me-1"></i>Preview & Match Students
+                                </button>
+                            </div>
+                            
+                            <!-- Preview Results -->
+                            <div id="bulk-assign-preview" class="mt-4" style="display: none;">
+                                <hr>
+                                <div class="row">
+                                    <!-- Found Students -->
+                                    <div class="col-md-6">
+                                        <h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Found Students (<span id="found-count">0</span>)</h6>
+                                        <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                                            <table class="table table-sm table-hover">
+                                                <thead class="table-success sticky-top">
+                                                    <tr>
+                                                        <th><input type="checkbox" id="select-all-found" checked></th>
+                                                        <th>Name</th>
+                                                        <th>Student ID</th>
+                                                        <th>Current Class</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="found-students-tbody">
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <!-- Not Found Students -->
+                                    <div class="col-md-6">
+                                        <h6 class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Not Found (<span id="notfound-count">0</span>)</h6>
+                                        <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                                            <table class="table table-sm">
+                                                <thead class="table-warning sticky-top">
+                                                    <tr>
+                                                        <th>Name Entered</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="notfound-students-tbody">
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mt-3">
+                                    <button class="btn btn-primary" id="confirm-bulk-assign-btn" disabled>
+                                        <i class="bi bi-check2-all me-1"></i>Assign <span id="assign-count">0</span> Students to Class
+                                    </button>
+                                    <button class="btn btn-outline-secondary ms-2" id="cancel-bulk-assign-btn">Cancel</button>
+                                </div>
+                            </div>
+                            <div id="bulk-assign-result" class="mt-3" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1613,6 +1696,163 @@
             const classId = btn.dataset.classId;
             window.open(`/admin/api/class-report/${classId}/pdf`, '_blank');
         });
+    });
+    
+    // ================== BULK ASSIGN STUDENTS TO CLASS ==================
+    
+    let matchedStudents = [];
+    
+    document.getElementById('preview-bulk-assign-btn').addEventListener('click', async () => {
+        const classId = document.getElementById('bulk_assign_class_id').value;
+        const namesText = document.getElementById('bulk_assign_names').value.trim();
+        
+        if (!classId) {
+            alert('Please select a class first');
+            return;
+        }
+        
+        if (!namesText) {
+            alert('Please enter student names');
+            return;
+        }
+        
+        // Parse names (split by newlines, tabs, or commas)
+        const names = namesText.split(/[\n\t,]+/).map(n => n.trim()).filter(n => n);
+        
+        if (names.length === 0) {
+            alert('No valid names found');
+            return;
+        }
+        
+        const btn = document.getElementById('preview-bulk-assign-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Matching...';
+        
+        try {
+            const response = await fetch('/admin/api/match-students-by-name', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ names })
+            });
+            const data = await response.json();
+            
+            if (!data.success) {
+                alert(data.error || 'Error matching students');
+                return;
+            }
+            
+            matchedStudents = data.found;
+            displayMatchResults(data.found, data.not_found);
+            document.getElementById('bulk-assign-preview').style.display = 'block';
+            
+        } catch (e) {
+            alert('Error matching students');
+            console.error(e);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-search me-1"></i>Preview & Match Students';
+        }
+    });
+    
+    function displayMatchResults(found, notFound) {
+        // Found students table
+        const foundTbody = document.getElementById('found-students-tbody');
+        document.getElementById('found-count').textContent = found.length;
+        
+        if (found.length === 0) {
+            foundTbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">No matching students found</td></tr>';
+        } else {
+            foundTbody.innerHTML = found.map(s => `
+                <tr>
+                    <td><input type="checkbox" class="found-student-cb" value="${s.student_id}" checked></td>
+                    <td>
+                        ${escapeHtml(s.name)}
+                        ${s.partial_match ? '<span class="badge bg-info ms-1" title="Partial match">~</span>' : ''}
+                        ${s.input_name.toLowerCase() !== s.name.toLowerCase() ? `<br><small class="text-muted">Input: ${escapeHtml(s.input_name)}</small>` : ''}
+                    </td>
+                    <td><code>${s.student_id}</code></td>
+                    <td>${s.class || '<span class="text-muted">-</span>'}</td>
+                </tr>
+            `).join('');
+        }
+        
+        // Not found table
+        const notFoundTbody = document.getElementById('notfound-students-tbody');
+        document.getElementById('notfound-count').textContent = notFound.length;
+        
+        if (notFound.length === 0) {
+            notFoundTbody.innerHTML = '<tr><td colspan="2" class="text-success text-center">All students found!</td></tr>';
+        } else {
+            notFoundTbody.innerHTML = notFound.map(s => `
+                <tr>
+                    <td>${escapeHtml(s.input_name)}</td>
+                    <td><span class="badge bg-warning text-dark">Not in system</span></td>
+                </tr>
+            `).join('');
+        }
+        
+        // Update assign button
+        updateBulkAssignButton();
+        
+        // Select all handler
+        document.getElementById('select-all-found').addEventListener('change', (e) => {
+            document.querySelectorAll('.found-student-cb').forEach(cb => cb.checked = e.target.checked);
+            updateBulkAssignButton();
+        });
+        
+        // Individual checkbox handlers
+        document.querySelectorAll('.found-student-cb').forEach(cb => {
+            cb.addEventListener('change', updateBulkAssignButton);
+        });
+    }
+    
+    function updateBulkAssignButton() {
+        const selectedCount = document.querySelectorAll('.found-student-cb:checked').length;
+        document.getElementById('assign-count').textContent = selectedCount;
+        document.getElementById('confirm-bulk-assign-btn').disabled = selectedCount === 0;
+    }
+    
+    document.getElementById('confirm-bulk-assign-btn').addEventListener('click', async () => {
+        const classId = document.getElementById('bulk_assign_class_id').value;
+        const selectedIds = [...document.querySelectorAll('.found-student-cb:checked')].map(cb => cb.value);
+        
+        if (!classId || selectedIds.length === 0) return;
+        
+        const btn = document.getElementById('confirm-bulk-assign-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Assigning...';
+        
+        try {
+            const response = await fetch('/admin/api/bulk-assign-class', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ student_ids: selectedIds, class_id: classId })
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                showResult('bulk-assign-result', `Successfully assigned ${data.updated} students to class "${classId}"`, 'success');
+                // Reset form
+                document.getElementById('bulk_assign_names').value = '';
+                document.getElementById('bulk-assign-preview').style.display = 'none';
+                matchedStudents = [];
+                // Refresh page to update class counts
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showResult('bulk-assign-result', data.error || 'Failed to assign students', 'danger');
+            }
+        } catch (e) {
+            showResult('bulk-assign-result', 'Error assigning students', 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check2-all me-1"></i>Assign <span id="assign-count">' + selectedIds.length + '</span> Students to Class';
+        }
+    });
+    
+    document.getElementById('cancel-bulk-assign-btn').addEventListener('click', () => {
+        document.getElementById('bulk-assign-preview').style.display = 'none';
+        document.getElementById('bulk-assign-result').style.display = 'none';
+        matchedStudents = [];
     });
     
     document.querySelectorAll('.delete-class-btn').forEach(btn => {

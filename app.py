@@ -4040,6 +4040,105 @@ def reset_prompts():
 # ADMIN REPORTS AND DUPLICATE MANAGEMENT
 # ============================================================================
 
+@app.route('/admin/api/match-students-by-name', methods=['POST'])
+@admin_required
+def match_students_by_name():
+    """Match a list of names to existing students in the system"""
+    try:
+        data = request.get_json()
+        names = data.get('names', [])
+        
+        if not names:
+            return jsonify({'error': 'No names provided'}), 400
+        
+        found = []
+        not_found = []
+        
+        for name in names:
+            name = name.strip()
+            if not name:
+                continue
+            
+            # Try exact match first (case-insensitive)
+            student = Student.find_one({
+                'name': {'$regex': f'^{name}$', '$options': 'i'}
+            })
+            
+            if student:
+                found.append({
+                    'input_name': name,
+                    'student_id': student['student_id'],
+                    'name': student.get('name', ''),
+                    'class': student.get('class', '')
+                })
+            else:
+                # Try partial match
+                student = Student.find_one({
+                    'name': {'$regex': name, '$options': 'i'}
+                })
+                
+                if student:
+                    found.append({
+                        'input_name': name,
+                        'student_id': student['student_id'],
+                        'name': student.get('name', ''),
+                        'class': student.get('class', ''),
+                        'partial_match': True
+                    })
+                else:
+                    not_found.append({
+                        'input_name': name,
+                        'reason': 'No matching student found'
+                    })
+        
+        return jsonify({
+            'success': True,
+            'found': found,
+            'not_found': not_found
+        })
+        
+    except Exception as e:
+        logger.error(f"Error matching students: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/api/bulk-assign-class', methods=['POST'])
+@admin_required
+def bulk_assign_students_to_class():
+    """Assign multiple students to a class"""
+    try:
+        data = request.get_json()
+        student_ids = data.get('student_ids', [])
+        class_id = data.get('class_id')
+        
+        if not student_ids:
+            return jsonify({'error': 'No students selected'}), 400
+        
+        if not class_id:
+            return jsonify({'error': 'No class selected'}), 400
+        
+        # Verify class exists
+        class_doc = Class.find_one({'class_id': class_id})
+        if not class_doc:
+            return jsonify({'error': 'Class not found'}), 404
+        
+        # Update all students
+        result = Student.update_many(
+            {'student_id': {'$in': student_ids}},
+            {'$set': {'class': class_id}}
+        )
+        
+        return jsonify({
+            'success': True,
+            'updated': result.modified_count,
+            'class_id': class_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error bulk assigning students: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/api/teacher/<teacher_id>/assignments')
 @admin_required
 def get_teacher_class_assignments(teacher_id):
