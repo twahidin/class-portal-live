@@ -1665,9 +1665,30 @@ def create_assignment():
     """Create a new assignment"""
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
     
-    # Get classes and teaching groups for the teacher
-    teacher_classes = teacher.get('classes', [])
-    classes = list(Class.find({'class_id': {'$in': teacher_classes}})) if teacher_classes else []
+    # Get classes for the teacher - use comprehensive detection like dashboard
+    # Include: classes in teacher profile, students assigned to teacher, AND students with submissions
+    teacher_classes = set(teacher.get('classes', []))
+    
+    # Add classes from students assigned to this teacher
+    assigned_students = Student.find({'teachers': session['teacher_id']})
+    for student in assigned_students:
+        if student.get('class'):
+            teacher_classes.add(student.get('class'))
+    
+    # Also find students who have submissions to this teacher's assignments
+    teacher_assignments = Assignment.find({'teacher_id': session['teacher_id']})
+    teacher_assignment_ids = [a['assignment_id'] for a in teacher_assignments]
+    if teacher_assignment_ids:
+        submissions = Submission.find({'assignment_id': {'$in': teacher_assignment_ids}})
+        for sub in submissions:
+            student = Student.find_one({'student_id': sub.get('student_id')})
+            if student and student.get('class'):
+                teacher_classes.add(student.get('class'))
+    
+    # Get class documents
+    classes = list(Class.find({'class_id': {'$in': list(teacher_classes)}})) if teacher_classes else []
+    
+    # Get teaching groups for this teacher
     teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
     
     if request.method == 'POST':
@@ -1893,9 +1914,29 @@ def edit_assignment(assignment_id):
     if not assignment:
         return redirect(url_for('teacher_assignments'))
     
-    # Get classes and teaching groups for the teacher
-    teacher_classes = teacher.get('classes', [])
-    classes = list(Class.find({'class_id': {'$in': teacher_classes}})) if teacher_classes else []
+    # Get classes for the teacher - use comprehensive detection like dashboard
+    teacher_classes = set(teacher.get('classes', []))
+    
+    # Add classes from students assigned to this teacher
+    assigned_students = Student.find({'teachers': session['teacher_id']})
+    for student in assigned_students:
+        if student.get('class'):
+            teacher_classes.add(student.get('class'))
+    
+    # Also find students who have submissions to this teacher's assignments
+    teacher_assignments = Assignment.find({'teacher_id': session['teacher_id']})
+    teacher_assignment_ids = [a['assignment_id'] for a in teacher_assignments]
+    if teacher_assignment_ids:
+        submissions = Submission.find({'assignment_id': {'$in': teacher_assignment_ids}})
+        for sub in submissions:
+            student = Student.find_one({'student_id': sub.get('student_id')})
+            if student and student.get('class'):
+                teacher_classes.add(student.get('class'))
+    
+    # Get class documents
+    classes = list(Class.find({'class_id': {'$in': list(teacher_classes)}})) if teacher_classes else []
+    
+    # Get teaching groups for this teacher
     teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
     
     if request.method == 'POST':
