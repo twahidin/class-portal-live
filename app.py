@@ -218,6 +218,24 @@ def admin_logout():
 # HELPER FUNCTIONS
 # ============================================================================
 
+def get_student_teacher_ids(student_id):
+    """Get all teacher IDs for a student, including those from teaching groups"""
+    student = Student.find_one({'student_id': student_id})
+    if not student:
+        return []
+    
+    # Start with directly assigned teachers
+    teacher_ids = set(student.get('teachers', []))
+    
+    # Find all teaching groups that include this student
+    teaching_groups = TeachingGroup.find({'student_ids': student_id})
+    for group in teaching_groups:
+        teacher_id = group.get('teacher_id')
+        if teacher_id:
+            teacher_ids.add(teacher_id)
+    
+    return list(teacher_ids)
+
 def can_student_access_assignment(student, assignment):
     """Check if a student can access an assignment based on its target (class or teaching group)"""
     # If no target is specified, assignment is available to all students of the teacher
@@ -449,9 +467,10 @@ def poll_messages(teacher_id):
 def assignments_list():
     """List subjects with assignments"""
     student = Student.find_one({'student_id': session['student_id']})
-    teacher_ids = student.get('teachers', [])
+    # Get all teacher IDs including those from teaching groups
+    teacher_ids = get_student_teacher_ids(session['student_id'])
     
-    # Get all assignments from student's teachers
+    # Get all assignments from student's teachers (including via teaching groups)
     all_assignments = list(Assignment.find({
         'teacher_id': {'$in': teacher_ids},
         'status': 'published'
@@ -491,7 +510,8 @@ def assignments_list():
 def assignments_by_subject(subject):
     """List assignments for a specific subject"""
     student = Student.find_one({'student_id': session['student_id']})
-    teacher_ids = student.get('teachers', [])
+    # Get all teacher IDs including those from teaching groups
+    teacher_ids = get_student_teacher_ids(session['student_id'])
     
     all_assignments = list(Assignment.find({
         'teacher_id': {'$in': teacher_ids},
@@ -529,7 +549,12 @@ def view_assignment(assignment_id):
     if not assignment:
         return redirect(url_for('assignments_list'))
     
-    # Check if student can access this assignment
+    # Check if student has access to this teacher (directly or via teaching group)
+    teacher_ids = get_student_teacher_ids(session['student_id'])
+    if assignment.get('teacher_id') not in teacher_ids:
+        return redirect(url_for('assignments_list'))
+    
+    # Check if student can access this assignment based on target class/teaching group
     if not can_student_access_assignment(student, assignment):
         return redirect(url_for('assignments_list'))
     
