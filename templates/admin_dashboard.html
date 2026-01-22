@@ -317,8 +317,8 @@
 
                 <!-- Assign Teacher to Class -->
                 <div class="col-lg-4">
-                    <div class="card">
-                        <div class="card-header">
+                    <div class="card h-100">
+                        <div class="card-header bg-warning text-dark">
                             <h5 class="mb-0"><i class="bi bi-link me-2"></i>Assign Teacher to Class</h5>
                         </div>
                         <div class="card-body">
@@ -346,6 +346,41 @@
                                 </button>
                             </form>
                             <div id="assign-result" class="mt-3" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Unassign Teacher from Class -->
+                <div class="col-lg-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-danger text-white">
+                            <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Unassign Teacher from Class</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="unassign-teacher-form">
+                                <div class="mb-3">
+                                    <label class="form-label">Teacher *</label>
+                                    <select class="form-select" id="unassign_teacher_id" required>
+                                        <option value="">Select teacher...</option>
+                                        {% for t in teachers %}
+                                        <option value="{{ t.teacher_id }}">{{ t.name }} ({{ t.teacher_id }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Class *</label>
+                                    <select class="form-select" id="unassign_class_id" required>
+                                        <option value="">Select class...</option>
+                                        {% for c in classes %}
+                                        <option value="{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn btn-danger">
+                                    <i class="bi bi-x-circle me-1"></i>Unassign Teacher
+                                </button>
+                            </form>
+                            <div id="unassign-result" class="mt-3" style="display: none;"></div>
                         </div>
                     </div>
                 </div>
@@ -2315,6 +2350,36 @@
             }
         } catch (error) {
             showResult('assign-result', 'Failed to assign', 'danger');
+        }
+    });
+
+    document.getElementById('unassign-teacher-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const teacherId = document.getElementById('unassign_teacher_id').value;
+        const classId = document.getElementById('unassign_class_id').value;
+        
+        if (!confirm(`Are you sure you want to unassign this teacher from all students in class "${classId}"?`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/admin/unassign_teacher', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ teacher_id: teacherId, class_id: classId })
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                showResult('unassign-result', `Unassigned from ${result.updated} students`, 'success');
+                e.target.reset();
+                // Reload page to update counts
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showResult('unassign-result', result.error, 'danger');
+            }
+        } catch (error) {
+            showResult('unassign-result', 'Failed to unassign', 'danger');
         }
     });
 

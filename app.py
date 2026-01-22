@@ -3357,6 +3357,39 @@ def assign_teacher():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/admin/unassign_teacher', methods=['POST'])
+@admin_required
+def unassign_teacher():
+    """Unassign a teacher from students in a class"""
+    try:
+        data = request.get_json()
+        
+        teacher_id = data.get('teacher_id')
+        class_id = data.get('class_id')
+        
+        if not teacher_id:
+            return jsonify({'error': 'Teacher ID required'}), 400
+        
+        if not class_id:
+            return jsonify({'error': 'Class ID required'}), 400
+        
+        # Remove teacher from all students in this class
+        result = Student.update_many(
+            {'class': class_id},
+            {'$pull': {'teachers': teacher_id}}
+        )
+        
+        return jsonify({
+            'success': True, 
+            'updated': result.modified_count,
+            'message': f'Unassigned {teacher_id} from {result.modified_count} students in class {class_id}'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error unassigning teacher: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/assign_students_to_class', methods=['POST'])
 @admin_required
 def assign_students_to_class():
