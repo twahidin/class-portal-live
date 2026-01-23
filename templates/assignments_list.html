@@ -95,18 +95,13 @@
                 <div class="subject-info">
                     <h4>{{ subject.name }}</h4>
                     <div class="subject-stats">
+                        {% set total_submitted = subject.submitted + subject.feedback %}
                         <span class="total">
-                            <i class="bi bi-file-text me-1"></i>{{ subject.total }} assignment{% if subject.total != 1 %}s{% endif %}
+                            <i class="bi bi-file-text me-1"></i>{{ subject.total }} assignment{% if subject.total != 1 %}s{% endif %} due
+                            {% if total_submitted > 0 %}
+                            • {{ total_submitted }} submitted
+                            {% endif %}
                         </span>
-                        {% if subject.feedback > 0 %}
-                        <span class="feedback">
-                            <i class="bi bi-check-circle-fill me-1"></i>{{ subject.feedback }} feedback given
-                        </span>
-                        {% elif subject.submitted > 0 %}
-                        <span class="submitted">
-                            <i class="bi bi-upload me-1"></i>{{ subject.submitted }} submitted
-                        </span>
-                        {% endif %}
                     </div>
                     <div class="progress mt-2" style="height: 6px;">
                         {% set total_done = subject.feedback + subject.submitted %}

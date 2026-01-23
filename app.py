@@ -351,9 +351,44 @@ def dashboard():
         shared_classes = list(set(student_classes) & set(teacher_classes))
         t['shared_classes'] = shared_classes
     
+    # Calculate assignment status counts for the dashboard
+    teacher_ids = get_student_teacher_ids(session['student_id'])
+    all_assignments = list(Assignment.find({
+        'teacher_id': {'$in': teacher_ids},
+        'status': 'published'
+    }))
+    
+    # Filter assignments based on target class/teaching group
+    assignments = [a for a in all_assignments if can_student_access_assignment(student, a)]
+    
+    # Count assignments by status
+    not_submitted_count = 0
+    pending_review_count = 0
+    feedback_received_count = 0
+    
+    for a in assignments:
+        submission = Submission.find_one({
+            'assignment_id': a['assignment_id'],
+            'student_id': session['student_id']
+        })
+        
+        if not submission:
+            not_submitted_count += 1
+        elif submission.get('status') in ['submitted', 'ai_reviewed']:
+            pending_review_count += 1
+        elif submission.get('feedback_sent', False) or submission.get('status') in ['reviewed', 'approved']:
+            feedback_received_count += 1
+    
+    assignment_stats = {
+        'not_submitted': not_submitted_count,
+        'pending_review': pending_review_count,
+        'feedback_received': feedback_received_count
+    }
+    
     return render_template('dashboard.html', 
                          student=student, 
-                         teachers=teachers)
+                         teachers=teachers,
+                         assignment_stats=assignment_stats)
 
 @app.route('/chat/<teacher_id>')
 @login_required
@@ -573,6 +608,9 @@ def assignments_by_subject(subject):
     # Filter assignments based on target class/teaching group
     assignments = [a for a in all_assignments if can_student_access_assignment(student, a)]
     
+    # Count submitted assignments
+    submitted_count = 0
+    
     # Add submission status and teacher info for each
     for a in assignments:
         submission = Submission.find_one({
@@ -581,6 +619,26 @@ def assignments_by_subject(subject):
         })
         a['submission'] = submission
         
+        # Determine status for display
+        if not submission:
+            a['status_display'] = 'Un-Submitted'
+            a['status_class'] = 'secondary'
+        elif submission.get('status') == 'rejected':
+            a['status_display'] = 'Rejected'
+            a['status_class'] = 'danger'
+            submitted_count += 1  # Rejected still counts as submitted
+        elif submission.get('status') in ['submitted', 'ai_reviewed']:
+            a['status_display'] = 'Pending Review'
+            a['status_class'] = 'warning'
+            submitted_count += 1
+        elif submission.get('feedback_sent', False) or submission.get('status') in ['reviewed', 'approved']:
+            a['status_display'] = 'Feedback Received'
+            a['status_class'] = 'success'
+            submitted_count += 1
+        else:
+            a['status_display'] = 'Un-Submitted'
+            a['status_class'] = 'secondary'
+        
         # Add teacher info
         teacher = Teacher.find_one({'teacher_id': a['teacher_id']})
         a['teacher_name'] = teacher.get('name', a['teacher_id']) if teacher else a['teacher_id']
@@ -588,7 +646,9 @@ def assignments_by_subject(subject):
     return render_template('assignments_subject.html',
                          student=student,
                          subject=subject,
-                         assignments=assignments)
+                         assignments=assignments,
+                         total_count=len(assignments),
+                         submitted_count=submitted_count)
 
 @app.route('/assignments/<assignment_id>')
 @login_required

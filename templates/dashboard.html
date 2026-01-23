@@ -127,6 +127,15 @@
                 <div class="stat-info">
                     <h3>View All</h3>
                     <p>Assignments</p>
+                    {% if assignment_stats %}
+                    <div class="assignment-status-summary mt-2" style="font-size: 0.85rem;">
+                        <div class="d-flex flex-column gap-1">
+                            <span><strong>Not Submitted:</strong> {{ assignment_stats.not_submitted }}</span>
+                            <span><strong>Pending Review:</strong> {{ assignment_stats.pending_review }}</span>
+                            <span><strong>Feedback Received:</strong> {{ assignment_stats.feedback_received }}</span>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </a>
         </div>
