@@ -293,8 +293,8 @@ def dashboard():
     if not student_classes and student.get('class'):
         student_classes = [student.get('class')]
     
-    # Get assigned teachers
-    teacher_ids = student.get('teachers', [])
+    # Get assigned teachers (including those from teaching groups)
+    teacher_ids = get_student_teacher_ids(session['student_id'])
     teachers = list(Teacher.find({'teacher_id': {'$in': teacher_ids}}))
     
     # Get unread message counts and shared classes for each teacher
@@ -326,8 +326,9 @@ def chat(teacher_id):
     if not teacher:
         return redirect(url_for('dashboard'))
     
-    # Check if student is assigned to this teacher
-    if teacher_id not in student.get('teachers', []):
+    # Check if student is assigned to this teacher (directly or via teaching group)
+    teacher_ids = get_student_teacher_ids(session['student_id'])
+    if teacher_id not in teacher_ids:
         return redirect(url_for('dashboard'))
     
     # Get messages
