@@ -146,8 +146,21 @@ def generate_review_pdf(submission: dict, assignment: dict, student: dict, teach
     final_marks = submission.get('final_marks')
     total_marks = assignment.get('total_marks', 100)
     
+    # Convert to float if string
     if final_marks is not None:
-        percentage = (final_marks / total_marks * 100) if total_marks > 0 else 0
+        try:
+            final_marks = float(final_marks) if isinstance(final_marks, str) else final_marks
+        except (ValueError, TypeError):
+            final_marks = 0
+    
+    if isinstance(total_marks, str):
+        try:
+            total_marks = float(total_marks)
+        except (ValueError, TypeError):
+            total_marks = 100
+    
+    if final_marks is not None:
+        percentage = (float(final_marks) / float(total_marks) * 100) if total_marks > 0 else 0
         grade = get_grade(percentage)
         
         score_data = [[
@@ -862,8 +875,21 @@ def generate_student_feedback_elements(submission: dict, assignment: dict, stude
     final_marks = submission.get('final_marks')
     total_marks = assignment.get('total_marks', 100)
     
+    # Convert to float if string
     if final_marks is not None:
-        percentage = (final_marks / total_marks * 100) if total_marks > 0 else 0
+        try:
+            final_marks = float(final_marks) if isinstance(final_marks, str) else final_marks
+        except (ValueError, TypeError):
+            final_marks = 0
+    
+    if isinstance(total_marks, str):
+        try:
+            total_marks = float(total_marks)
+        except (ValueError, TypeError):
+            total_marks = 100
+    
+    if final_marks is not None:
+        percentage = (float(final_marks) / float(total_marks) * 100) if total_marks > 0 else 0
         elements.append(Paragraph(f"<b>Score: {final_marks}/{total_marks} ({percentage:.1f}%)</b>", styles['Heading_Custom']))
     
     elements.append(Spacer(1, 10))

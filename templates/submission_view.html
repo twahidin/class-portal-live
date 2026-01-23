@@ -66,7 +66,9 @@
                     <div class="score-box">
                         <div class="score-value">{{ submission.get('final_marks', 0) }}<span class="score-total">/{{ assignment.get('total_marks', 100) }}</span></div>
                         <div class="score-label">Your Score</div>
-                        {% set percentage = (submission.get('final_marks', 0) / assignment.get('total_marks', 100) * 100) if assignment.get('total_marks', 100) > 0 else 0 %}
+                        {% set final_marks_num = submission.get('final_marks', 0)|float %}
+                        {% set total_marks_num = assignment.get('total_marks', 100)|float %}
+                        {% set percentage = (final_marks_num / total_marks_num * 100) if total_marks_num > 0 else 0 %}
                         <div class="progress mt-2" style="height: 8px;">
                             <div class="progress-bar {% if percentage >= 70 %}bg-success{% elif percentage >= 50 %}bg-warning{% else %}bg-danger{% endif %}" 
                                  style="width: {{ percentage }}%"></div>
