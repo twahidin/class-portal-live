@@ -54,7 +54,8 @@
         {% for submission in submissions %}
         <div class="submission-card">
             <div class="submission-status">
-                {% if submission.status == 'approved' %}
+                {% set feedback_sent = submission.get('feedback_sent', False) %}
+                {% if submission.status == 'approved' or submission.status == 'reviewed' or feedback_sent %}
                 <span class="status-icon success"><i class="bi bi-check-circle-fill"></i></span>
                 {% elif submission.status in ['submitted', 'ai_reviewed'] %}
                 <span class="status-icon warning"><i class="bi bi-hourglass-split"></i></span>
@@ -70,14 +71,17 @@
                     {% if submission.submitted_at %}
                     <span><i class="bi bi-clock me-1"></i>Submitted: {{ (submission.submitted_at|sgt).strftime('%d %b %Y, %H:%M') }} SGT</span>
                     {% endif %}
-                    {% if submission.teacher_review and submission.teacher_review.final_score is defined %}
+                    {% if submission.get('final_marks') is not none %}
+                    <span class="score"><i class="bi bi-star-fill me-1"></i>Score: {{ submission.get('final_marks', 0) }}/{{ submission.assignment.total_marks if submission.assignment else '?' }}</span>
+                    {% elif submission.teacher_review and submission.teacher_review.final_score is defined %}
                     <span class="score"><i class="bi bi-star-fill me-1"></i>Score: {{ submission.teacher_review.final_score }}/{{ submission.assignment.total_marks if submission.assignment else '?' }}</span>
                     {% endif %}
                 </div>
                 
                 <div class="status-text mt-2">
-                    {% if submission.status == 'approved' %}
-                    <span class="text-success"><i class="bi bi-check-circle me-1"></i>Reviewed by teacher</span>
+                    {% set feedback_sent = submission.get('feedback_sent', False) %}
+                    {% if submission.status == 'approved' or submission.status == 'reviewed' or feedback_sent %}
+                    <span class="text-success"><i class="bi bi-check-circle me-1"></i>Feedback received</span>
                     {% elif submission.status == 'ai_reviewed' %}
                     <span class="text-info"><i class="bi bi-robot me-1"></i>AI reviewed - awaiting teacher</span>
                     {% elif submission.status == 'submitted' %}
@@ -92,7 +96,8 @@
                 <a href="{{ url_for('view_submission', submission_id=submission.submission_id) }}" class="btn btn-outline-primary">
                     <i class="bi bi-eye me-1"></i>View
                 </a>
-                {% if submission.status == 'approved' %}
+                {% set feedback_sent = submission.get('feedback_sent', False) %}
+                {% if submission.status == 'approved' or submission.status == 'reviewed' or feedback_sent %}
                 <a href="{{ url_for('download_submission_pdf', submission_id=submission.submission_id) }}" class="btn btn-outline-success">
                     <i class="bi bi-download me-1"></i>PDF
                 </a>
