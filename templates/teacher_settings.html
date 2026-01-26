@@ -662,6 +662,25 @@
         }, 2000);
     }
     
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            // Show temporary success message
+            const event = new CustomEvent('showToast', {
+                detail: { title: 'Copied!', message: 'Email copied to clipboard', type: 'success' }
+            });
+            window.dispatchEvent(event);
+        }).catch(() => {
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            alert('Copied to clipboard!');
+        });
+    }
+    
     // Load on page load
     loadServiceAccountInfo();
     
@@ -687,16 +706,23 @@
             } else {
                 let troubleshooting = '';
                 if (data.troubleshooting) {
-                    troubleshooting = '<ul class="mb-0 mt-2"><li>' + data.troubleshooting.join('</li><li>') + '</li></ul>';
+                    troubleshooting = '<ol class="mb-0 mt-2"><li>' + data.troubleshooting.join('</li><li>') + '</li></ol>';
+                }
+                
+                let verificationSteps = '';
+                if (data.verification_steps) {
+                    verificationSteps = '<div class="mt-2"><strong>Verification:</strong><ul class="mb-0"><li>' + data.verification_steps.join('</li><li>') + '</li></ul></div>';
                 }
                 
                 resultDiv.innerHTML = `
                     <div class="alert alert-danger">
                         <i class="bi bi-exclamation-triangle me-1"></i><strong>Access Failed</strong><br>
                         ${data.error || 'Unknown error'}<br>
-                        ${data.details ? '<small>' + data.details + '</small>' : ''}
+                        ${data.details ? '<small class="d-block mt-1">' + data.details + '</small>' : ''}
+                        ${data.folder_id ? `<small class="d-block mt-1"><strong>Folder ID being tested:</strong> <code>${data.folder_id}</code></small>` : ''}
+                        ${data.service_account ? `<div class="mt-2 p-2 bg-light rounded"><strong>Service Account Email:</strong><br><code class="d-block mt-1">${data.service_account}</code><button class="btn btn-sm btn-outline-primary mt-2" onclick="copyToClipboard('${data.service_account}')"><i class="bi bi-clipboard me-1"></i>Copy Email</button></div>` : ''}
                         ${troubleshooting}
-                        ${data.service_account ? `<small class="d-block mt-2"><strong>Service Account:</strong> ${data.service_account}</small>` : ''}
+                        ${verificationSteps}
                     </div>
                 `;
             }

@@ -3976,6 +3976,10 @@ def test_folder_access():
         
         service_account_email = get_service_account_email()
         
+        # Log the folder ID being tested
+        logger.info(f"Testing folder access for ID: {source_folder_id}")
+        logger.info(f"Service account: {service_account_email}")
+        
         manager = DriveManager(service)
         has_access, error_msg = manager.verify_folder_access(folder_id=source_folder_id)
         
@@ -4000,19 +4004,27 @@ def test_folder_access():
                     'service_account': service_account_email
                 }), 500
         else:
-            return jsonify({
-                'success': False,
-                'error': error_msg,
-                'folder_id': source_folder_id,
-                'service_account': service_account_email,
-                'troubleshooting': [
-                    '1. Verify the folder ID is correct',
-                    f'2. Share the folder with: {service_account_email}',
-                    '3. Set permission to "Editor" (not Viewer)',
-                    '4. Uncheck "Notify people" when sharing',
-                    '5. Wait a few seconds after sharing for permissions to propagate'
-                ]
-            }), 403
+                return jsonify({
+                    'success': False,
+                    'error': error_msg,
+                    'folder_id': source_folder_id,
+                    'folder_id_from_url': 'Copy from: drive.google.com/drive/folders/[FOLDER_ID]',
+                    'service_account': service_account_email,
+                    'troubleshooting': [
+                        '1. Right-click the folder in Google Drive',
+                        '2. Click "Share"',
+                        f'3. Paste this email: {service_account_email}',
+                        '4. Set permission to "Editor" (NOT Viewer or Commenter)',
+                        '5. UNCHECK "Notify people" checkbox',
+                        '6. Click "Share"',
+                        '7. Wait 10-30 seconds for permissions to propagate',
+                        '8. Click "Test Folder Access" again'
+                    ],
+                    'verification_steps': [
+                        'To verify sharing: Right-click folder > Share > Check if the service account email appears in the list',
+                        'If it does not appear, add it following the steps above'
+                    ]
+                }), 403
         
     except Exception as e:
         logger.error(f"Error testing folder access: {e}", exc_info=True)
