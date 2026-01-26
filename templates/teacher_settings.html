@@ -298,10 +298,13 @@
                             </div>
                         </div>
                         
-                        <div class="alert alert-warning mb-3">
-                            <i class="bi bi-exclamation-triangle me-2"></i>
-                            <strong>Important:</strong> You must share <strong>both folders</strong> with the service account email shown above. 
-                            Set permission to <strong>Editor</strong> for both folders.
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <strong>Sharing Requirements:</strong>
+                            <ul class="mb-0 mt-2">
+                                <li><strong>Submissions Folder:</strong> Must be shared with <strong>Editor</strong> permission (needs to upload files)</li>
+                                <li><strong>Source Files Folder:</strong> Can be shared with <strong>Viewer</strong> permission (only reads files, doesn't modify)</li>
+                            </ul>
                         </div>
                         
                         <div class="mb-3">
@@ -329,7 +332,7 @@
                             <small class="text-muted">
                                 Folder containing your question papers, answer keys, and reference materials. You can browse and select files from this folder when creating assignments instead of uploading from your computer.
                                 <br>Find this in the URL when viewing the folder: drive.google.com/drive/folders/<strong>[FOLDER_ID]</strong>
-                                <br><strong class="text-danger">⚠️ Must be shared with service account email above with Editor access.</strong>
+                                <br><strong class="text-info">ℹ️ Files are referenced directly from your Drive (not copied). Viewer permission is sufficient for reading files.</strong>
                             </small>
                         </div>
                         
@@ -369,11 +372,14 @@
                                         <li>Upload your PDFs, Google Docs, or Google Sheets to this folder</li>
                                         <li>Right-click the folder and select <strong>Share</strong></li>
                                         <li>Paste the <strong>same service account email</strong> shown above</li>
-                                        <li>Set permission to <strong>Editor</strong></li>
+                                        <li>Set permission to <strong>Viewer</strong> (sufficient for reading files - files are referenced, not copied)</li>
                                         <li>Uncheck "Notify people" and click <strong>Share</strong></li>
                                         <li>Copy the Folder ID from the URL</li>
                                         <li>Paste it in the "Google Drive Source Files Folder ID" field above</li>
                                     </ol>
+                                    <div class="alert alert-info mt-2 mb-0">
+                                        <small><i class="bi bi-info-circle me-1"></i><strong>Note:</strong> Files from this folder are referenced directly from Google Drive (not copied). The system only reads them when needed, so Viewer permission is sufficient.</small>
+                                    </div>
                                     <div class="alert alert-info mt-3 mb-0">
                                         <small><i class="bi bi-info-circle me-1"></i><strong>Note:</strong> You can use the same folder for both, but it's recommended to keep them separate for better organization.</small>
                                     </div>
