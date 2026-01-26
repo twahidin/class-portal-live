@@ -232,14 +232,25 @@ class DriveManager:
                     fileId=target_folder_id,
                     fields="id, name, mimeType, permissions"
                 ).execute()
+                logger.info(f"Successfully accessed folder: {folder.get('name')} (ID: {target_folder_id})")
             except Exception as api_error:
                 error_str = str(api_error)
-                if 'insufficientFilePermissions' in error_str or 'permissionDenied' in error_str:
-                    return False, f"Permission denied. The folder is not shared with the service account or doesn't have Editor access."
-                elif 'notFound' in error_str or 'File not found' in error_str:
-                    return False, f"Folder not found. Please check that the folder ID '{target_folder_id}' is correct."
+                error_details = repr(api_error)
+                
+                # Log the full error for debugging
+                logger.error(f"Google Drive API error for folder {target_folder_id}: {error_details}")
+                
+                # Check for specific error types
+                if 'insufficientFilePermissions' in error_str or 'permissionDenied' in error_str or '403' in error_str:
+                    return False, f"Permission denied (403). The folder exists but the service account doesn't have access. Verify: 1) Folder is shared with service account, 2) Permission is 'Editor', 3) Wait 30-60 seconds after sharing."
+                elif 'notFound' in error_str or 'File not found' in error_str or '404' in error_str:
+                    # Sometimes Google returns 404 even when it's a permission issue
+                    # Try to get more info
+                    return False, f"Folder not found (404). This usually means: 1) Folder ID is incorrect, OR 2) Service account doesn't have access (Google returns 404 for security). Verify the folder ID matches the URL exactly: drive.google.com/drive/folders/{target_folder_id}"
+                elif '400' in error_str or 'Bad Request' in error_str:
+                    return False, f"Bad request (400). The folder ID format may be invalid: {target_folder_id}"
                 else:
-                    return False, f"API error: {error_str}"
+                    return False, f"Google Drive API error: {error_str}. Full details logged in server logs."
             
             # Check if it's actually a folder
             if folder.get('mimeType') != 'application/vnd.google-apps.folder':
