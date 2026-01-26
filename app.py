@@ -3870,18 +3870,25 @@ def list_drive_files():
     try:
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
         if not teacher:
-            return jsonify({'error': 'Teacher not found'}), 404
+            return jsonify({'success': False, 'error': 'Teacher not found'}), 404
         
         source_folder_id = teacher.get('google_drive_source_folder_id')
         if not source_folder_id:
-            return jsonify({'error': 'Source folder not configured'}), 400
+            return jsonify({'success': False, 'error': 'Source folder not configured. Please set it in Settings.'}), 400
         
         from utils.google_drive import get_drive_service, DriveManager
         service = get_drive_service()
         if not service:
-            return jsonify({'error': 'Google Drive not configured'}), 500
+            return jsonify({'success': False, 'error': 'Google Drive service not configured. Please contact administrator.'}), 500
         
         manager = DriveManager(service)
+        
+        # First verify we have access to the folder
+        if not manager.verify_folder_access(folder_id=source_folder_id):
+            return jsonify({
+                'success': False,
+                'error': 'Cannot access folder. Please verify: 1) The folder ID is correct, 2) The folder is shared with the service account email with Editor access.'
+            }), 403
         
         # List PDFs, Google Docs, and Google Sheets
         mime_types = [
@@ -3890,7 +3897,9 @@ def list_drive_files():
             'application/vnd.google-apps.spreadsheet'
         ]
         
+        logger.info(f"Listing files from folder {source_folder_id} for teacher {session['teacher_id']}")
         files = manager.list_files(folder_id=source_folder_id, mime_types=mime_types)
+        logger.info(f"Found {len(files)} files in folder")
         
         # Format files for frontend
         formatted_files = []
@@ -3913,12 +3922,29 @@ def list_drive_files():
         
         return jsonify({
             'success': True,
-            'files': formatted_files
+            'files': formatted_files,
+            'count': len(formatted_files)
         })
         
     except Exception as e:
-        logger.error(f"Error listing Drive files: {e}")
-        return jsonify({'error': str(e)}), 500
+        error_msg = str(e)
+        logger.error(f"Error listing Drive files: {error_msg}", exc_info=True)
+        # Provide more helpful error messages
+        if 'insufficient permissions' in error_msg.lower() or 'permission denied' in error_msg.lower():
+            return jsonify({
+                'success': False, 
+                'error': 'Permission denied. Please ensure the folder is shared with the service account email with Editor access.'
+            }), 403
+        elif 'not found' in error_msg.lower():
+            return jsonify({
+                'success': False,
+                'error': 'Folder not found. Please check the folder ID in Settings.'
+            }), 404
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Error loading files: {error_msg}'
+            }), 500
 
 @app.route('/api/teacher/drive/files/<file_id>/download', methods=['GET'])
 @teacher_required

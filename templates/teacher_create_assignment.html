@@ -727,7 +727,7 @@
             const response = await fetch('/api/teacher/drive/files');
             const data = await response.json();
             
-            if (data.success && data.files) {
+            if (data.success && data.files && data.files.length > 0) {
                 select.innerHTML = '<option value="">-- Select a file from Google Drive --</option>';
                 data.files.forEach(file => {
                     const option = document.createElement('option');
@@ -738,12 +738,38 @@
                     select.appendChild(option);
                 });
                 select.disabled = false;
+                
+                // Show success message
+                if (data.count && typeof showToast === 'function') {
+                    showToast('Success', `Loaded ${data.count} file(s) from Google Drive`, 'success');
+                }
+            } else if (data.success && data.files && data.files.length === 0) {
+                select.innerHTML = '<option value="">No PDFs, Docs, or Sheets found in this folder</option>';
+                const msg = 'No files found. Make sure the folder contains PDFs, Google Docs, or Google Sheets.';
+                if (typeof showToast === 'function') {
+                    showToast('Info', msg, 'info');
+                } else {
+                    alert(msg);
+                }
             } else {
-                select.innerHTML = '<option value="">No files found or error loading</option>';
+                const errorMsg = data.error || 'Unknown error loading files';
+                select.innerHTML = `<option value="">Error: ${errorMsg}</option>`;
+                if (typeof showToast === 'function') {
+                    showToast('Error', errorMsg, 'danger');
+                } else {
+                    alert('Error: ' + errorMsg);
+                }
+                console.error('Drive API error:', data);
             }
         } catch (error) {
             console.error('Error loading Drive files:', error);
-            select.innerHTML = '<option value="">Error loading files</option>';
+            select.innerHTML = '<option value="">Network error loading files</option>';
+            const msg = 'Failed to connect to server. Please try again.';
+            if (typeof showToast === 'function') {
+                showToast('Error', msg, 'danger');
+            } else {
+                alert(msg);
+            }
         }
     }
     
