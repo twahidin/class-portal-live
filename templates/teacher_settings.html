@@ -337,6 +337,12 @@
                         <div class="alert alert-success">
                             <i class="bi bi-check-circle me-1"></i>Source files folder configured
                         </div>
+                        <div class="mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="testFolderAccess()">
+                                <i class="bi bi-check-circle me-1"></i>Test Folder Access
+                            </button>
+                            <div id="folder-test-result" class="mt-2"></div>
+                        </div>
                         {% endif %}
                         
                         <!-- Setup Instructions -->
@@ -658,6 +664,50 @@
     
     // Load on page load
     loadServiceAccountInfo();
+    
+    // Test folder access
+    async function testFolderAccess() {
+        const resultDiv = document.getElementById('folder-test-result');
+        if (!resultDiv) return;
+        
+        resultDiv.innerHTML = '<div class="alert alert-info"><i class="bi bi-hourglass-split me-1"></i>Testing folder access...</div>';
+        
+        try {
+            const response = await fetch('/api/teacher/drive/test-folder-access');
+            const data = await response.json();
+            
+            if (data.success) {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle me-1"></i><strong>Success!</strong><br>
+                        ${data.message}<br>
+                        <small>Found ${data.file_count} PDF file(s) in folder</small>
+                    </div>
+                `;
+            } else {
+                let troubleshooting = '';
+                if (data.troubleshooting) {
+                    troubleshooting = '<ul class="mb-0 mt-2"><li>' + data.troubleshooting.join('</li><li>') + '</li></ul>';
+                }
+                
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle me-1"></i><strong>Access Failed</strong><br>
+                        ${data.error || 'Unknown error'}<br>
+                        ${data.details ? '<small>' + data.details + '</small>' : ''}
+                        ${troubleshooting}
+                        ${data.service_account ? `<small class="d-block mt-2"><strong>Service Account:</strong> ${data.service_account}</small>` : ''}
+                    </div>
+                `;
+            }
+        } catch (error) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle me-1"></i>Error testing access: ${error.message}
+                </div>
+            `;
+        }
+    }
 
     // Change Password
     document.getElementById('change-password-btn').addEventListener('click', async () => {

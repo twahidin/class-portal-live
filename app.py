@@ -3884,10 +3884,12 @@ def list_drive_files():
         manager = DriveManager(service)
         
         # First verify we have access to the folder
-        if not manager.verify_folder_access(folder_id=source_folder_id):
+        has_access, error_msg = manager.verify_folder_access(folder_id=source_folder_id)
+        if not has_access:
+            logger.error(f"Folder access verification failed: {error_msg}")
             return jsonify({
                 'success': False,
-                'error': 'Cannot access folder. Please verify: 1) The folder ID is correct, 2) The folder is shared with the service account email with Editor access.'
+                'error': error_msg
             }), 403
         
         # List PDFs, Google Docs, and Google Sheets
@@ -3945,6 +3947,79 @@ def list_drive_files():
                 'success': False,
                 'error': f'Error loading files: {error_msg}'
             }), 500
+
+@app.route('/api/teacher/drive/test-folder-access', methods=['GET'])
+@teacher_required
+def test_folder_access():
+    """Test access to the configured source folder - for debugging"""
+    try:
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        if not teacher:
+            return jsonify({'success': False, 'error': 'Teacher not found'}), 404
+        
+        source_folder_id = teacher.get('google_drive_source_folder_id')
+        if not source_folder_id:
+            return jsonify({
+                'success': False,
+                'error': 'Source folder not configured',
+                'details': 'Please set the Source Files Folder ID in Settings'
+            }), 400
+        
+        from utils.google_drive import get_drive_service, DriveManager, get_service_account_email
+        service = get_drive_service()
+        if not service:
+            return jsonify({
+                'success': False,
+                'error': 'Google Drive service not configured',
+                'details': 'Service account credentials are missing'
+            }), 500
+        
+        service_account_email = get_service_account_email()
+        
+        manager = DriveManager(service)
+        has_access, error_msg = manager.verify_folder_access(folder_id=source_folder_id)
+        
+        if has_access:
+            # Try to list files to see if we can actually read them
+            try:
+                files = manager.list_files(folder_id=source_folder_id, mime_types=['application/pdf'])
+                return jsonify({
+                    'success': True,
+                    'message': 'Folder access verified successfully',
+                    'folder_id': source_folder_id,
+                    'service_account': service_account_email,
+                    'file_count': len(files),
+                    'details': f'Found {len(files)} PDF files (testing with PDFs only)'
+                })
+            except Exception as list_error:
+                return jsonify({
+                    'success': False,
+                    'error': 'Can access folder but cannot list files',
+                    'details': str(list_error),
+                    'folder_id': source_folder_id,
+                    'service_account': service_account_email
+                }), 500
+        else:
+            return jsonify({
+                'success': False,
+                'error': error_msg,
+                'folder_id': source_folder_id,
+                'service_account': service_account_email,
+                'troubleshooting': [
+                    '1. Verify the folder ID is correct',
+                    f'2. Share the folder with: {service_account_email}',
+                    '3. Set permission to "Editor" (not Viewer)',
+                    '4. Uncheck "Notify people" when sharing',
+                    '5. Wait a few seconds after sharing for permissions to propagate'
+                ]
+            }), 403
+        
+    except Exception as e:
+        logger.error(f"Error testing folder access: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/api/teacher/drive/files/<file_id>/download', methods=['GET'])
 @teacher_required

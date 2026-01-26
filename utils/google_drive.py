@@ -215,29 +215,42 @@ class DriveManager:
             logger.error(f"Error listing files from folder {folder_id or self.folder_id}: {e}", exc_info=True)
             raise  # Re-raise to let caller handle it
     
-    def verify_folder_access(self, folder_id: str = None) -> bool:
-        """Verify that we have access to a folder"""
+    def verify_folder_access(self, folder_id: str = None) -> tuple[bool, str]:
+        """Verify that we have access to a folder
+        
+        Returns:
+            (success: bool, error_message: str)
+        """
         try:
             target_folder_id = folder_id or self.folder_id
             if not target_folder_id:
-                return False
+                return False, "No folder ID provided"
             
             # Try to get folder metadata
-            folder = self.service.files().get(
-                fileId=target_folder_id,
-                fields="id, name, mimeType"
-            ).execute()
+            try:
+                folder = self.service.files().get(
+                    fileId=target_folder_id,
+                    fields="id, name, mimeType, permissions"
+                ).execute()
+            except Exception as api_error:
+                error_str = str(api_error)
+                if 'insufficientFilePermissions' in error_str or 'permissionDenied' in error_str:
+                    return False, f"Permission denied. The folder is not shared with the service account or doesn't have Editor access."
+                elif 'notFound' in error_str or 'File not found' in error_str:
+                    return False, f"Folder not found. Please check that the folder ID '{target_folder_id}' is correct."
+                else:
+                    return False, f"API error: {error_str}"
             
             # Check if it's actually a folder
             if folder.get('mimeType') != 'application/vnd.google-apps.folder':
-                logger.warning(f"File {target_folder_id} is not a folder")
-                return False
+                return False, f"The ID '{target_folder_id}' is not a folder. It's a {folder.get('mimeType', 'file')}."
             
             logger.info(f"Successfully verified access to folder: {folder.get('name')}")
-            return True
+            return True, f"Access verified to folder: {folder.get('name')}"
         except Exception as e:
-            logger.error(f"Error verifying folder access: {e}", exc_info=True)
-            return False
+            error_msg = str(e)
+            logger.error(f"Error verifying folder access: {error_msg}", exc_info=True)
+            return False, f"Unexpected error: {error_msg}"
     
     def get_file_content(self, file_id: str, export_as_pdf: bool = False) -> bytes:
         """Get file content, optionally exporting Google Docs/Sheets as PDF"""
