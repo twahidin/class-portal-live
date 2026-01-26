@@ -2699,12 +2699,10 @@ def get_next_pending_submission(teacher_id, current_submission_id=None):
         query['submission_id'] = {'$ne': current_submission_id}
     
     # Get the next pending submission (oldest first)
-    next_submission = Submission.find_one(
-        query,
-        sort=[('submitted_at', 1)]  # Oldest first
-    )
+    # Use find().sort().limit(1) since find_one() doesn't support sort
+    next_submissions = list(Submission.find(query).sort('submitted_at', 1).limit(1))
     
-    return next_submission
+    return next_submissions[0] if next_submissions else None
 
 @app.route('/teacher/submissions')
 @teacher_required
