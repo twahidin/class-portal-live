@@ -1537,8 +1537,8 @@ def download_student_assignment_file(assignment_id, file_type):
 @app.route('/student/feedback/<submission_id>/pdf')
 @login_required
 def download_student_feedback_pdf(submission_id):
-    """Download feedback PDF for student"""
-    from utils.pdf_generator import generate_review_pdf
+    """Download feedback PDF for student (same content as teacher review: standard or rubric)."""
+    from utils.pdf_generator import generate_review_pdf, generate_rubric_review_pdf
     
     submission = Submission.find_one({
         'submission_id': submission_id,
@@ -1553,7 +1553,11 @@ def download_student_feedback_pdf(submission_id):
     teacher = Teacher.find_one({'teacher_id': submission.get('teacher_id')})
     
     try:
-        pdf_content = generate_review_pdf(submission, assignment, student, teacher)
+        # Use rubric PDF when assignment is rubric-based so student gets same criteria + detailed corrections
+        if assignment.get('marking_type') == 'rubric' or (submission.get('ai_feedback') or {}).get('criteria'):
+            pdf_content = generate_rubric_review_pdf(submission, assignment, student, teacher)
+        else:
+            pdf_content = generate_review_pdf(submission, assignment, student, teacher)
         
         filename = f"feedback_{assignment['title']}_{student['student_id']}.pdf"
         

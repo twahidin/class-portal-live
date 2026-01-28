@@ -146,10 +146,12 @@
                         {% set ai_feedback = submission.get('ai_feedback', {}) %}
                         {% set teacher_feedback = submission.get('teacher_feedback', {}) %}
                         {% set questions = ai_feedback.get('questions', []) %}
+                        {% set criteria = ai_feedback.get('criteria', []) %}
+                        {% set is_rubric = assignment.marking_type == 'rubric' or (criteria and not questions) %}
                         
                         {% if questions %}
                         {% set include_answer_key = submission.get('include_answer_key', False) %}
-                        <!-- Feedback Table -->
+                        <!-- Standard: Feedback Table by Question -->
                         <div class="table-responsive">
                             <table class="table table-sm feedback-table">
                                 <thead class="table-light">
@@ -222,11 +224,86 @@
                                 </tbody>
                             </table>
                         </div>
+                        {% elif is_rubric and criteria %}
+                        <!-- Rubric: same structure as teacher review -->
+                        <h6 class="mb-2"><i class="bi bi-list-check me-2"></i>Rubric Criteria Assessment</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered feedback-table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width: 15%;">Criterion</th>
+                                        <th style="width: 35%;">Reasoning for Mark</th>
+                                        <th style="width: 35%;">Feedback / Area for Improvement</th>
+                                        <th style="width: 15%;">Marks</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for criterion in criteria %}
+                                    {% set teacher_c = teacher_feedback.get('criteria', {}).get(criterion.name|string, {}) %}
+                                    <tr>
+                                        <td class="fw-bold">{{ criterion.name }}</td>
+                                        <td class="small">
+                                            {{ teacher_c.get('reasoning') or criterion.reasoning or '—' }}
+                                        </td>
+                                        <td class="small">
+                                            {{ teacher_c.get('afi') or criterion.afi or '—' }}
+                                        </td>
+                                        <td class="text-center">
+                                            {% set m = teacher_c.get('marks') if teacher_c.get('marks') is not none else criterion.marks_awarded %}
+                                            {% set mx = teacher_c.get('max_marks') or criterion.max_marks or 10 %}
+                                            {% if m is not none %}
+                                            <span class="badge bg-primary">{{ m }}/{{ mx }}</span>
+                                            {% else %}
+                                            <span class="text-muted">—/{{ mx }}</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot class="table-light">
+                                    <tr>
+                                        <td class="fw-bold">Overall</td>
+                                        <td colspan="2">
+                                            {{ teacher_feedback.get('overall_feedback') or ai_feedback.get('overall_feedback') or '—' }}
+                                        </td>
+                                        <td class="text-center fw-bold">
+                                            {{ submission.get('teacher_feedback', {}).get('total_marks') or ai_feedback.total_marks or '—' }}/{{ assignment.total_marks or 100 }}
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        {% set display_errors = teacher_feedback.get('errors') or ai_feedback.get('errors') or [] %}
+                        {% if display_errors %}
+                        <h6 class="mt-4 mb-2"><i class="bi bi-exclamation-triangle me-2"></i>Detailed Corrections</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th style="width: 15%;">Location</th>
+                                        <th style="width: 25%;">Error</th>
+                                        <th style="width: 30%;">Suggested Correction</th>
+                                        <th style="width: 30%;">Feedback</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for err in display_errors %}
+                                    <tr>
+                                        <td class="small">{{ err.location or '—' }}</td>
+                                        <td class="small">{{ err.error or '—' }}</td>
+                                        <td class="small">{{ err.correction or '—' }}</td>
+                                        <td class="small">{{ err.feedback or '—' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
                         {% endif %}
                         
-                        <!-- Overall Feedback -->
+                        <!-- Overall Feedback (standard view only; rubric already has overall in table) -->
                         {% set overall = teacher_feedback.get('overall_feedback') or ai_feedback.get('overall_feedback', '') %}
-                        {% if overall %}
+                        {% if overall and not is_rubric %}
                         <div class="overall-feedback mt-4">
                             <h6><i class="bi bi-chat-quote me-2"></i>Overall Comments</h6>
                             <div class="alert alert-secondary">
