@@ -51,33 +51,43 @@
 
 {% block content %}
 <div class="container py-4">
-    <div class="page-header mb-4">
-        <h1><i class="bi bi-inbox me-2"></i>Student Submissions</h1>
-        <p class="text-muted">Review and grade student work</p>
+    <div class="d-flex justify-content-between align-items-start mb-4">
+        <div class="page-header">
+            <h1><i class="bi bi-inbox me-2"></i>Student Submissions</h1>
+            <p class="text-muted mb-0">Review and grade student work. Select an assignment to see all students in that class or teaching group.</p>
+        </div>
+        {% if selected_assignment %}
+        <a href="{{ url_for('manual_submission', assignment_id=selected_assignment.assignment_id) }}" class="btn btn-primary">
+            <i class="bi bi-file-earmark-plus me-1"></i>Manual submission
+        </a>
+        {% endif %}
     </div>
     
-    <!-- Filters -->
+    <!-- Filters: Assignment (same class/group only) and Status -->
     <div class="card mb-4">
         <div class="card-body">
             <form method="GET" class="row g-3 align-items-end">
                 <div class="col-md-4">
-                    <label class="form-label">Status</label>
-                    <select name="status" class="form-select" onchange="this.form.submit()">
-                        <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending Review</option>
-                        <option value="approved" {% if status_filter == 'approved' %}selected{% endif %}>Reviewed</option>
-                        <option value="rejected" {% if status_filter == 'rejected' %}selected{% endif %}>Rejected</option>
-                        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
-                    </select>
-                </div>
-                <div class="col-md-4">
                     <label class="form-label">Assignment</label>
                     <select name="assignment" class="form-select" onchange="this.form.submit()">
-                        <option value="">All Assignments</option>
+                        <option value="">Select an assignment</option>
                         {% for a in assignments %}
                         <option value="{{ a.assignment_id }}" {% if assignment_filter == a.assignment_id %}selected{% endif %}>
                             {{ a.title }}
                         </option>
                         {% endfor %}
+                    </select>
+                    <small class="text-muted">Only assignments from this teaching group or class</small>
+                </div>
+                {% if selected_assignment %}
+                <div class="col-md-4">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-select" onchange="this.form.submit()">
+                        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                        <option value="not_submitted" {% if status_filter == 'not_submitted' %}selected{% endif %}>Not submitted</option>
+                        <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending Review</option>
+                        <option value="approved" {% if status_filter == 'approved' %}selected{% endif %}>Reviewed</option>
+                        <option value="rejected" {% if status_filter == 'rejected' %}selected{% endif %}>Rejected</option>
                     </select>
                 </div>
                 <div class="col-md-4">
@@ -85,17 +95,17 @@
                         <i class="bi bi-funnel me-1"></i>Apply Filters
                     </button>
                 </div>
+                {% endif %}
             </form>
         </div>
     </div>
     
-    {% if submissions %}
+    {% if selected_assignment and student_rows %}
     <div class="table-responsive">
         <table class="table table-hover submissions-table">
             <thead>
                 <tr>
                     <th>Student</th>
-                    <th>Assignment</th>
                     <th>Submitted</th>
                     <th>Status</th>
                     <th>Score</th>
@@ -103,61 +113,75 @@
                 </tr>
             </thead>
             <tbody>
-                {% for sub in submissions %}
+                {% for row in student_rows %}
                 <tr>
                     <td>
                         <div class="student-cell">
-                            <strong>{{ sub.student.name if sub.student else 'Unknown' }}</strong>
-                            <small class="text-muted d-block">{{ sub.student.student_id if sub.student else '' }}</small>
+                            <strong>{{ row.student.name }}</strong>
+                            <small class="text-muted d-block">{{ row.student.student_id }}</small>
                         </div>
                     </td>
                     <td>
-                        <div class="assignment-cell">
-                            <span>{{ sub.assignment.title if sub.assignment else 'Unknown' }}</span>
-                            <small class="text-muted d-block">{{ sub.assignment.subject if sub.assignment else '' }}</small>
-                        </div>
+                        {% if row.submission and row.submission.submitted_at %}
+                        {{ (row.submission.submitted_at|sgt).strftime('%d %b %Y, %H:%M') }} SGT
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
                     </td>
                     <td>
-                        {{ (sub.submitted_at|sgt).strftime('%d %b %Y, %H:%M') if sub.submitted_at else 'N/A' }} SGT
-                    </td>
-                    <td>
-                        {% if sub.status == 'reviewed' or sub.status == 'approved' %}
+                        {% if row.status == 'reviewed' or row.status == 'approved' %}
                         <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Reviewed</span>
-                        {% elif sub.status == 'rejected' %}
+                        {% elif row.status == 'rejected' %}
                         <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Rejected</span>
-                        {% else %}
+                        {% elif row.status in ('submitted', 'ai_reviewed') %}
                         <span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending Review</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if sub.teacher_review and sub.teacher_review.final_score is defined %}
-                        <strong>{{ sub.teacher_review.final_score }}</strong>/{{ sub.assignment.total_marks if sub.assignment else '?' }}
                         {% else %}
-                        <span class="text-muted">-</span>
+                        <span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Not submitted</span>
                         {% endif %}
                     </td>
                     <td>
-                        <a href="{{ url_for('review_submission', submission_id=sub.submission_id) }}" 
-                           class="btn btn-sm {% if sub.status in ['approved', 'reviewed'] %}btn-outline-success{% elif sub.status == 'rejected' %}btn-outline-danger{% else %}btn-primary{% endif %}">
-                            {% if sub.status in ['approved', 'reviewed'] %}
+                        {% if row.final_marks is not none %}
+                        <strong>{{ "%.0f"|format(row.final_marks) }}</strong>/{{ row.total_marks }}
+                        <small class="text-muted">({{ "%.0f"|format(row.percentage) }}%)</small>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.submission %}
+                        <a href="{{ url_for('review_submission', submission_id=row.submission.submission_id) }}"
+                           class="btn btn-sm {% if row.status in ['approved', 'reviewed'] %}btn-outline-success{% elif row.status == 'rejected' %}btn-outline-danger{% else %}btn-primary{% endif %}">
+                            {% if row.status in ['approved', 'reviewed'] %}
                             <i class="bi bi-eye me-1"></i>View
-                            {% elif sub.status == 'rejected' %}
+                            {% elif row.status == 'rejected' %}
                             <i class="bi bi-eye me-1"></i>View
                             {% else %}
                             <i class="bi bi-pencil me-1"></i>Review
                             {% endif %}
                         </a>
+                        {% else %}
+                        <span class="text-muted">—</span>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
-    {% else %}
+    {% elif selected_assignment %}
     <div class="empty-state">
         <i class="bi bi-inbox"></i>
-        <h4>No Submissions</h4>
-        <p>{% if status_filter == 'pending' %}No pending submissions to review.{% else %}No submissions found matching your filters.{% endif %}</p>
+        <h4>No students match</h4>
+        <p>No students in this class match the selected status filter. Try &quot;All&quot; to see everyone.</p>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-journal-text"></i>
+        <h4>Select an assignment</h4>
+        <p>Choose an assignment from the dropdown above to see all students in that teaching group or class and their submission status.</p>
+        <a href="{{ url_for('teacher_assignments') }}" class="btn btn-primary">
+            <i class="bi bi-journal-text me-1"></i>My Assignments
+        </a>
     </div>
     {% endif %}
 </div>

@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Feedback & Summary Report - Teacher Portal{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark teacher-nav">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('teacher_dashboard') }}">
+            <i class="bi bi-mortarboard-fill me-2"></i>Teacher Portal
+        </a>
+        <div class="navbar-nav ms-auto">
+            <a class="nav-link" href="{{ url_for('assignment_summary', assignment_id=assignment.assignment_id) }}">Summary</a>
+            <a class="nav-link" href="{{ url_for('teacher_assignments') }}">Assignments</a>
+            <a class="nav-link" href="{{ url_for('teacher_logout') }}">Logout</a>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('teacher_assignments') }}">Assignments</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('assignment_summary', assignment_id=assignment.assignment_id) }}">Summary</a></li>
+            <li class="breadcrumb-item active">Feedback & Summary Report</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-start mb-4">
+        <h3><i class="bi bi-clipboard-data me-2"></i>Feedback & Summary Report: {{ assignment.title }}</h3>
+        <a href="{{ url_for('download_heatmap_pdf', assignment_id=assignment.assignment_id) }}" class="btn btn-primary">
+            <i class="bi bi-download me-1"></i>Download heatmap (PDF)
+        </a>
+    </div>
+
+    <p class="text-muted mb-4">Based on {{ stats.submitted }} submission(s) from {{ stats.total_students }} students.</p>
+
+    <div class="row">
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Topics to go through again</h5>
+                </div>
+                <div class="card-body">
+                    {% if report.topics_to_revisit %}
+                    <ul class="list-group list-group-flush">
+                        {% for t in report.topics_to_revisit %}
+                        <li class="list-group-item">
+                            {{ t.description }}
+                            {% if t.common_wrong %}
+                            <br><small class="text-muted">Common wrong: {% for w in t.common_wrong %}"{{ w.answer }}" ({{ w.count }}){% if not loop.last %}; {% endif %}{% endfor %}</small>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="text-muted mb-0">No topics flagged from current remarks.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Students needing particular attention</h5>
+                </div>
+                <div class="card-body">
+                    {% if report.students_needing_attention %}
+                    <ul class="list-group list-group-flush">
+                        {% for s in report.students_needing_attention %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>{{ s.student.name }} <small class="text-muted">({{ s.student.student_id }})</small></span>
+                            <span class="badge {% if s.percentage < 50 %}bg-danger{% else %}bg-warning text-dark{% endif %}">{{ "%.0f"|format(s.percentage) }}%</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="text-muted mb-0">No students flagged from current scores.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Approaches to support the class</h5>
+                </div>
+                <div class="card-body">
+                    {% if report.support_approaches %}
+                    <ul class="mb-0">
+                        {% for a in report.support_approaches %}
+                        <li>{{ a }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="text-muted mb-0">No specific approaches suggested from current data.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-grid-3x3-gap me-2"></i>Score heatmap</h5>
+            <span class="badge bg-success">100%</span>
+            <span class="badge bg-warning text-dark">50–99%</span>
+            <span class="badge bg-danger">&lt;50%</span>
+            <span class="badge bg-secondary">no data</span>
+        </div>
+        <div class="card-body p-0 overflow-auto">
+            {% if report.heatmap_question_labels and report.heatmap_rows %}
+            <table class="table table-bordered table-sm mb-0 heatmap-table">
+                <thead class="table-light sticky-top">
+                    <tr>
+                        <th>Student</th>
+                        {% for q in report.heatmap_question_labels %}
+                        <th class="text-center">Q{{ q }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report.heatmap_rows %}
+                    <tr>
+                        <td>
+                            <strong>{{ row.student.name }}</strong>
+                            <br><small class="text-muted">{{ row.student.student_id }}</small>
+                        </td>
+                        {% for cell in row.cells %}
+                        <td class="text-center {{ cell.css }}" title="{% if cell.pct is not none %}{{ "%.0f"|format(cell.pct) }}%{% else %}—{% endif %}">{{ cell.label }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="p-4 text-muted mb-0">No per-question data available for heatmap. Review more submissions to see question-level scores.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+.heatmap-table td, .heatmap-table th { min-width: 3rem; }
+.heatmap-full { background-color: #d4edda !important; }
+.heatmap-partial { background-color: #fff3cd !important; }
+.heatmap-low { background-color: #f8d7da !important; }
+.heatmap-missing { background-color: #e9ecef !important; }
+</style>
+{% endblock %}

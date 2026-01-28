@@ -2002,6 +2002,219 @@ def assignment_summary(assignment_id):
                          insights=insights,
                          student_submissions=student_submissions)
 
+
+def _build_feedback_summary_report(assignment, submissions, student_submissions_list, insights):
+    """Build extended report: topics to revisit, students needing attention, support approaches, heatmap data."""
+    total_marks = float(assignment.get('total_marks', 100) or 100)
+    
+    # Topics to go through again (from insights improvements)
+    topics_to_revisit = []
+    for imp in insights.get('improvements', []):
+        topics_to_revisit.append({
+            'question': imp['question'],
+            'description': f"Q{imp['question']}: {imp['incorrect']}/{imp['total']} need improvement ({imp['percentage']}%)",
+            'percentage': imp['percentage'],
+            'common_wrong': imp.get('common_wrong', [])
+        })
+    
+    # Students needing particular attention (low scorers, or many wrong)
+    students_needing_attention = []
+    for item in student_submissions_list:
+        student, sub, status, percentage = item['student'], item.get('submission'), item['status'], item['percentage']
+        if sub and percentage is not None and (percentage < 50 or (status in ('submitted', 'ai_reviewed') and percentage < 70)):
+            students_needing_attention.append({
+                'student': student,
+                'percentage': percentage,
+                'final_marks': item.get('submission', {}).get('final_marks'),
+                'total_marks': total_marks,
+                'status': status
+            })
+    students_needing_attention.sort(key=lambda x: x['percentage'] or 0)
+    
+    # Support approaches (recommendations + targeted suggestions)
+    support_approaches = list(insights.get('recommendations', []))
+    if students_needing_attention:
+        support_approaches.append("Consider one-to-one or small-group support for students scoring below 50%.")
+    if topics_to_revisit:
+        support_approaches.append("Re-teach or recap topics for questions with high error rates before moving on.")
+    if insights.get('misconceptions'):
+        support_approaches.append("Address common misconceptions in class discussion or targeted practice.")
+    
+    # Heatmap: question labels from submissions' AI feedback
+    question_nums = set()
+    for sub in submissions:
+        for q in (sub.get('ai_feedback') or {}).get('questions', []):
+            question_nums.add(q.get('question_num'))
+    for sub in submissions:
+        for q_num in (sub.get('teacher_feedback') or {}).get('questions', {}).keys():
+            try:
+                question_nums.add(int(q_num) if isinstance(q_num, str) and q_num.isdigit() else q_num)
+            except (ValueError, TypeError):
+                question_nums.add(q_num)
+    if not question_nums and assignment.get('questions'):
+        question_nums = set(range(1, len(assignment.get('questions', [])) + 1))
+    question_labels = sorted(question_nums, key=lambda x: (isinstance(x, int), x))
+    
+    def _get_question_marks(sub, q_num):
+        tf = sub.get('teacher_feedback') or {}
+        af = sub.get('ai_feedback') or {}
+        q_map = tf.get('questions', {}) or af.get('questions', [])
+        if isinstance(q_map, list):
+            for q in q_map:
+                if q.get('question_num') == q_num:
+                    m = q.get('marks_awarded') or q.get('marks')
+                    mt = q.get('marks_total') or q.get('marks_total')
+                    if m is not None and mt:
+                        try:
+                            return float(m), float(mt)
+                        except (ValueError, TypeError):
+                            pass
+                    return None, None
+        else:
+            q_data = q_map.get(str(q_num)) or q_map.get(q_num)
+            if q_data:
+                m = q_data.get('marks') or q_data.get('marks_awarded')
+                mt = q_data.get('marks_total')
+                if m is not None:
+                    try:
+                        return float(m), float(mt) or 1.0
+                    except (ValueError, TypeError):
+                        pass
+        return None, None
+    
+    heatmap_rows = []
+    for item in sorted(student_submissions_list, key=lambda x: (x['student'].get('name', ''))):
+        student = item['student']
+        sub = item.get('submission')
+        row_cells = []
+        for q_num in question_labels:
+            pct_val = None
+            css = 'heatmap-missing'
+            label = '—'
+            if sub:
+                m, mt = _get_question_marks(sub, q_num)
+                if m is not None and mt and mt > 0:
+                    pct_val = (m / mt) * 100
+                    if pct_val >= 100:
+                        css = 'heatmap-full'
+                        label = '100%'
+                    elif pct_val >= 50:
+                        css = 'heatmap-partial'
+                        label = f'{int(pct_val)}%'
+                    else:
+                        css = 'heatmap-low'
+                        label = f'{int(pct_val)}%'
+            row_cells.append({'pct': pct_val, 'label': label, 'css': css})
+        heatmap_rows.append({
+            'student': student,
+            'submission': sub,
+            'cells': row_cells,
+            'percentage': item.get('percentage'),
+            'final_marks': item.get('submission', {}).get('final_marks') if item.get('submission') else None
+        })
+    
+    return {
+        'topics_to_revisit': topics_to_revisit,
+        'students_needing_attention': students_needing_attention,
+        'support_approaches': support_approaches,
+        'heatmap_question_labels': question_labels,
+        'heatmap_rows': heatmap_rows,
+    }
+
+
+@app.route('/teacher/assignment/<assignment_id>/feedback-summary-report')
+@teacher_required
+def feedback_summary_report(assignment_id):
+    """Generate feedback and summary report: topics to revisit, students needing attention, support approaches, heatmap."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return redirect(url_for('teacher_assignments'))
+    
+    all_students = _get_students_for_assignment(assignment, session['teacher_id'])
+    submissions = list(Submission.find({
+        'assignment_id': assignment_id,
+        'status': {'$in': ['submitted', 'ai_reviewed', 'reviewed']}
+    }))
+    submission_map = {s['student_id']: s for s in submissions}
+    total_marks = float(assignment.get('total_marks', 100) or 100)
+    student_submissions_list = []
+    for student in sorted(all_students, key=lambda x: x.get('name', '')):
+        sub = submission_map.get(student['student_id'])
+        pct = 0
+        if sub and sub.get('final_marks') is not None:
+            try:
+                pct = (float(sub['final_marks']) / total_marks * 100) if total_marks > 0 else 0
+            except (ValueError, TypeError):
+                pass
+        student_submissions_list.append({
+            'student': student,
+            'submission': sub,
+            'status': sub.get('status') if sub else 'not_submitted',
+            'percentage': pct
+        })
+    
+    insights = analyze_class_insights(submissions)
+    report = _build_feedback_summary_report(assignment, submissions, student_submissions_list, insights)
+    
+    return render_template('teacher_feedback_summary_report.html',
+                         teacher=teacher,
+                         assignment=assignment,
+                         report=report,
+                         stats={'total_students': len(all_students), 'submitted': len(submissions)})
+
+
+@app.route('/teacher/assignment/<assignment_id>/heatmap-pdf')
+@teacher_required
+def download_heatmap_pdf(assignment_id):
+    """Download heatmap and summary report as PDF."""
+    from utils.pdf_generator import generate_heatmap_pdf
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return 'Assignment not found', 404
+    all_students = _get_students_for_assignment(assignment, session['teacher_id'])
+    submissions = list(Submission.find({
+        'assignment_id': assignment_id,
+        'status': {'$in': ['submitted', 'ai_reviewed', 'reviewed']}
+    }))
+    submission_map = {s['student_id']: s for s in submissions}
+    total_marks = float(assignment.get('total_marks', 100) or 100)
+    student_submissions_list = []
+    for student in sorted(all_students, key=lambda x: x.get('name', '')):
+        sub = submission_map.get(student['student_id'])
+        pct = 0
+        if sub and sub.get('final_marks') is not None:
+            try:
+                pct = (float(sub['final_marks']) / total_marks * 100) if total_marks > 0 else 0
+            except (ValueError, TypeError):
+                pass
+        student_submissions_list.append({
+            'student': student,
+            'submission': sub,
+            'status': sub.get('status') if sub else 'not_submitted',
+            'percentage': pct
+        })
+    insights = analyze_class_insights(submissions)
+    report = _build_feedback_summary_report(assignment, submissions, student_submissions_list, insights)
+    try:
+        pdf_content = generate_heatmap_pdf(assignment, report, teacher=Teacher.find_one({'teacher_id': session['teacher_id']}))
+        safe_title = (assignment.get('title') or 'report').replace(' ', '_')[:30]
+        return Response(
+            pdf_content,
+            mimetype='application/pdf',
+            headers={'Content-Disposition': f'attachment; filename="feedback_summary_heatmap_{safe_title}.pdf"'}
+        )
+    except Exception as e:
+        logger.error(f"Error generating heatmap PDF: {e}")
+        return str(e), 500
+
+
 def _get_students_for_assignment(assignment, teacher_id):
     """Get list of students for an assignment (class or teaching group)."""
     target_type = assignment.get('target_type', 'class')
@@ -2019,6 +2232,27 @@ def _get_students_for_assignment(assignment, teacher_id):
             'teachers': teacher_id
         }))
     return list(Student.find({'teachers': teacher_id}))
+
+
+def _assignments_same_class_or_group(assignment, teacher_id):
+    """Return assignments that target the same class or teaching group (for dropdown)."""
+    target_type = assignment.get('target_type', 'class')
+    target_class_id = assignment.get('target_class_id')
+    target_group_id = assignment.get('target_group_id')
+    if target_type == 'teaching_group' and target_group_id:
+        return list(Assignment.find({
+            'teacher_id': teacher_id,
+            'target_type': 'teaching_group',
+            'target_group_id': target_group_id
+        }))
+    if target_type == 'class' and target_class_id:
+        return list(Assignment.find({
+            'teacher_id': teacher_id,
+            'target_type': 'class',
+            'target_class_id': target_class_id
+        }))
+    # Fallback: only this assignment
+    return [assignment]
 
 @app.route('/teacher/assignment/<assignment_id>/manual-submission', methods=['GET', 'POST'])
 @teacher_required
@@ -2999,43 +3233,71 @@ def get_next_pending_submission(teacher_id, current_submission_id=None):
 @app.route('/teacher/submissions')
 @teacher_required
 def teacher_submissions():
-    """List all submissions for teacher's assignments"""
+    """List all students in the assignment's class/group with submission status.
+    Assignment dropdown is restricted to same teaching group/class only."""
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
-    
-    # Get filter params
-    status_filter = request.args.get('status', 'pending')
+    status_filter = request.args.get('status', 'all')
     assignment_filter = request.args.get('assignment', '')
     
-    # Get teacher's assignments
-    assignments = list(Assignment.find({'teacher_id': session['teacher_id']}))
-    assignment_ids = [a['assignment_id'] for a in assignments]
-    assignment_map = {a['assignment_id']: a for a in assignments}
-    
-    # Build query
-    query = {'assignment_id': {'$in': assignment_ids}}
-    
-    if status_filter == 'pending':
-        query['status'] = {'$in': ['submitted', 'ai_reviewed']}
-    elif status_filter == 'approved':
-        query['status'] = {'$in': ['reviewed', 'approved']}
-    elif status_filter == 'rejected':
-        query['status'] = 'rejected'
+    # When an assignment is selected: show only assignments from same class/group
+    selected_assignment = None
+    assignments_for_dropdown = []
+    student_rows = []
     
     if assignment_filter:
-        query['assignment_id'] = assignment_filter
-    
-    submissions = list(Submission.find(query).sort('submitted_at', -1))
-    
-    # Add details
-    for s in submissions:
-        s['assignment'] = assignment_map.get(s['assignment_id'], {})
-        student = Student.find_one({'student_id': s['student_id']})
-        s['student'] = student
+        selected_assignment = Assignment.find_one({
+            'assignment_id': assignment_filter,
+            'teacher_id': session['teacher_id']
+        })
+        if selected_assignment:
+            assignments_for_dropdown = _assignments_same_class_or_group(
+                selected_assignment, session['teacher_id']
+            )
+            all_students = _get_students_for_assignment(selected_assignment, session['teacher_id'])
+            submissions_for_assignment = list(Submission.find({
+                'assignment_id': assignment_filter
+            }))
+            sub_by_student = {s['student_id']: s for s in submissions_for_assignment}
+            total_marks = float(selected_assignment.get('total_marks', 100) or 100)
+            for student in sorted(all_students, key=lambda x: x.get('name', '')):
+                sub = sub_by_student.get(student['student_id'])
+                status = (sub.get('status') or 'submitted') if sub else 'not_submitted'
+                percentage = 0
+                final_marks = None
+                if sub and sub.get('final_marks') is not None:
+                    try:
+                        final_marks = float(sub['final_marks'])
+                        percentage = (final_marks / total_marks * 100) if total_marks > 0 else 0
+                    except (ValueError, TypeError):
+                        pass
+                row = {
+                    'student': student,
+                    'submission': sub,
+                    'status': status,
+                    'percentage': percentage,
+                    'final_marks': final_marks,
+                    'total_marks': int(total_marks)
+                }
+                # Apply status filter
+                if status_filter == 'all':
+                    student_rows.append(row)
+                elif status_filter == 'pending' and status in ('submitted', 'ai_reviewed'):
+                    student_rows.append(row)
+                elif status_filter == 'approved' and status in ('reviewed', 'approved'):
+                    student_rows.append(row)
+                elif status_filter == 'rejected' and status == 'rejected':
+                    student_rows.append(row)
+                elif status_filter == 'not_submitted' and status == 'not_submitted':
+                    student_rows.append(row)
+    else:
+        # No assignment selected: show all teacher assignments in dropdown
+        assignments_for_dropdown = list(Assignment.find({'teacher_id': session['teacher_id']}))
     
     return render_template('teacher_submissions.html',
                          teacher=teacher,
-                         submissions=submissions,
-                         assignments=assignments,
+                         student_rows=student_rows,
+                         assignments=assignments_for_dropdown,
+                         selected_assignment=selected_assignment,
                          status_filter=status_filter,
                          assignment_filter=assignment_filter)
 

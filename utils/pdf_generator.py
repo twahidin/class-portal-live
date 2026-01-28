@@ -1474,3 +1474,115 @@ def generate_affected_teachers_report_pdf(affected_teachers: list, resolved_mapp
     except Exception as e:
         logger.error(f"Error generating affected teachers report PDF: {e}")
         raise
+
+
+def generate_heatmap_pdf(assignment: dict, report: dict, teacher: dict = None) -> bytes:
+    """Generate PDF: feedback summary report (topics to revisit, students needing attention, support approaches) + score heatmap."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+    styles = get_styles()
+    story = []
+
+    story.append(Paragraph("Feedback &amp; Summary Report", styles['Title_Custom']))
+    story.append(Paragraph(assignment.get('title', 'Assignment'), styles['Heading_Custom']))
+    story.append(Spacer(1, 15))
+
+    # Topics to revisit
+    topics = report.get('topics_to_revisit', [])
+    if topics:
+        story.append(Paragraph("Topics to go through again", styles['Heading_Custom']))
+        for t in topics[:10]:
+            story.append(Paragraph(f"• {t.get('description', '')}", styles['Body_Custom']))
+        story.append(Spacer(1, 12))
+
+    # Students needing attention
+    students_attention = report.get('students_needing_attention', [])
+    if students_attention:
+        story.append(Paragraph("Students needing particular attention", styles['Heading_Custom']))
+        for s in students_attention[:15]:
+            name = (s.get('student') or {}).get('name', 'Unknown')
+            pct = s.get('percentage', 0)
+            story.append(Paragraph(f"• {name}: {pct:.0f}%", styles['Body_Custom']))
+        story.append(Spacer(1, 12))
+
+    # Support approaches
+    approaches = report.get('support_approaches', [])
+    if approaches:
+        story.append(Paragraph("Approaches to support the class", styles['Heading_Custom']))
+        for a in approaches:
+            story.append(Paragraph(f"• {a}", styles['Body_Custom']))
+        story.append(Spacer(1, 20))
+
+    # Heatmap
+    story.append(Paragraph("Score heatmap (by student and question)", styles['Heading_Custom']))
+    story.append(Spacer(1, 8))
+
+    q_labels = report.get('heatmap_question_labels', [])
+    heatmap_rows = report.get('heatmap_rows', [])
+    if not q_labels or not heatmap_rows:
+        story.append(Paragraph("No per-question data available for heatmap.", styles['Body_Custom']))
+    else:
+        col_widths = [3.5*cm] + [1.2*cm] * min(len(q_labels), 12)
+        if len(q_labels) > 12:
+            col_widths = [3.5*cm] + [1.0*cm] * min(len(q_labels), 15)
+        header_row = ['Student'] + [str(q) for q in q_labels[:15]]
+        if len(q_labels) > 15:
+            header_row = ['Student'] + [str(q) for q in q_labels[:12]]
+            col_widths = [3.5*cm] + [1.2*cm] * 12
+        data = [header_row]
+        for row in heatmap_rows[:40]:
+            student = row.get('student', {})
+            name = (student.get('name') or 'Unknown')[:18]
+            cells = row.get('cells', [])[:len(header_row)-1]
+            data_row = [name] + [c.get('label', '—') for c in cells]
+            if len(data_row) < len(header_row):
+                data_row += ['—'] * (len(header_row) - len(data_row))
+            data.append(data_row)
+
+        t = Table(data, colWidths=col_widths[:len(header_row)])
+        table_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+            ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+            ('PADDING', (0, 0), (-1, -1), 4),
+        ]
+        for r in range(1, len(data)):
+            for c in range(1, len(header_row)):
+                if r - 1 < len(heatmap_rows) and c - 1 < len(heatmap_rows[r-1].get('cells', [])):
+                    cell = heatmap_rows[r-1]['cells'][c-1]
+                    pct = cell.get('pct')
+                    if pct is not None:
+                        if pct >= 100:
+                            table_style.append(('BACKGROUND', (c, r), (c, r), SUCCESS_COLOR))
+                        elif pct >= 50:
+                            table_style.append(('BACKGROUND', (c, r), (c, r), WARNING_COLOR))
+                        else:
+                            table_style.append(('BACKGROUND', (c, r), (c, r), DANGER_COLOR))
+                    else:
+                        table_style.append(('BACKGROUND', (c, r), (c, r), LIGHT_GRAY))
+        t.setStyle(TableStyle(table_style))
+        story.append(t)
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Green: 100% | Yellow: 50–99% | Red: &lt;50% | Gray: no data", styles['Body_Custom']))
+
+    story.append(Spacer(1, 20))
+    story.append(Paragraph(f"Generated: {datetime.utcnow().strftime('%d %B %Y, %H:%M UTC')}", styles['Footer']))
+
+    try:
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Error generating heatmap PDF: {e}")
+        raise
