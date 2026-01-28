@@ -2981,6 +2981,121 @@ def save_review_feedback(submission_id):
         logger.error(f"Error saving feedback: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/teacher/api/available-ai-models')
+@teacher_required
+def available_ai_models():
+    """Return which AI models the teacher has API keys for (for Remark model picker)."""
+    try:
+        from utils.ai_marking import get_available_ai_models
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        models = get_available_ai_models(teacher)
+        labels = {'anthropic': 'Anthropic (Claude)', 'openai': 'OpenAI (GPT)', 'deepseek': 'DeepSeek', 'google': 'Google Gemini'}
+        return jsonify({
+            'success': True,
+            'models': models,
+            'labels': labels
+        })
+    except Exception as e:
+        logger.error(f"Error getting available AI models: {e}")
+        return jsonify({'success': False, 'models': {}, 'labels': {}}), 500
+
+@app.route('/teacher/review/<submission_id>/regenerate-ai-feedback', methods=['POST'])
+@teacher_required
+def regenerate_ai_feedback(submission_id):
+    """Re-run AI feedback generation for a submission. Optional JSON body: { \"ai_model\": \"anthropic\" | \"openai\" | \"deepseek\" | \"google\" } to choose model."""
+    from gridfs import GridFS
+    from bson import ObjectId
+    from utils.ai_marking import analyze_submission_images, analyze_essay_with_rubrics
+    
+    try:
+        data = request.get_json() or {}
+        override_ai_model = data.get('ai_model')  # optional: use this model for this run only
+        
+        submission = Submission.find_one({'submission_id': submission_id})
+        if not submission:
+            return jsonify({'success': False, 'error': 'Submission not found'}), 404
+        
+        assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+        if not assignment or assignment['teacher_id'] != session['teacher_id']:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        fs = GridFS(db.db)
+        
+        # Build pages from stored files
+        file_ids = submission.get('file_ids', [])
+        if not file_ids:
+            return jsonify({'success': False, 'error': 'No submission files found'}), 400
+        
+        pages = []
+        for i, fid in enumerate(file_ids):
+            try:
+                file_data = fs.get(ObjectId(fid))
+                raw = file_data.read()
+                content_type = (file_data.content_type or '').lower()
+                if 'pdf' in content_type:
+                    page_type = 'pdf'
+                else:
+                    page_type = 'image'
+                pages.append({'type': page_type, 'data': raw, 'page_num': i + 1})
+            except Exception as e:
+                logger.warning(f"Could not read file {fid}: {e}")
+                continue
+        
+        if not pages:
+            return jsonify({'success': False, 'error': 'Could not read any submission files'}), 400
+        
+        marking_type = assignment.get('marking_type', 'standard')
+        
+        if marking_type == 'rubric':
+            rubrics_content = None
+            if assignment.get('rubrics_id'):
+                try:
+                    rubrics_file = fs.get(assignment['rubrics_id'])
+                    rubrics_content = rubrics_file.read()
+                except Exception:
+                    pass
+            ai_result = analyze_essay_with_rubrics(pages, assignment, rubrics_content, teacher, override_ai_model=override_ai_model)
+        else:
+            answer_key_content = None
+            if assignment.get('answer_key_id'):
+                try:
+                    answer_file = fs.get(assignment['answer_key_id'])
+                    answer_key_content = answer_file.read()
+                except Exception:
+                    pass
+            ai_result = analyze_submission_images(pages, assignment, answer_key_content, teacher, override_ai_model=override_ai_model)
+        
+        # Determine status: ai_reviewed if we got valid feedback, else keep submitted so teacher can retry
+        has_error = ai_result.get('error') or (
+            marking_type == 'standard' and not ai_result.get('questions')
+        ) or (
+            marking_type == 'rubric' and not ai_result.get('criteria') and not ai_result.get('errors')
+        )
+        new_status = 'ai_reviewed' if not has_error else submission.get('status', 'submitted')
+        
+        Submission.update_one(
+            {'submission_id': submission_id},
+            {'$set': {
+                'ai_feedback': ai_result,
+                'status': new_status,
+                'updated_at': datetime.utcnow()
+            }}
+        )
+        
+        if has_error:
+            err_msg = ai_result.get('error') or ai_result.get('overall_feedback', 'Unknown error')
+            return jsonify({
+                'success': False,
+                'error': err_msg,
+                'message': 'AI feedback failed. You can edit manually or try again.'
+            }), 200
+        return jsonify({'success': True, 'message': 'AI feedback generated successfully'})
+        
+    except Exception as e:
+        logger.error(f"Error regenerating AI feedback: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/teacher/review/<submission_id>/extract-answer-key', methods=['POST'])
 @teacher_required
 def extract_answer_key(submission_id):

@@ -113,8 +113,18 @@
         <div class="col-lg-8" id="feedback-panel">
             <!-- Table 1: Rubric Criteria -->
             <div class="card mb-3">
-                <div class="card-header bg-primary text-white">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                     <h6 class="mb-0"><i class="bi bi-list-check me-2"></i>Rubric Criteria Assessment</h6>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-light btn-sm" id="btn-regenerate-ai" title="Generate or re-run AI feedback (e.g. after an error)"
+                                onclick="regenerateAIFeedback()" {% if ai_feedback and (ai_feedback.criteria or ai_feedback.errors) and not ai_feedback.get('error') %}style="display:none;"{% endif %}>
+                            <i class="bi bi-arrow-clockwise me-1"></i><span id="regenerate-ai-label">{% if ai_feedback and (ai_feedback.criteria or ai_feedback.errors) %}Regenerate{% else %}Generate{% endif %} AI Feedback</span>
+                        </button>
+                        <button type="button" class="btn btn-outline-light btn-sm" title="Re-mark with a chosen AI model"
+                                onclick="openRemarkModal()">
+                            <i class="bi bi-pencil-square me-1"></i>Remark
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body p-0" style="max-height: 45vh; overflow: auto;">
                     <form id="rubric-form">
@@ -176,6 +186,9 @@
                                 <tr>
                                     <td class="fw-bold">Overall Feedback</td>
                                     <td colspan="2">
+                                        {% if ai_feedback and ai_feedback.get('error') %}
+                                        <div class="alert alert-warning py-2 mb-2 small">AI feedback failed. You can edit below or click "Regenerate AI Feedback" above to try again.</div>
+                                        {% endif %}
                                         <textarea class="form-control form-control-sm" id="overall-feedback" 
                                                   name="overall_feedback" rows="3"
                                                   placeholder="Overall assessment of the essay...">{{ submission.get('teacher_feedback', {}).get('overall_feedback') or (ai_feedback.overall_feedback if ai_feedback else '') }}</textarea>
@@ -307,6 +320,35 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-warning" onclick="addErrorRow()">
                     <i class="bi bi-plus-circle me-1"></i>Add Correction
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Remark (choose model) Modal -->
+<div class="modal fade" id="remarkModal" tabindex="-1" aria-labelledby="remarkModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="remarkModalLabel">
+                    <i class="bi bi-pencil-square me-2"></i>Remark with chosen model
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Choose which AI model to use for this remark. Only models with an API key configured are shown.</p>
+                <div id="remark-model-list" class="mb-3">
+                    <div class="text-muted text-center py-3"><span class="spinner-border spinner-border-sm me-1"></span>Loading...</div>
+                </div>
+                <div id="remark-no-models" class="alert alert-warning py-2 small" style="display:none;">
+                    No AI models have API keys configured. Add keys in Teacher Settings.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="btn-run-remark" onclick="runRemark()" disabled>
+                    <i class="bi bi-arrow-clockwise me-1"></i>Run remark
                 </button>
             </div>
         </div>
@@ -845,6 +887,107 @@
         } catch (e) {
             showToast('Error', 'Failed to save');
             return false;
+        }
+    }
+    
+    let selectedRemarkModel = null;
+    
+    async function openRemarkModal() {
+        const listEl = document.getElementById('remark-model-list');
+        const noModelsEl = document.getElementById('remark-no-models');
+        const runBtn = document.getElementById('btn-run-remark');
+        listEl.innerHTML = '<div class="text-muted text-center py-3"><span class="spinner-border spinner-border-sm me-1"></span>Loading...</div>';
+        noModelsEl.style.display = 'none';
+        runBtn.disabled = true;
+        selectedRemarkModel = null;
+        new bootstrap.Modal(document.getElementById('remarkModal')).show();
+        try {
+            const r = await fetch('/teacher/api/available-ai-models');
+            const data = await r.json();
+            if (!data.success || !data.models) {
+                listEl.innerHTML = '<div class="text-danger small">Could not load models.</div>';
+                return;
+            }
+            const models = data.models;
+            const labels = data.labels || {};
+            const available = Object.keys(models).filter(k => models[k]);
+            if (available.length === 0) {
+                listEl.innerHTML = '';
+                noModelsEl.style.display = 'block';
+                return;
+            }
+            listEl.innerHTML = available.map(key => `
+                <div class="form-check">
+                    <input class="form-check-input remark-model-radio" type="radio" name="remark_model" id="remark_${key}" value="${key}">
+                    <label class="form-check-label" for="remark_${key}">${labels[key] || key}</label>
+                </div>
+            `).join('');
+            listEl.querySelectorAll('.remark-model-radio').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    selectedRemarkModel = this.value;
+                    runBtn.disabled = false;
+                });
+            });
+        } catch (e) {
+            listEl.innerHTML = '<div class="text-danger small">Failed to load models.</div>';
+        }
+    }
+    
+    async function runRemark() {
+        if (!selectedRemarkModel) return;
+        const runBtn = document.getElementById('btn-run-remark');
+        runBtn.disabled = true;
+        runBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running...';
+        try {
+            const response = await fetch(`/teacher/review/${submissionId}/regenerate-ai-feedback`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ ai_model: selectedRemarkModel })
+            });
+            const result = await response.json();
+            if (result.success) {
+                showToast('Success', result.message || 'Remark completed.');
+                bootstrap.Modal.getInstance(document.getElementById('remarkModal')).hide();
+                setTimeout(() => location.reload(), 800);
+            } else {
+                showToast('Error', result.error || result.message || 'Remark failed');
+                runBtn.disabled = false;
+                runBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Run remark';
+            }
+        } catch (e) {
+            showToast('Error', 'Remark failed');
+            runBtn.disabled = false;
+            runBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Run remark';
+        }
+    }
+    
+    // Generate or regenerate AI feedback (e.g. after an error)
+    async function regenerateAIFeedback() {
+        const btn = document.getElementById('btn-regenerate-ai');
+        const label = document.getElementById('regenerate-ai-label');
+        if (!btn || !label) return;
+        const originalHtml = label.textContent;
+        btn.disabled = true;
+        label.textContent = 'Generating...';
+        try {
+            const response = await fetch(`/teacher/review/${submissionId}/regenerate-ai-feedback`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            });
+            const result = await response.json();
+            if (result.success) {
+                showToast('Success', result.message || 'AI feedback generated.');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                showToast('Error', result.error || result.message || 'Failed to generate AI feedback');
+                btn.disabled = false;
+                label.textContent = originalHtml;
+            }
+        } catch (e) {
+            showToast('Error', 'Failed to generate AI feedback');
+            btn.disabled = false;
+            label.textContent = originalHtml;
         }
     }
     

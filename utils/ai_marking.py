@@ -80,6 +80,42 @@ MODEL_MAPPINGS = {
     'google': 'gemini-3-flash-preview'  # Gemini 3 Flash Preview with vision support
 }
 
+VALID_MODEL_TYPES = frozenset(MODEL_MAPPINGS.keys())
+
+def resolve_model_type(assignment, teacher, override_model=None):
+    """
+    Resolve which AI model to use. Prefer override, then assignment, then teacher default, then anthropic.
+    Normalizes empty/invalid values so we never accidentally use a wrong provider.
+    """
+    if override_model and (override_model or '').strip() and override_model in VALID_MODEL_TYPES:
+        model_type = override_model
+        logger.info(f"Using override model_type={model_type}")
+        return model_type
+    raw = (assignment.get('ai_model') if assignment else None)
+    if not raw or (isinstance(raw, str) and not raw.strip()) or raw not in VALID_MODEL_TYPES:
+        raw = (teacher.get('default_ai_model') if teacher else None)
+    if not raw or (isinstance(raw, str) and not raw.strip()) or raw not in VALID_MODEL_TYPES:
+        raw = 'anthropic'
+    logger.info(f"Resolved model_type={raw} (assignment.ai_model={assignment.get('ai_model') if assignment else None}, teacher.default_ai_model={teacher.get('default_ai_model') if teacher else None})")
+    return raw
+
+def get_available_ai_models(teacher):
+    """Return dict of model_type -> True if that model has an API key configured (teacher or env)."""
+    available = {}
+    # Anthropic
+    has_anthropic = (teacher and teacher.get('anthropic_api_key')) or bool(os.getenv('ANTHROPIC_API_KEY'))
+    available['anthropic'] = bool(has_anthropic)
+    # OpenAI
+    has_openai = (teacher and teacher.get('openai_api_key')) or bool(os.getenv('OPENAI_API_KEY'))
+    available['openai'] = bool(has_openai and OPENAI_AVAILABLE)
+    # DeepSeek
+    has_deepseek = (teacher and teacher.get('deepseek_api_key')) or bool(os.getenv('DEEPSEEK_API_KEY'))
+    available['deepseek'] = bool(has_deepseek and OPENAI_AVAILABLE)
+    # Google
+    has_google = (teacher and teacher.get('google_api_key')) or bool(os.getenv('GOOGLE_API_KEY'))
+    available['google'] = bool(has_google and GEMINI_AVAILABLE)
+    return available
+
 def get_teacher_ai_service(teacher, model_type='anthropic'):
     """
     Get AI service configured for a specific teacher and model type
@@ -184,10 +220,14 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
     
     Returns:
         Response text string
+    
+    Note: The "max_completion_tokens" error is from OpenAI only. Claude (Anthropic) uses max_tokens.
+    If you see that error, check that the assignment/teacher AI model is set to Claude (Anthropic), not OpenAI.
     """
     try:
+        logger.info(f"Making AI API call with provider={provider}, model={model_name}")
         if provider == 'anthropic':
-            # Anthropic format
+            # Claude (Anthropic) uses max_tokens - no max_completion_tokens
             message = client.messages.create(
                 model=model_name,
                 max_tokens=max_tokens,
@@ -296,11 +336,22 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
             
             openai_messages.append({"role": "user", "content": user_content})
             
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=openai_messages,
-                max_tokens=max_tokens
-            )
+            # Newer OpenAI models use max_completion_tokens; older ones use max_tokens
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=openai_messages,
+                    max_completion_tokens=max_tokens
+                )
+            except Exception as e:
+                if 'max_completion_tokens' in str(e) or 'max_tokens' in str(e).lower():
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=openai_messages,
+                        max_tokens=max_tokens
+                    )
+                else:
+                    raise
             return response.choices[0].message.content
         
         elif provider == 'google':
@@ -348,7 +399,10 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
         logger.error(f"Error making API call to {provider}: {e}")
         raise
 
-def analyze_submission_images(pages: list, assignment: dict, answer_key_content: bytes = None, teacher: dict = None) -> dict:
+# Limit pages sent to AI to avoid 413 request_too_large (API max request size)
+MAX_PAGES_FOR_AI = 20
+
+def analyze_submission_images(pages: list, assignment: dict, answer_key_content: bytes = None, teacher: dict = None, override_ai_model: str = None) -> dict:
     """
     Analyze student submission images/PDF and generate feedback
     
@@ -361,8 +415,13 @@ def analyze_submission_images(pages: list, assignment: dict, answer_key_content:
     Returns:
         Dictionary with structured feedback
     """
-    # Get model type from assignment, fallback to teacher default, then to anthropic
-    model_type = assignment.get('ai_model') or (teacher.get('default_ai_model') if teacher else None) or 'anthropic'
+    # Limit pages to avoid 413 request_too_large
+    if len(pages) > MAX_PAGES_FOR_AI:
+        pages = pages[:MAX_PAGES_FOR_AI]
+        logger.warning(f"Limiting to first {MAX_PAGES_FOR_AI} pages to avoid request size limit")
+    
+    # Resolve model type (override → assignment → teacher default → anthropic)
+    model_type = resolve_model_type(assignment, teacher, override_ai_model)
     
     client, model_name, provider = get_teacher_ai_service(teacher, model_type)
     if not client:
@@ -1414,7 +1473,7 @@ def generate_feedback_summary(submission: dict, assignment: dict, ai_feedback: d
     }
 
 
-def analyze_essay_with_rubrics(pages: list, assignment: dict, rubrics_content: bytes = None, teacher: dict = None) -> dict:
+def analyze_essay_with_rubrics(pages: list, assignment: dict, rubrics_content: bytes = None, teacher: dict = None, override_ai_model: str = None) -> dict:
     """
     Analyze student essay submission using rubrics for criteria-based marking.
     
@@ -1428,6 +1487,7 @@ def analyze_essay_with_rubrics(pages: list, assignment: dict, rubrics_content: b
         assignment: Assignment document with details (including rubrics_text)
         rubrics_content: Optional bytes of rubrics PDF for vision analysis
         teacher: Teacher document for API key
+        override_ai_model: Optional model key to use for this run (e.g. 'anthropic', 'openai')
     
     Returns:
         Dictionary with:
@@ -1437,7 +1497,7 @@ def analyze_essay_with_rubrics(pages: list, assignment: dict, rubrics_content: b
         - total_marks: Sum of marks awarded
         - submission_quality: 'acceptable', 'poor', 'wrong_submission' for rejection logic
     """
-    model_type = assignment.get('ai_model') or (teacher.get('default_ai_model') if teacher else None) or 'anthropic'
+    model_type = resolve_model_type(assignment, teacher, override_ai_model)
     client, model_name, provider = get_teacher_ai_service(teacher, model_type)
     if not client:
         return {
@@ -1447,6 +1507,11 @@ def analyze_essay_with_rubrics(pages: list, assignment: dict, rubrics_content: b
             'overall_feedback': f'AI feedback unavailable - no {model_type} API key configured',
             'submission_quality': 'unknown'
         }
+    
+    # Limit pages to avoid 413 request_too_large
+    if len(pages) > MAX_PAGES_FOR_AI:
+        pages = pages[:MAX_PAGES_FOR_AI]
+        logger.warning(f"Limiting essay to first {MAX_PAGES_FOR_AI} pages to avoid request size limit")
     
     try:
         content = []
