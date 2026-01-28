@@ -120,9 +120,9 @@
                                 onclick="regenerateAIFeedback()" {% if ai_feedback and (ai_feedback.criteria or ai_feedback.errors) and not ai_feedback.get('error') %}style="display:none;"{% endif %}>
                             <i class="bi bi-arrow-clockwise me-1"></i><span id="regenerate-ai-label">{% if ai_feedback and (ai_feedback.criteria or ai_feedback.errors) %}Regenerate{% else %}Generate{% endif %} AI Feedback</span>
                         </button>
-                        <button type="button" class="btn btn-outline-light btn-sm" title="Re-mark with a chosen AI model"
+                        <button type="button" class="btn btn-outline-light btn-sm" title="Regenerate AI feedback using a different model (e.g. Claude, GPT)"
                                 onclick="openRemarkModal()">
-                            <i class="bi bi-pencil-square me-1"></i>Remark
+                            <i class="bi bi-pencil-square me-1"></i>Remark with another model
                         </button>
                     </div>
                 </div>
