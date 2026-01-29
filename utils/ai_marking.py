@@ -248,8 +248,7 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
     Returns:
         Response text string
     
-    Note: The "max_completion_tokens" error is from OpenAI only. Claude (Anthropic) uses max_tokens.
-    If you see that error, check that the assignment/teacher AI model is set to Claude (Anthropic), not OpenAI.
+    Note: OpenAI and DeepSeek use max_tokens; Anthropic uses max_tokens as well.
     """
     try:
         logger.info(f"Making AI API call with provider={provider}, model={model_name}")
@@ -363,11 +362,11 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
             
             openai_messages.append({"role": "user", "content": user_content})
             
-            # OpenAI API: use max_completion_tokens only (max_tokens is unsupported on current models)
+            # OpenAI API: use max_tokens (max_completion_tokens is for newer API versions only)
             response = client.chat.completions.create(
                 model=model_name,
                 messages=openai_messages,
-                max_completion_tokens=max_tokens
+                max_tokens=max_tokens
             )
             return response.choices[0].message.content
         
