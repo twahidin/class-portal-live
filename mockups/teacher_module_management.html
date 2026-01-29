@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher Module Management - Mockup</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #059669;
+            --primary-dark: #047857;
+            --secondary: #10b981;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #06b6d4;
+            --bg-light: #f8fafc;
+            --bg-card: #ffffff;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --border-color: #e2e8f0;
+            --border-radius: 12px;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-light);
+            margin: 0;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            padding: 0.75rem 0;
+        }
+
+        .navbar-brand {
+            color: white !important;
+            font-weight: 700;
+        }
+
+        .nav-link { color: rgba(255,255,255,0.85) !important; }
+        .nav-link:hover { color: white !important; }
+
+        .container { max-width: 1400px; }
+
+        /* Page Header */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .page-header h1 {
+            font-weight: 700;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        /* Stats Cards */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        @media (max-width: 992px) {
+            .stats-row {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            box-shadow: var(--shadow);
+        }
+
+        .stat-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .stat-icon.primary { background: rgba(5, 150, 105, 0.15); color: var(--primary); }
+        .stat-icon.success { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+        .stat-icon.warning { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+        .stat-icon.info { background: rgba(6, 182, 212, 0.15); color: var(--info); }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin: 0;
+        }
+
+        /* Module Cards Grid */
+        .modules-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .module-card {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .module-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .module-card-header {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            padding: 1.25rem;
+            color: white;
+            position: relative;
+        }
+
+        .module-badge {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+        }
+
+        .module-subject {
+            font-size: 0.8rem;
+            opacity: 0.9;
+        }
+
+        .module-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin: 0.5rem 0 0;
+        }
+
+        .module-card-body {
+            padding: 1.25rem;
+        }
+
+        .module-stats {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .module-stat {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .module-stat i { color: var(--primary); }
+
+        .class-mastery {
+            margin-bottom: 1rem;
+        }
+
+        .mastery-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .progress {
+            height: 8px;
+            border-radius: 4px;
+            background: var(--border-color);
+        }
+
+        .progress-bar {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+        }
+
+        .module-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .module-actions .btn { flex: 1; }
+
+        /* Create New Module Card */
+        .create-card {
+            background: white;
+            border: 2px dashed var(--border-color);
+            border-radius: var(--border-radius);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 280px;
+        }
+
+        .create-card:hover {
+            border-color: var(--primary);
+            background: rgba(5, 150, 105, 0.05);
+        }
+
+        .create-card i {
+            font-size: 3rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+
+        /* Class Mastery Table */
+        .mastery-table-card {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 1.5rem;
+        }
+
+        .card-header-custom {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-weight: 600;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .table {
+            margin-bottom: 0;
+        }
+
+        .table th {
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom-width: 2px;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+
+        .table td {
+            vertical-align: middle;
+        }
+
+        .student-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .student-avatar {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+        }
+
+        .mastery-bar {
+            width: 100px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .mastery-bar .progress {
+            flex: 1;
+            height: 6px;
+        }
+
+        .mastery-value {
+            font-size: 0.8rem;
+            font-weight: 600;
+            width: 35px;
+        }
+
+        /* Upload Modal */
+        .upload-area {
+            border: 2px dashed var(--border-color);
+            border-radius: var(--border-radius);
+            padding: 3rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: var(--bg-light);
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary);
+            background: rgba(5, 150, 105, 0.05);
+        }
+
+        .upload-area i {
+            font-size: 3rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+
+        .upload-area.dragover {
+            border-color: var(--primary);
+            background: rgba(5, 150, 105, 0.1);
+        }
+
+        /* Module Node Editor (sidebar panel) */
+        .node-editor {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 1.5rem;
+            position: fixed;
+            right: 1rem;
+            top: 80px;
+            width: 350px;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+            display: none;
+            z-index: 100;
+        }
+
+        .node-editor.active { display: block; }
+
+        .node-editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .resource-list {
+            margin-top: 1rem;
+        }
+
+        .resource-item {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem;
+            background: var(--bg-light);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .resource-item .resource-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 0.75rem;
+        }
+
+        .resource-item .resource-icon.youtube {
+            background: rgba(255, 0, 0, 0.1);
+            color: #ff0000;
+        }
+
+        .resource-item .resource-icon.pdf {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+
+        .add-resource-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .add-resource-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        /* AI Generation Status */
+        .ai-status {
+            background: linear-gradient(135deg, rgba(5, 150, 105, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
+            border-radius: var(--border-radius);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .ai-status-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .ai-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+        }
+
+        .ai-spinner {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-mortarboard-fill me-2"></i>Teacher Portal
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="#"><i class="bi bi-house me-1"></i>Dashboard</a>
+                <a class="nav-link active" href="#"><i class="bi bi-diagram-3 me-1"></i>My Modules</a>
+                <a class="nav-link" href="#"><i class="bi bi-journal-check me-1"></i>Assignments</a>
+                <a class="nav-link" href="#"><i class="bi bi-chat-dots me-1"></i>Messages</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <!-- Page Header -->
+        <div class="page-header">
+            <div>
+                <h1><i class="bi bi-diagram-3 text-primary"></i>My Modules</h1>
+                <p class="text-muted mb-0">Create and manage learning module trees for your students</p>
+            </div>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createModal">
+                <i class="bi bi-plus-circle me-1"></i>Create New Module
+            </button>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-icon primary">
+                    <i class="bi bi-diagram-3"></i>
+                </div>
+                <div>
+                    <p class="stat-value">4</p>
+                    <p class="stat-label">Module Trees</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon success">
+                    <i class="bi bi-boxes"></i>
+                </div>
+                <div>
+                    <p class="stat-value">87</p>
+                    <p class="stat-label">Total Modules</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon warning">
+                    <i class="bi bi-people"></i>
+                </div>
+                <div>
+                    <p class="stat-value">156</p>
+                    <p class="stat-label">Students Enrolled</p>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon info">
+                    <i class="bi bi-graph-up"></i>
+                </div>
+                <div>
+                    <p class="stat-value">68%</p>
+                    <p class="stat-label">Avg Class Mastery</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Generation Status (shows when generating) -->
+        <div class="ai-status" id="aiStatus" style="display: none;">
+            <div class="ai-status-header">
+                <div class="ai-icon">
+                    <i class="bi bi-cpu ai-spinner"></i>
+                </div>
+                <div>
+                    <h5 class="mb-1">AI Generating Module Structure...</h5>
+                    <p class="text-muted mb-0">Analyzing your syllabus and creating the module tree</p>
+                </div>
+            </div>
+            <div class="progress" style="height: 10px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 65%"></div>
+            </div>
+            <div class="mt-2 small text-muted">
+                <i class="bi bi-check-circle text-success me-1"></i> Extracted 12 main topics
+                <span class="mx-2">•</span>
+                <i class="bi bi-hourglass-split text-warning me-1"></i> Creating sub-modules...
+            </div>
+        </div>
+
+        <!-- Module Cards Grid -->
+        <div class="modules-grid">
+            <!-- Module Card 1 -->
+            <div class="module-card">
+                <div class="module-card-header">
+                    <span class="badge bg-success module-badge">Published</span>
+                    <div class="module-subject">Mathematics • Secondary 3</div>
+                    <h3 class="module-title">Algebra & Functions</h3>
+                </div>
+                <div class="module-card-body">
+                    <div class="module-stats">
+                        <div class="module-stat">
+                            <i class="bi bi-boxes"></i>
+                            <span>24 modules</span>
+                        </div>
+                        <div class="module-stat">
+                            <i class="bi bi-clock"></i>
+                            <span>45 hours</span>
+                        </div>
+                        <div class="module-stat">
+                            <i class="bi bi-people"></i>
+                            <span>42 students</span>
+                        </div>
+                    </div>
+                    <div class="class-mastery">
+                        <div class="mastery-label">
+                            <span>Class Mastery</span>
+                            <span class="text-primary fw-bold">72%</span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" style="width: 72%"></div>
+                        </div>
+                    </div>
+                    <div class="module-actions">
+                        <a href="#" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-eye me-1"></i>View & Edit
+                        </a>
+                        <a href="#" class="btn btn-outline-success btn-sm">
+                            <i class="bi bi-graph-up me-1"></i>Mastery
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Module Card 2 -->
+            <div class="module-card">
+                <div class="module-card-header" style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);">
+                    <span class="badge bg-success module-badge">Published</span>
+                    <div class="module-subject">Mathematics • Secondary 3</div>
+                    <h3 class="module-title">Geometry & Trigonometry</h3>
+                </div>
+                <div class="module-card-body">
+                    <div class="module-stats">
+                        <div class="module-stat">
+                            <i class="bi bi-boxes"></i>
+                            <span>28 modules</span>
+                        </div>
+                        <div class="module-stat">
+                            <i class="bi bi-clock"></i>
+                            <span>52 hours</span>
+                        </div>
+                        <div class="module-stat">
+                            <i class="bi bi-people"></i>
+                            <span>42 students</span>
+                        </div>
+                    </div>
+                    <div class="class-mastery">
+                        <div class="mastery-label">
+                            <span>Class Mastery</span>
+                            <span class="text-primary fw-bold">58%</span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" style="width: 58%"></div>
+                        </div>
+                    </div>
+                    <div class="module-actions">
+                        <a href="#" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-eye me-1"></i>View & Edit
+                        </a>
+                        <a href="#" class="btn btn-outline-success btn-sm">
+                            <i class="bi bi-graph-up me-1"></i>Mastery
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Module Card 3 -->
+            <div class="module-card">
+                <div class="module-card-header" style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);">
+                    <span class="badge bg-warning text-dark module-badge">Draft</span>
+                    <div class="module-subject">Science • Secondary 3</div>
+                    <h3 class="module-title">Physics - Forces & Motion</h3>
+                </div>
+                <div class="module-card-body">
+                    <div class="module-stats">
+                        <div class="module-stat">
+                            <i class="bi bi-boxes"></i>
+                            <span>18 modules</span>
+                        </div>
+                        <div class="module-stat">
+                            <i class="bi bi-clock"></i>
+                            <span>30 hours</span>
+                        </div>
+                        <div class="module-stat">
+                            <i class="bi bi-collection"></i>
+                            <span>8 resources</span>
+                        </div>
+                    </div>
+                    <div class="class-mastery">
+                        <div class="mastery-label">
+                            <span>Status</span>
+                            <span class="text-warning fw-bold">Not Published</span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar bg-warning" style="width: 40%"></div>
+                        </div>
+                        <small class="text-muted">8 of 18 modules have resources</small>
+                    </div>
+                    <div class="module-actions">
+                        <a href="#" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-pencil me-1"></i>Edit
+                        </a>
+                        <a href="#" class="btn btn-success btn-sm">
+                            <i class="bi bi-send me-1"></i>Publish
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Create New Card -->
+            <div class="create-card" data-bs-toggle="modal" data-bs-target="#createModal">
+                <i class="bi bi-plus-circle"></i>
+                <h5>Create New Module Tree</h5>
+                <p class="text-muted mb-0">Upload a syllabus to auto-generate modules</p>
+            </div>
+        </div>
+
+        <!-- Class Mastery Table -->
+        <div class="mastery-table-card">
+            <div class="card-header-custom">
+                <h5 class="card-title">
+                    <i class="bi bi-graph-up text-primary me-2"></i>
+                    Class Mastery Overview - Algebra & Functions
+                </h5>
+                <div>
+                    <select class="form-select form-select-sm" style="width: auto;">
+                        <option>All Students</option>
+                        <option>Class 3A</option>
+                        <option>Class 3B</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Student</th>
+                            <th>Linear Eq.</th>
+                            <th>Quadratics</th>
+                            <th>Polynomials</th>
+                            <th>Functions</th>
+                            <th>Overall</th>
+                            <th>Last Active</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <div class="student-info">
+                                    <div class="student-avatar">JT</div>
+                                    <div>
+                                        <div class="fw-500">John Tan</div>
+                                        <small class="text-muted">Class 3A</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar bg-success" style="width: 100%"></div></div>
+                                    <span class="mastery-value text-success">100%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar" style="width: 85%"></div></div>
+                                    <span class="mastery-value">85%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar" style="width: 65%"></div></div>
+                                    <span class="mastery-value">65%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar bg-warning" style="width: 40%"></div></div>
+                                    <span class="mastery-value text-warning">40%</span>
+                                </div>
+                            </td>
+                            <td><span class="badge bg-primary">72%</span></td>
+                            <td><small class="text-muted">2 hours ago</small></td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <div class="student-info">
+                                    <div class="student-avatar">SL</div>
+                                    <div>
+                                        <div class="fw-500">Sarah Lim</div>
+                                        <small class="text-muted">Class 3A</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar bg-success" style="width: 100%"></div></div>
+                                    <span class="mastery-value text-success">100%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar bg-success" style="width: 100%"></div></div>
+                                    <span class="mastery-value text-success">100%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar" style="width: 90%"></div></div>
+                                    <span class="mastery-value">90%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar" style="width: 75%"></div></div>
+                                    <span class="mastery-value">75%</span>
+                                </div>
+                            </td>
+                            <td><span class="badge bg-success">91%</span></td>
+                            <td><small class="text-muted">30 min ago</small></td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <div class="student-info">
+                                    <div class="student-avatar">MK</div>
+                                    <div>
+                                        <div class="fw-500">Michael Koh</div>
+                                        <small class="text-muted">Class 3B</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar" style="width: 80%"></div></div>
+                                    <span class="mastery-value">80%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar bg-warning" style="width: 45%"></div></div>
+                                    <span class="mastery-value text-warning">45%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar bg-danger" style="width: 20%"></div></div>
+                                    <span class="mastery-value text-danger">20%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar" style="width: 0%"></div></div>
+                                    <span class="mastery-value text-muted">0%</span>
+                                </div>
+                            </td>
+                            <td><span class="badge bg-warning text-dark">36%</span></td>
+                            <td><small class="text-muted">Yesterday</small></td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <div class="student-info">
+                                    <div class="student-avatar">AL</div>
+                                    <div>
+                                        <div class="fw-500">Amy Lee</div>
+                                        <small class="text-muted">Class 3B</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar bg-success" style="width: 95%"></div></div>
+                                    <span class="mastery-value">95%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar" style="width: 70%"></div></div>
+                                    <span class="mastery-value">70%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar" style="width: 55%"></div></div>
+                                    <span class="mastery-value">55%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="mastery-bar">
+                                    <div class="progress"><div class="progress-bar bg-warning" style="width: 30%"></div></div>
+                                    <span class="mastery-value text-warning">30%</span>
+                                </div>
+                            </td>
+                            <td><span class="badge bg-primary">62%</span></td>
+                            <td><small class="text-muted">5 hours ago</small></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Module Modal -->
+    <div class="modal fade" id="createModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-plus-circle me-2 text-primary"></i>Create New Module Tree
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-4">
+                        <label class="form-label fw-500">Subject</label>
+                        <select class="form-select">
+                            <option>Mathematics</option>
+                            <option>Science - Physics</option>
+                            <option>Science - Chemistry</option>
+                            <option>Science - Biology</option>
+                            <option>English</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-500">Year Level</label>
+                        <select class="form-select">
+                            <option>Secondary 1</option>
+                            <option>Secondary 2</option>
+                            <option selected>Secondary 3</option>
+                            <option>Secondary 4</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-500">Upload Syllabus / Scheme of Work</label>
+                        <p class="text-muted small">Upload a PDF or Word document. Our AI will analyze it and automatically create your module structure.</p>
+
+                        <div class="upload-area" id="uploadArea">
+                            <i class="bi bi-cloud-arrow-up"></i>
+                            <h5>Drag & Drop or Click to Upload</h5>
+                            <p class="text-muted mb-0">Supports PDF, DOC, DOCX (Max 10MB)</p>
+                        </div>
+
+                        <!-- Upload success state -->
+                        <div class="upload-success d-none" id="uploadSuccess">
+                            <div class="alert alert-success d-flex align-items-center">
+                                <i class="bi bi-file-earmark-check me-2" style="font-size: 2rem;"></i>
+                                <div>
+                                    <div class="fw-bold">Sec3_Mathematics_Syllabus_2024.pdf</div>
+                                    <small>2.4 MB • Ready for AI analysis</small>
+                                </div>
+                                <button class="btn btn-sm btn-outline-danger ms-auto">
+                                    <i class="bi bi-x"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-500">Module Title (Optional)</label>
+                        <input type="text" class="form-control" placeholder="e.g., Secondary 3 Mathematics - Full Year">
+                        <small class="text-muted">Leave blank to auto-generate from syllabus</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="startGeneration()">
+                        <i class="bi bi-cpu me-1"></i>Generate with AI
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Node Editor Sidebar (shows when editing a module node) -->
+    <div class="node-editor" id="nodeEditor">
+        <div class="node-editor-header">
+            <h5 class="mb-0">Edit Module Node</h5>
+            <button class="btn btn-sm btn-outline-secondary" onclick="closeNodeEditor()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label small text-muted">Module Title</label>
+            <input type="text" class="form-control" value="Solving Linear Equations">
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label small text-muted">Description</label>
+            <textarea class="form-control" rows="2">Learn to solve equations with one variable using inverse operations.</textarea>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label small text-muted">Learning Objectives</label>
+            <div class="p-2 bg-light rounded small">
+                <div class="mb-1">• Understand variables and constants</div>
+                <div class="mb-1">• Apply inverse operations</div>
+                <div>• Solve real-world problems</div>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label small text-muted d-flex justify-content-between">
+                Resources
+                <span class="badge bg-primary">3 items</span>
+            </label>
+
+            <div class="resource-list">
+                <div class="resource-item">
+                    <div class="resource-icon youtube">
+                        <i class="bi bi-youtube"></i>
+                    </div>
+                    <div class="flex-grow-1">
+                        <div class="small fw-500">Introduction Video</div>
+                        <div class="text-muted" style="font-size: 0.7rem;">Khan Academy • 8:24</div>
+                    </div>
+                    <button class="btn btn-sm btn-link text-danger p-0">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+
+                <div class="resource-item">
+                    <div class="resource-icon pdf">
+                        <i class="bi bi-file-pdf"></i>
+                    </div>
+                    <div class="flex-grow-1">
+                        <div class="small fw-500">Practice Worksheet</div>
+                        <div class="text-muted" style="font-size: 0.7rem;">PDF • 2 pages</div>
+                    </div>
+                    <button class="btn btn-sm btn-link text-danger p-0">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+
+                <div class="add-resource-btn">
+                    <i class="bi bi-plus-circle"></i>
+                    Add Resource
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex gap-2 mt-4">
+            <button class="btn btn-outline-danger btn-sm">
+                <i class="bi bi-trash me-1"></i>Delete
+            </button>
+            <button class="btn btn-primary btn-sm ms-auto">
+                <i class="bi bi-check me-1"></i>Save Changes
+            </button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Simulate file upload
+        document.getElementById('uploadArea').addEventListener('click', () => {
+            document.getElementById('uploadArea').classList.add('d-none');
+            document.getElementById('uploadSuccess').classList.remove('d-none');
+        });
+
+        // Simulate AI generation
+        function startGeneration() {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('createModal'));
+            modal.hide();
+
+            document.getElementById('aiStatus').style.display = 'block';
+
+            // Simulate progress
+            setTimeout(() => {
+                document.getElementById('aiStatus').style.display = 'none';
+                alert('Module tree generated successfully! In the real app, you would be redirected to the 3D editor.');
+            }, 3000);
+        }
+
+        // Node editor toggle
+        function closeNodeEditor() {
+            document.getElementById('nodeEditor').classList.remove('active');
+        }
+
+        // Simulate clicking on a module to edit
+        document.querySelectorAll('.module-card').forEach(card => {
+            card.querySelector('.btn-outline-primary')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                document.getElementById('nodeEditor').classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

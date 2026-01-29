@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Module Visualization - Mockup</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5a6fd6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg-light: #f8fafc;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-light);
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 0.75rem 0;
+        }
+
+        .navbar-brand {
+            color: white !important;
+            font-weight: 700;
+            font-size: 1.25rem;
+        }
+
+        .nav-link {
+            color: rgba(255,255,255,0.85) !important;
+            padding: 0.5rem 1rem;
+        }
+
+        .nav-link:hover { color: white !important; }
+
+        .visualization-container {
+            position: relative;
+            height: calc(100vh - 130px);
+            background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+            border-radius: 16px;
+            margin: 1rem;
+            overflow: hidden;
+        }
+
+        /* 3D Space with CSS perspective */
+        .space-3d {
+            position: absolute;
+            inset: 0;
+            perspective: 1500px;
+            transform-style: preserve-3d;
+        }
+
+        .modules-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transform-style: preserve-3d;
+            animation: rotateSpace 60s linear infinite;
+        }
+
+        @keyframes rotateSpace {
+            from { transform: rotateY(0deg); }
+            to { transform: rotateY(360deg); }
+        }
+
+        .module-node {
+            position: absolute;
+            transform-style: preserve-3d;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .module-node:hover {
+            transform: scale(1.15) !important;
+        }
+
+        .module-sphere {
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow:
+                0 0 20px rgba(255,255,255,0.2),
+                inset 0 -10px 30px rgba(0,0,0,0.3),
+                inset 0 10px 30px rgba(255,255,255,0.3);
+            position: relative;
+        }
+
+        .module-sphere::after {
+            content: '';
+            position: absolute;
+            top: 10%;
+            left: 15%;
+            width: 30%;
+            height: 30%;
+            background: radial-gradient(circle, rgba(255,255,255,0.8) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+
+        .module-label {
+            position: absolute;
+            bottom: -35px;
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            background: rgba(0,0,0,0.5);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+        }
+
+        .mastery-ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            pointer-events: none;
+        }
+
+        .connection-line {
+            position: absolute;
+            background: linear-gradient(90deg, rgba(255,255,255,0.1), rgba(255,255,255,0.3), rgba(255,255,255,0.1));
+            height: 2px;
+            transform-origin: left center;
+        }
+
+        /* Center module (root) */
+        .module-root {
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+        }
+
+        .module-root .module-sphere {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 20px rgba(102,126,234,0.4), 0 0 60px rgba(102,126,234,0.2); }
+            50% { box-shadow: 0 0 40px rgba(102,126,234,0.6), 0 0 80px rgba(102,126,234,0.3); }
+        }
+
+        /* Level 1 modules */
+        .module-l1 .module-sphere {
+            width: 80px;
+            height: 80px;
+        }
+
+        /* Level 2 modules */
+        .module-l2 .module-sphere {
+            width: 50px;
+            height: 50px;
+        }
+
+        /* Level 3 modules (leaf) */
+        .module-l3 .module-sphere {
+            width: 35px;
+            height: 35px;
+        }
+
+        /* Mastery colors */
+        .mastery-full { background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important; }
+        .mastery-high { background: linear-gradient(135deg, #84cc16 0%, #65a30d 100%) !important; }
+        .mastery-medium { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important; }
+        .mastery-low { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important; }
+        .mastery-none { background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important; opacity: 0.7; }
+
+        /* Info Panel */
+        .info-panel {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            padding: 1rem;
+            width: 280px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            z-index: 200;
+        }
+
+        .module-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .mastery-display {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        .mastery-circle {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: conic-gradient(var(--success) var(--mastery), #e2e8f0 var(--mastery));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mastery-circle-inner {
+            width: 55px;
+            height: 55px;
+            border-radius: 50%;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--primary);
+        }
+
+        /* Legend */
+        .legend {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            padding: 1rem;
+            z-index: 200;
+        }
+
+        .legend-title {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            margin: 0.25rem 0;
+        }
+
+        .legend-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+        }
+
+        /* Controls */
+        .controls {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            z-index: 200;
+        }
+
+        .control-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(255,255,255,0.95);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            color: #1e293b;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .control-btn:hover {
+            transform: scale(1.1);
+            background: var(--primary);
+            color: white;
+        }
+
+        /* Module detail modal */
+        .module-modal {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 16px;
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+            z-index: 300;
+        }
+
+        .module-modal.active {
+            display: block;
+            animation: modalIn 0.3s ease;
+        }
+
+        @keyframes modalIn {
+            from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+            to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        .modal-overlay {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 250;
+        }
+
+        .modal-overlay.active { display: block; }
+
+        /* Stars background */
+        .stars {
+            position: absolute;
+            inset: 0;
+            background-image:
+                radial-gradient(2px 2px at 20px 30px, rgba(255,255,255,0.5), transparent),
+                radial-gradient(2px 2px at 40px 70px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(1px 1px at 90px 40px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(2px 2px at 160px 120px, rgba(255,255,255,0.5), transparent),
+                radial-gradient(1px 1px at 230px 80px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(2px 2px at 300px 160px, rgba(255,255,255,0.4), transparent);
+            background-size: 350px 200px;
+            animation: twinkle 4s ease-in-out infinite;
+        }
+
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+
+        /* Breadcrumb */
+        .module-breadcrumb {
+            position: absolute;
+            top: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255,255,255,0.95);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            z-index: 200;
+        }
+
+        .breadcrumb-item {
+            color: #64748b;
+        }
+
+        .breadcrumb-item.active {
+            color: var(--primary);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-mortarboard-fill me-2"></i>School Portal
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="#"><i class="bi bi-house me-1"></i>Dashboard</a>
+                <a class="nav-link active" href="#"><i class="bi bi-diagram-3 me-1"></i>My Learning</a>
+                <a class="nav-link" href="#"><i class="bi bi-journal-text me-1"></i>Assignments</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 3D Visualization -->
+    <div class="visualization-container">
+        <div class="stars"></div>
+
+        <!-- Breadcrumb -->
+        <nav class="module-breadcrumb">
+            <span class="breadcrumb-item">Mathematics</span>
+            <span class="mx-2">›</span>
+            <span class="breadcrumb-item active">Secondary 3 - Full Year</span>
+        </nav>
+
+        <!-- Info Panel -->
+        <div class="info-panel">
+            <div class="module-title" id="selectedTitle">Secondary 3 Mathematics</div>
+            <p class="text-muted small mb-2" id="selectedDesc">Complete mathematics curriculum for the year</p>
+
+            <div class="mastery-display">
+                <div class="mastery-circle" style="--mastery: 68%">
+                    <div class="mastery-circle-inner">68%</div>
+                </div>
+                <div>
+                    <div class="text-muted small">Overall Mastery</div>
+                    <div class="fw-bold">In Progress</div>
+                    <div class="text-success small"><i class="bi bi-arrow-up"></i> +5% this week</div>
+                </div>
+            </div>
+
+            <div class="progress mb-3" style="height: 8px;">
+                <div class="progress-bar bg-success" style="width: 68%"></div>
+            </div>
+
+            <button class="btn btn-primary w-100" id="learnBtn" style="display: none;">
+                <i class="bi bi-play-circle me-1"></i>Start Learning
+            </button>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend">
+            <div class="legend-title">Mastery Level</div>
+            <div class="legend-item">
+                <div class="legend-dot mastery-full"></div>
+                <span>Mastered (100%)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot mastery-high"></div>
+                <span>High (70-99%)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot mastery-medium"></div>
+                <span>Medium (40-69%)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot mastery-low"></div>
+                <span>Low (1-39%)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot mastery-none"></div>
+                <span>Not Started</span>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button class="control-btn" title="Zoom In"><i class="bi bi-zoom-in"></i></button>
+            <button class="control-btn" title="Zoom Out"><i class="bi bi-zoom-out"></i></button>
+            <button class="control-btn" title="Reset View"><i class="bi bi-arrows-fullscreen"></i></button>
+            <button class="control-btn" id="pauseBtn" title="Pause Rotation"><i class="bi bi-pause-fill"></i></button>
+        </div>
+
+        <!-- 3D Space -->
+        <div class="space-3d">
+            <div class="modules-container" id="modulesContainer">
+                <!-- Center Module (Root) -->
+                <div class="module-node module-root" data-id="root" data-title="Secondary 3 Mathematics" data-mastery="68">
+                    <div class="module-sphere">
+                        <i class="bi bi-calculator text-white" style="font-size: 2rem;"></i>
+                    </div>
+                    <div class="module-label">Sec 3 Maths</div>
+                </div>
+
+                <!-- Level 1: Major Topics -->
+                <div class="module-node module-l1" style="left: 30%; top: 30%; transform: translateZ(100px);" data-id="algebra" data-title="Algebra" data-mastery="85">
+                    <div class="module-sphere mastery-high">
+                        <i class="bi bi-x-lg text-white"></i>
+                    </div>
+                    <div class="module-label">Algebra (85%)</div>
+                </div>
+
+                <div class="module-node module-l1" style="left: 70%; top: 30%; transform: translateZ(50px);" data-id="geometry" data-title="Geometry" data-mastery="72">
+                    <div class="module-sphere mastery-high">
+                        <i class="bi bi-pentagon text-white"></i>
+                    </div>
+                    <div class="module-label">Geometry (72%)</div>
+                </div>
+
+                <div class="module-node module-l1" style="left: 70%; top: 70%; transform: translateZ(-50px);" data-id="trigonometry" data-title="Trigonometry" data-mastery="45">
+                    <div class="module-sphere mastery-medium">
+                        <i class="bi bi-triangle text-white"></i>
+                    </div>
+                    <div class="module-label">Trigonometry (45%)</div>
+                </div>
+
+                <div class="module-node module-l1" style="left: 30%; top: 70%; transform: translateZ(-100px);" data-id="statistics" data-title="Statistics" data-mastery="0">
+                    <div class="module-sphere mastery-none">
+                        <i class="bi bi-bar-chart text-white"></i>
+                    </div>
+                    <div class="module-label">Statistics (0%)</div>
+                </div>
+
+                <!-- Level 2: Sub-topics for Algebra -->
+                <div class="module-node module-l2" style="left: 15%; top: 20%; transform: translateZ(150px);" data-id="linear" data-title="Linear Equations" data-mastery="100">
+                    <div class="module-sphere mastery-full"></div>
+                    <div class="module-label">Linear (100%)</div>
+                </div>
+
+                <div class="module-node module-l2" style="left: 22%; top: 15%; transform: translateZ(130px);" data-id="quadratic" data-title="Quadratic Equations" data-mastery="90">
+                    <div class="module-sphere mastery-high"></div>
+                    <div class="module-label">Quadratic (90%)</div>
+                </div>
+
+                <div class="module-node module-l2" style="left: 35%; top: 18%; transform: translateZ(120px);" data-id="polynomials" data-title="Polynomials" data-mastery="65">
+                    <div class="module-sphere mastery-medium"></div>
+                    <div class="module-label">Polynomials (65%)</div>
+                </div>
+
+                <!-- Level 3: Leaf nodes for Linear Equations -->
+                <div class="module-node module-l3" style="left: 8%; top: 12%; transform: translateZ(180px);" data-id="one-var" data-title="One Variable Equations" data-mastery="100" data-leaf="true">
+                    <div class="module-sphere mastery-full"></div>
+                    <div class="module-label">1-Var</div>
+                </div>
+
+                <div class="module-node module-l3" style="left: 12%; top: 8%; transform: translateZ(170px);" data-id="two-var" data-title="Two Variable Equations" data-mastery="100" data-leaf="true">
+                    <div class="module-sphere mastery-full"></div>
+                    <div class="module-label">2-Var</div>
+                </div>
+
+                <div class="module-node module-l3" style="left: 18%; top: 10%; transform: translateZ(165px);" data-id="word-problems" data-title="Word Problems" data-mastery="100" data-leaf="true">
+                    <div class="module-sphere mastery-full"></div>
+                    <div class="module-label">Word Prob</div>
+                </div>
+
+                <!-- Level 2: Sub-topics for Geometry -->
+                <div class="module-node module-l2" style="left: 80%; top: 20%; transform: translateZ(80px);" data-id="circles" data-title="Circles" data-mastery="100">
+                    <div class="module-sphere mastery-full"></div>
+                    <div class="module-label">Circles (100%)</div>
+                </div>
+
+                <div class="module-node module-l2" style="left: 85%; top: 35%; transform: translateZ(40px);" data-id="triangles" data-title="Triangles" data-mastery="55">
+                    <div class="module-sphere mastery-medium"></div>
+                    <div class="module-label">Triangles (55%)</div>
+                </div>
+
+                <!-- Level 2: Sub-topics for Trigonometry -->
+                <div class="module-node module-l2" style="left: 82%; top: 75%; transform: translateZ(-70px);" data-id="basic-trig" data-title="Basic Trigonometry" data-mastery="70">
+                    <div class="module-sphere mastery-high"></div>
+                    <div class="module-label">Basic Trig (70%)</div>
+                </div>
+
+                <div class="module-node module-l2" style="left: 75%; top: 85%; transform: translateZ(-90px);" data-id="trig-identities" data-title="Trig Identities" data-mastery="20">
+                    <div class="module-sphere mastery-low"></div>
+                    <div class="module-label">Identities (20%)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Overlay -->
+        <div class="modal-overlay" id="modalOverlay"></div>
+
+        <!-- Module Detail Modal -->
+        <div class="module-modal" id="moduleModal">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h5 class="mb-1" id="modalTitle">Module Name</h5>
+                    <span class="badge bg-success" id="modalStatus">85% Mastered</span>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" onclick="closeModal()">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+
+            <p class="text-muted" id="modalDesc">Learning objectives and description here.</p>
+
+            <div class="mb-3">
+                <label class="form-label small text-muted">Learning Objectives</label>
+                <ul class="small" id="modalObjectives">
+                    <li>Understand and solve equations</li>
+                    <li>Apply to real-world problems</li>
+                </ul>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary flex-grow-1" id="modalLearnBtn">
+                    <i class="bi bi-play-circle me-1"></i>Start Learning
+                </button>
+                <button class="btn btn-outline-secondary">
+                    <i class="bi bi-info-circle"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Pause/Resume rotation
+        const pauseBtn = document.getElementById('pauseBtn');
+        const container = document.getElementById('modulesContainer');
+        let isPaused = false;
+
+        pauseBtn.addEventListener('click', () => {
+            isPaused = !isPaused;
+            container.style.animationPlayState = isPaused ? 'paused' : 'running';
+            pauseBtn.innerHTML = isPaused ? '<i class="bi bi-play-fill"></i>' : '<i class="bi bi-pause-fill"></i>';
+        });
+
+        // Module click handling
+        document.querySelectorAll('.module-node').forEach(node => {
+            node.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const title = node.dataset.title;
+                const mastery = node.dataset.mastery;
+                const isLeaf = node.dataset.leaf === 'true';
+
+                // Update info panel
+                document.getElementById('selectedTitle').textContent = title;
+
+                // Update learn button visibility
+                const learnBtn = document.getElementById('learnBtn');
+                learnBtn.style.display = isLeaf ? 'block' : 'none';
+
+                // Show modal for leaf nodes
+                if (isLeaf) {
+                    showModal(title, mastery);
+                }
+            });
+        });
+
+        // Modal functions
+        function showModal(title, mastery) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalStatus').textContent = mastery + '% Mastered';
+            document.getElementById('moduleModal').classList.add('active');
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('moduleModal').classList.remove('active');
+            document.getElementById('modalOverlay').classList.remove('active');
+        }
+
+        document.getElementById('modalOverlay').addEventListener('click', closeModal);
+
+        // Learn button action
+        document.getElementById('modalLearnBtn').addEventListener('click', () => {
+            alert('This would navigate to the Learning Page for this module');
+        });
+    </script>
+</body>
+</html>
