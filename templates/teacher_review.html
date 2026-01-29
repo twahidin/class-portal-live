@@ -705,9 +705,12 @@
         container.innerHTML = '';
     }
     
-    // Save feedback
-    async function saveFeedback() {
-        // Update colors before saving
+    // Save feedback: queue so only one request in flight; retry once on 429
+    let saveInFlight = false;
+    let saveAgainAfter = false;
+    const SAVE_RETRY_AFTER_MS = 45000;
+
+    function buildReviewSavePayload() {
         updateMarkBoxColors();
         const formData = new FormData(document.getElementById('feedback-form'));
         const data = {
@@ -716,8 +719,6 @@
             include_answer_key: document.getElementById('include-answer-key').checked,
             questions: {}
         };
-        
-        // Collect question data
         document.querySelectorAll('#feedback-tbody tr').forEach(row => {
             const qNum = row.dataset.question;
             if (qNum) {
@@ -730,23 +731,49 @@
                 };
             }
         });
-        
-        // Include total marks max
         data.total_marks_max = document.getElementById('total-marks-max').value;
-        
-        try {
-            const response = await fetch(`/teacher/review/${submissionId}/save`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            });
-            
-            const result = await response.json();
-            showToast(result.success ? 'Success' : 'Error', result.message || 'Saved');
-            return result.success;
-        } catch (e) {
-            showToast('Error', 'Failed to save');
-            return false;
+        return data;
+    }
+
+    async function saveFeedback() {
+        if (saveInFlight) {
+            saveAgainAfter = true;
+            return;
+        }
+        const data = buildReviewSavePayload();
+        saveInFlight = true;
+        let retrying = false;
+        for (;;) {
+            try {
+                const response = await fetch(`/teacher/review/${submissionId}/save`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                if (response.status === 429) {
+                    if (!retrying) {
+                        showToast('Rate limit', 'Retrying in a moment…');
+                        retrying = true;
+                        await new Promise(r => setTimeout(r, SAVE_RETRY_AFTER_MS));
+                        Object.assign(data, buildReviewSavePayload());
+                        continue;
+                    }
+                    showToast('Error', result.error || 'Rate limit. Please try again later.');
+                    saveInFlight = false;
+                    if (saveAgainAfter) { saveAgainAfter = false; saveFeedback(); }
+                    return false;
+                }
+                showToast(result.success ? 'Success' : 'Error', result.message || 'Saved');
+                saveInFlight = false;
+                if (saveAgainAfter) { saveAgainAfter = false; saveFeedback(); }
+                return result.success;
+            } catch (e) {
+                showToast('Error', 'Failed to save');
+                saveInFlight = false;
+                if (saveAgainAfter) { saveAgainAfter = false; saveFeedback(); }
+                return false;
+            }
         }
     }
     

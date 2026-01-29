@@ -846,9 +846,12 @@
         return div.innerHTML;
     }
     
-    // Save feedback
-    async function saveFeedback() {
-        // Update colors before saving
+    // Save feedback: queue so only one request in flight; retry once on 429
+    let saveInFlight = false;
+    let saveAgainAfter = false;
+    const SAVE_RETRY_AFTER_MS = 45000;
+
+    function buildRubricSavePayload() {
         updateMarkBoxColors();
         const data = {
             overall_feedback: document.getElementById('overall-feedback').value,
@@ -857,9 +860,7 @@
             criteria: {},
             errors: []
         };
-        
-        // Collect criteria data
-        document.querySelectorAll('#rubric-tbody tr[data-criterion]').forEach((row, idx) => {
+        document.querySelectorAll('#rubric-tbody tr[data-criterion]').forEach((row) => {
             const criterion = row.dataset.criterion;
             data.criteria[criterion] = {
                 reasoning: row.querySelector('.reasoning-input').value,
@@ -868,8 +869,6 @@
                 max_marks: row.querySelector('.criterion-max-input').value
             };
         });
-        
-        // Collect error data
         document.querySelectorAll('#errors-tbody tr[data-error-index]').forEach(row => {
             data.errors.push({
                 location: row.querySelector('.location-input').value,
@@ -878,20 +877,48 @@
                 feedback: row.querySelector('.error-feedback-input').value
             });
         });
-        
-        try {
-            const response = await fetch(`/teacher/review/${submissionId}/save-rubric`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            });
-            
-            const result = await response.json();
-            showToast(result.success ? 'Success' : 'Error', result.message || 'Saved');
-            return result.success;
-        } catch (e) {
-            showToast('Error', 'Failed to save');
-            return false;
+        return data;
+    }
+
+    async function saveFeedback() {
+        if (saveInFlight) {
+            saveAgainAfter = true;
+            return;
+        }
+        const data = buildRubricSavePayload();
+        saveInFlight = true;
+        let retrying = false;
+        for (;;) {
+            try {
+                const response = await fetch(`/teacher/review/${submissionId}/save-rubric`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                if (response.status === 429) {
+                    if (!retrying) {
+                        showToast('Rate limit', 'Retrying in a moment…');
+                        retrying = true;
+                        await new Promise(r => setTimeout(r, SAVE_RETRY_AFTER_MS));
+                        Object.assign(data, buildRubricSavePayload());
+                        continue;
+                    }
+                    showToast('Error', result.error || 'Rate limit. Please try again later.');
+                    saveInFlight = false;
+                    if (saveAgainAfter) { saveAgainAfter = false; saveFeedback(); }
+                    return false;
+                }
+                showToast(result.success ? 'Success' : 'Error', result.message || 'Saved');
+                saveInFlight = false;
+                if (saveAgainAfter) { saveAgainAfter = false; saveFeedback(); }
+                return result.success;
+            } catch (e) {
+                showToast('Error', 'Failed to save');
+                saveInFlight = false;
+                if (saveAgainAfter) { saveAgainAfter = false; saveFeedback(); }
+                return false;
+            }
         }
     }
     

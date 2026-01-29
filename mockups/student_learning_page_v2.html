@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Learning Page - With Media Viewer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #667eea;
+            --primary-dark: #5a6fd6;
+            --secondary: #764ba2;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #06b6d4;
+            --bg-light: #f8fafc;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --border-color: #e2e8f0;
+            --border-radius: 12px;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-light);
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 0.5rem 0;
+        }
+
+        .navbar-brand {
+            color: white !important;
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .nav-link { color: rgba(255,255,255,0.85) !important; }
+
+        /* Main Layout - Two columns */
+        .learning-layout {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            height: calc(100vh - 56px);
+            overflow: hidden;
+        }
+
+        @media (max-width: 1400px) {
+            .learning-layout {
+                grid-template-columns: 1fr 340px;
+            }
+        }
+
+        @media (max-width: 1200px) {
+            .learning-layout {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                display: none;
+            }
+        }
+
+        /* Main Content - Vertical split */
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Module Header Bar */
+        .module-header {
+            background: white;
+            border-bottom: 1px solid var(--border-color);
+            padding: 0.75rem 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .module-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .module-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.1rem;
+        }
+
+        .breadcrumb-text {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .module-title {
+            font-weight: 700;
+            font-size: 1rem;
+            margin: 0;
+        }
+
+        .mastery-badge {
+            background: var(--success);
+            color: white;
+            padding: 0.375rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        /* ============================================
+           MEDIA VIEWER - TOP SECTION
+           ============================================ */
+        .media-viewer-section {
+            flex: 0 0 45%;
+            min-height: 300px;
+            background: #0f172a;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Media Type Tabs */
+        .media-tabs {
+            display: flex;
+            background: #1e293b;
+            padding: 0.5rem;
+            gap: 0.5rem;
+        }
+
+        .media-tab {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.85rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .media-tab:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .media-tab.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .media-tab i {
+            font-size: 1rem;
+        }
+
+        /* Media Content Area */
+        .media-content {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Video Player */
+        .video-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+
+        .video-placeholder {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 16/9;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .video-placeholder .play-btn {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .video-placeholder .play-btn:hover {
+            background: var(--primary);
+            transform: scale(1.1);
+        }
+
+        .video-placeholder .play-btn i {
+            font-size: 2rem;
+            margin-left: 4px;
+        }
+
+        .video-title {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .video-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .video-progress-bar {
+            height: 100%;
+            background: var(--primary);
+            width: 35%;
+        }
+
+        /* Slides Viewer */
+        .slides-container {
+            width: 100%;
+            height: 100%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .slides-container.active {
+            display: flex;
+        }
+
+        .slide-viewer {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            aspect-ratio: 16/10;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .slide-content {
+            padding: 2rem;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .slide-header {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 1.5rem;
+        }
+
+        .slide-body {
+            flex: 1;
+            font-size: 1.1rem;
+            line-height: 1.8;
+        }
+
+        .slide-body ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .slide-body li {
+            padding: 0.5rem 0;
+            padding-left: 1.5rem;
+            position: relative;
+        }
+
+        .slide-body li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: var(--primary);
+        }
+
+        .slide-nav {
+            position: absolute;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            background: rgba(0, 0, 0, 0.05);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+        }
+
+        .slide-nav button {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: var(--primary);
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .slide-nav button:hover {
+            transform: scale(1.1);
+        }
+
+        .slide-nav button:disabled {
+            background: #e2e8f0;
+            color: #94a3b8;
+        }
+
+        .slide-counter {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        /* Interactive Container */
+        .interactive-container {
+            width: 100%;
+            height: 100%;
+            display: none;
+            padding: 1rem;
+        }
+
+        .interactive-container.active {
+            display: block;
+        }
+
+        .interactive-frame {
+            width: 100%;
+            height: 100%;
+            background: white;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .interactive-demo {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .interactive-demo h3 {
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+        }
+
+        .equation-input {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1.5rem 0;
+            font-size: 1.5rem;
+        }
+
+        .equation-input input {
+            width: 80px;
+            height: 50px;
+            border: 2px solid var(--primary);
+            border-radius: 8px;
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .check-btn {
+            background: var(--success);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .check-btn:hover {
+            transform: scale(1.05);
+        }
+
+        /* ============================================
+           BOTTOM SECTION - Chat & Writing
+           ============================================ */
+        .bottom-section {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            padding: 1rem;
+            overflow: hidden;
+            background: var(--bg-light);
+        }
+
+        @media (max-width: 992px) {
+            .bottom-section {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Chat Panel */
+        .chat-panel {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .ai-avatar {
+            width: 32px;
+            height: 32px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            background: #f8fafc;
+        }
+
+        .message {
+            max-width: 85%;
+            margin-bottom: 0.75rem;
+        }
+
+        .message.student { margin-left: auto; }
+        .message.assistant { margin-right: auto; }
+
+        .message-bubble {
+            padding: 0.75rem 1rem;
+            border-radius: 16px;
+            font-size: 0.9rem;
+        }
+
+        .message.student .message-bubble {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-bubble {
+            background: white;
+            box-shadow: var(--shadow);
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-input {
+            padding: 0.75rem;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .chat-input input {
+            flex: 1;
+            border: 2px solid var(--border-color);
+            border-radius: 20px;
+            padding: 0.625rem 1rem;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .chat-input input:focus {
+            border-color: var(--primary);
+        }
+
+        .chat-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .chat-btn.upload {
+            background: white;
+            border: 2px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .chat-btn.upload:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .chat-btn.send {
+            background: var(--primary);
+            color: white;
+        }
+
+        .chat-btn.send:hover {
+            transform: scale(1.05);
+        }
+
+        /* Writing Panel */
+        .writing-panel {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .writing-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .writing-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .writing-tools {
+            display: flex;
+            gap: 0.375rem;
+        }
+
+        .tool-btn {
+            width: 32px;
+            height: 32px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .tool-btn:hover, .tool-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .canvas-area {
+            flex: 1;
+            background: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .canvas-placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #cbd5e1;
+            pointer-events: none;
+        }
+
+        .canvas-placeholder i {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Simulated handwriting */
+        .handwriting {
+            position: absolute;
+            top: 20px;
+            left: 30px;
+            font-family: 'Brush Script MT', cursive;
+            font-size: 1.3rem;
+            color: #1e293b;
+            line-height: 1.8;
+            transform: rotate(-1deg);
+        }
+
+        .writing-actions {
+            padding: 0.75rem;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .writing-actions .btn {
+            font-size: 0.85rem;
+            padding: 0.5rem 1rem;
+        }
+
+        /* ============================================
+           SIDEBAR
+           ============================================ */
+        .sidebar {
+            background: white;
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-section {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sidebar-section:last-child {
+            border-bottom: none;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .section-title {
+            font-weight: 600;
+            font-size: 0.85rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        /* Mastery Circle */
+        .mastery-display {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .mastery-circle {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: conic-gradient(var(--success) 75%, var(--border-color) 75%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .mastery-circle::before {
+            content: '';
+            width: 55px;
+            height: 55px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+        }
+
+        .mastery-value {
+            position: relative;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--success);
+        }
+
+        .mastery-info .label {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .mastery-info .sublabel {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        /* Overall Progress */
+        .progress-item {
+            margin-bottom: 0.75rem;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            margin-bottom: 0.375rem;
+        }
+
+        .progress {
+            height: 6px;
+            border-radius: 3px;
+            background: var(--border-color);
+        }
+
+        .progress-bar {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+        }
+
+        /* Topics List */
+        .topic-item {
+            display: flex;
+            align-items: center;
+            padding: 0.625rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .topic-item:last-child {
+            border-bottom: none;
+        }
+
+        .topic-status {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 0.625rem;
+            font-size: 0.7rem;
+        }
+
+        .topic-status.complete {
+            background: var(--success);
+            color: white;
+        }
+
+        .topic-status.current {
+            background: var(--primary);
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(102, 126, 234, 0); }
+        }
+
+        .topic-status.locked {
+            background: var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .topic-info {
+            flex: 1;
+        }
+
+        .topic-name {
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        .topic-progress {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        /* Resource List */
+        .resource-item {
+            display: flex;
+            align-items: center;
+            padding: 0.625rem;
+            margin-bottom: 0.5rem;
+            background: var(--bg-light);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .resource-item:hover {
+            background: #e2e8f0;
+        }
+
+        .resource-item.active {
+            background: rgba(102, 126, 234, 0.1);
+            border: 2px solid var(--primary);
+        }
+
+        .resource-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 0.625rem;
+        }
+
+        .resource-icon.video {
+            background: rgba(255, 0, 0, 0.1);
+            color: #ff0000;
+        }
+
+        .resource-icon.slides {
+            background: rgba(245, 158, 11, 0.1);
+            color: #f59e0b;
+        }
+
+        .resource-icon.interactive {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+        }
+
+        .resource-icon.pdf {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+
+        .resource-title {
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        .resource-meta {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        .resource-check {
+            margin-left: auto;
+            color: var(--success);
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid px-3">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-mortarboard-fill me-2"></i>School Portal
+            </a>
+            <div class="d-flex align-items-center">
+                <a href="#" class="btn btn-sm btn-light me-2">
+                    <i class="bi bi-arrow-left me-1"></i>Back to Modules
+                </a>
+                <span class="text-white"><i class="bi bi-person-circle me-1"></i>John Tan</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Layout -->
+    <div class="learning-layout">
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Module Header -->
+            <div class="module-header">
+                <div class="module-info">
+                    <div class="module-icon">
+                        <i class="bi bi-x-lg"></i>
+                    </div>
+                    <div>
+                        <div class="breadcrumb-text">Mathematics › Algebra › Linear Equations</div>
+                        <h1 class="module-title">Solving One-Variable Equations</h1>
+                    </div>
+                </div>
+                <span class="mastery-badge"><i class="bi bi-trophy me-1"></i>75% Mastered</span>
+            </div>
+
+            <!-- MEDIA VIEWER SECTION (TOP) -->
+            <div class="media-viewer-section">
+                <!-- Media Type Tabs -->
+                <div class="media-tabs">
+                    <button class="media-tab active" onclick="switchMedia('video')">
+                        <i class="bi bi-play-circle"></i>
+                        <span>Video</span>
+                    </button>
+                    <button class="media-tab" onclick="switchMedia('slides')">
+                        <i class="bi bi-easel"></i>
+                        <span>Slides</span>
+                    </button>
+                    <button class="media-tab" onclick="switchMedia('interactive')">
+                        <i class="bi bi-joystick"></i>
+                        <span>Interactive</span>
+                    </button>
+                </div>
+
+                <!-- Media Content -->
+                <div class="media-content">
+                    <!-- Video Player -->
+                    <div class="video-container" id="videoContainer">
+                        <div class="video-placeholder">
+                            <div class="play-btn">
+                                <i class="bi bi-play-fill"></i>
+                            </div>
+                            <div class="video-title">Introduction to Linear Equations - Khan Academy</div>
+                            <div class="video-progress">
+                                <div class="video-progress-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Slides Viewer -->
+                    <div class="slides-container" id="slidesContainer">
+                        <div class="slide-viewer">
+                            <div class="slide-content">
+                                <div class="slide-header">Solving Linear Equations</div>
+                                <div class="slide-body">
+                                    <ul>
+                                        <li>A linear equation has the form: <strong>ax + b = c</strong></li>
+                                        <li>Goal: Isolate the variable <strong>x</strong></li>
+                                        <li>Use inverse operations to move terms</li>
+                                        <li>Whatever you do to one side, do to the other</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="slide-nav">
+                                <button disabled><i class="bi bi-chevron-left"></i></button>
+                                <span class="slide-counter">Slide 3 of 15</span>
+                                <button><i class="bi bi-chevron-right"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Content -->
+                    <div class="interactive-container" id="interactiveContainer">
+                        <div class="interactive-frame">
+                            <div class="interactive-demo">
+                                <h3>Practice: Solve the Equation</h3>
+                                <div class="equation-input">
+                                    <span>x + 7 = 15</span>
+                                    <span style="margin: 0 1rem;">→</span>
+                                    <span>x = </span>
+                                    <input type="text" placeholder="?" />
+                                </div>
+                                <button class="check-btn">Check Answer</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BOTTOM SECTION - Chat & Writing -->
+            <div class="bottom-section">
+                <!-- Chat Panel -->
+                <div class="chat-panel">
+                    <div class="chat-header">
+                        <div class="ai-avatar">
+                            <i class="bi bi-robot"></i>
+                        </div>
+                        <div>
+                            <div class="fw-bold" style="font-size: 0.9rem;">AI Learning Assistant</div>
+                            <div class="small opacity-75">Ask questions or get help</div>
+                        </div>
+                    </div>
+
+                    <div class="chat-messages">
+                        <div class="message assistant">
+                            <div class="message-bubble">
+                                <div class="fw-bold mb-1">👋 Great progress!</div>
+                                <p class="mb-0">You've watched the introduction video. Ready to practice solving equations? Try the interactive above, or ask me any questions!</p>
+                            </div>
+                        </div>
+
+                        <div class="message student">
+                            <div class="message-bubble">
+                                How do I know when to add vs subtract?
+                            </div>
+                        </div>
+
+                        <div class="message assistant">
+                            <div class="message-bubble">
+                                <p class="mb-2">Great question! Use the <strong>inverse operation</strong>:</p>
+                                <p class="mb-1">• If something is <strong>added</strong> to x → <strong>subtract</strong> it from both sides</p>
+                                <p class="mb-2">• If something is <strong>subtracted</strong> from x → <strong>add</strong> it to both sides</p>
+                                <p class="mb-0">For example: <code>x + 5 = 12</code><br>Since 5 is added, subtract 5: <code>x = 12 - 5 = 7</code></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chat-input">
+                        <button class="chat-btn upload" title="Upload file">
+                            <i class="bi bi-paperclip"></i>
+                        </button>
+                        <input type="text" placeholder="Ask a question...">
+                        <button class="chat-btn send">
+                            <i class="bi bi-send-fill"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Writing Panel -->
+                <div class="writing-panel">
+                    <div class="writing-header">
+                        <span class="writing-title">
+                            <i class="bi bi-pencil"></i>
+                            Writing Board
+                        </span>
+                        <div class="writing-tools">
+                            <button class="tool-btn active"><i class="bi bi-pen"></i></button>
+                            <button class="tool-btn"><i class="bi bi-eraser"></i></button>
+                            <button class="tool-btn"><i class="bi bi-arrow-counterclockwise"></i></button>
+                            <input type="color" value="#1e293b" style="width: 28px; height: 28px; border: none; cursor: pointer; border-radius: 4px;">
+                        </div>
+                    </div>
+
+                    <div class="canvas-area">
+                        <div class="canvas-placeholder">
+                            <i class="bi bi-hand-index-thumb"></i>
+                            <span class="small">Write equations here (iPad supported)</span>
+                        </div>
+                        <div class="handwriting">
+                            x + 5 = 12<br>
+                            x = 12 - 5<br>
+                            x = 7 ✓
+                        </div>
+                    </div>
+
+                    <div class="writing-actions">
+                        <button class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-trash me-1"></i>Clear
+                        </button>
+                        <button class="btn btn-primary btn-sm ms-auto">
+                            <i class="bi bi-send me-1"></i>Submit to AI
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <!-- Mastery Section -->
+            <div class="sidebar-section">
+                <div class="section-title">
+                    <i class="bi bi-graph-up text-primary"></i>
+                    Your Progress
+                </div>
+                <div class="mastery-display">
+                    <div class="mastery-circle">
+                        <span class="mastery-value">75%</span>
+                    </div>
+                    <div class="mastery-info">
+                        <div class="label">Module Mastery</div>
+                        <div class="sublabel">3 of 4 topics complete</div>
+                        <div class="text-success small mt-1">
+                            <i class="bi bi-arrow-up"></i> +15% today
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Overall Progress -->
+            <div class="sidebar-section">
+                <div class="section-title">
+                    <i class="bi bi-bar-chart text-primary"></i>
+                    Overall Progress
+                </div>
+                <div class="progress-item">
+                    <div class="progress-label">
+                        <span>Linear Equations</span>
+                        <span class="fw-bold">68%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar" style="width: 68%"></div>
+                    </div>
+                </div>
+                <div class="progress-item">
+                    <div class="progress-label">
+                        <span>Algebra</span>
+                        <span class="fw-bold">52%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar" style="width: 52%"></div>
+                    </div>
+                </div>
+                <div class="progress-item">
+                    <div class="progress-label">
+                        <span>Mathematics</span>
+                        <span class="fw-bold">45%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-secondary" style="width: 45%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Topics -->
+            <div class="sidebar-section">
+                <div class="section-title">
+                    <i class="bi bi-list-check text-primary"></i>
+                    Topics
+                </div>
+                <div class="topic-item">
+                    <div class="topic-status complete"><i class="bi bi-check"></i></div>
+                    <div class="topic-info">
+                        <div class="topic-name">Introduction to Variables</div>
+                        <div class="topic-progress">Completed • 100%</div>
+                    </div>
+                </div>
+                <div class="topic-item">
+                    <div class="topic-status complete"><i class="bi bi-check"></i></div>
+                    <div class="topic-info">
+                        <div class="topic-name">Addition & Subtraction</div>
+                        <div class="topic-progress">Completed • 100%</div>
+                    </div>
+                </div>
+                <div class="topic-item">
+                    <div class="topic-status current"><i class="bi bi-play-fill"></i></div>
+                    <div class="topic-info">
+                        <div class="topic-name">Multiplication & Division</div>
+                        <div class="topic-progress">In Progress • 60%</div>
+                    </div>
+                </div>
+                <div class="topic-item">
+                    <div class="topic-status locked"><i class="bi bi-lock-fill"></i></div>
+                    <div class="topic-info">
+                        <div class="topic-name">Word Problems</div>
+                        <div class="topic-progress">Not Started</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resources -->
+            <div class="sidebar-section">
+                <div class="section-title">
+                    <i class="bi bi-collection-play text-primary"></i>
+                    Resources
+                </div>
+
+                <div class="resource-item active" onclick="switchMedia('video')">
+                    <div class="resource-icon video">
+                        <i class="bi bi-play-circle-fill"></i>
+                    </div>
+                    <div>
+                        <div class="resource-title">Intro Video</div>
+                        <div class="resource-meta">8:24 • Khan Academy</div>
+                    </div>
+                    <span class="resource-check"><i class="bi bi-check-circle-fill"></i></span>
+                </div>
+
+                <div class="resource-item" onclick="switchMedia('slides')">
+                    <div class="resource-icon slides">
+                        <i class="bi bi-easel-fill"></i>
+                    </div>
+                    <div>
+                        <div class="resource-title">Lesson Slides</div>
+                        <div class="resource-meta">15 slides</div>
+                    </div>
+                    <span class="resource-check"><i class="bi bi-check-circle-fill"></i></span>
+                </div>
+
+                <div class="resource-item" onclick="switchMedia('interactive')">
+                    <div class="resource-icon interactive">
+                        <i class="bi bi-joystick"></i>
+                    </div>
+                    <div>
+                        <div class="resource-title">Practice Tool</div>
+                        <div class="resource-meta">Interactive</div>
+                    </div>
+                </div>
+
+                <div class="resource-item">
+                    <div class="resource-icon pdf">
+                        <i class="bi bi-file-pdf-fill"></i>
+                    </div>
+                    <div>
+                        <div class="resource-title">Worksheet</div>
+                        <div class="resource-meta">PDF • 2 pages</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchMedia(type) {
+            // Update tabs
+            document.querySelectorAll('.media-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelector(`.media-tab[onclick="switchMedia('${type}')"]`).classList.add('active');
+
+            // Update resource items
+            document.querySelectorAll('.resource-item').forEach(item => item.classList.remove('active'));
+            const resourceItems = document.querySelectorAll('.resource-item');
+            if (type === 'video') resourceItems[0]?.classList.add('active');
+            if (type === 'slides') resourceItems[1]?.classList.add('active');
+            if (type === 'interactive') resourceItems[2]?.classList.add('active');
+
+            // Show/hide content
+            document.getElementById('videoContainer').style.display = type === 'video' ? 'flex' : 'none';
+            document.getElementById('slidesContainer').classList.toggle('active', type === 'slides');
+            document.getElementById('interactiveContainer').classList.toggle('active', type === 'interactive');
+        }
+    </script>
+</body>
+</html>
