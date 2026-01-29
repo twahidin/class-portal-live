@@ -363,7 +363,7 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
             
             openai_messages.append({"role": "user", "content": user_content})
             
-            # Newer OpenAI models use max_completion_tokens; older ones use max_tokens
+            # Newer OpenAI models require max_completion_tokens; older ones use max_tokens
             try:
                 response = client.chat.completions.create(
                     model=model_name,
@@ -371,12 +371,29 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
                     max_completion_tokens=max_tokens
                 )
             except Exception as e:
-                if 'max_completion_tokens' in str(e) or 'max_tokens' in str(e).lower():
-                    response = client.chat.completions.create(
-                        model=model_name,
-                        messages=openai_messages,
-                        max_tokens=max_tokens
-                    )
+                err = str(e).lower()
+                # Don't fall back to max_tokens if API already said to use max_completion_tokens
+                if 'max_tokens' in err and ('not supported' in err or 'unsupported' in err):
+                    raise
+                # Legacy models: fall back to max_tokens only when error is about max_completion_tokens
+                if 'max_completion_tokens' in err:
+                    try:
+                        response = client.chat.completions.create(
+                            model=model_name,
+                            messages=openai_messages,
+                            max_tokens=max_tokens
+                        )
+                    except Exception as e2:
+                        err2 = str(e2).lower()
+                        # This model requires max_completion_tokens; retry with it (first failure may have been transient)
+                        if 'max_tokens' in err2 and ('not supported' in err2 or 'unsupported' in err2):
+                            response = client.chat.completions.create(
+                                model=model_name,
+                                messages=openai_messages,
+                                max_completion_tokens=max_tokens
+                            )
+                        else:
+                            raise
                 else:
                     raise
             return response.choices[0].message.content
