@@ -3981,7 +3981,27 @@ def regenerate_ai_feedback(submission_id):
         )
         
         if has_error:
-            err_msg = ai_result.get('error') or ai_result.get('overall_feedback', 'Unknown error')
+            err_msg = ai_result.get('error') or ai_result.get('overall_feedback')
+            if not err_msg:
+                if marking_type == 'standard' and not ai_result.get('questions'):
+                    err_msg = (
+                        'AI did not return question-by-question feedback. '
+                        'The model may have returned an unexpected format. '
+                        'Try "Remark with another model" or ensure the submission and answer key are clear.'
+                    )
+                elif marking_type == 'rubric' and not ai_result.get('criteria') and not ai_result.get('errors'):
+                    err_msg = (
+                        'AI did not return rubric feedback. '
+                        'Try "Remark with another model" or check that the submission is readable.'
+                    )
+                else:
+                    err_msg = 'AI feedback could not be generated. Try "Remark with another model" or try again later.'
+            # Log for debugging (avoid logging huge raw response)
+            raw_preview = (ai_result.get('raw_response') or '')[:500] if isinstance(ai_result.get('raw_response'), str) else ''
+            logger.warning(
+                "Regenerate AI feedback treated as failed: has_error=True, error=%s, keys=%s, raw_preview=%s",
+                ai_result.get('error'), list(ai_result.keys()), raw_preview
+            )
             return jsonify({
                 'success': False,
                 'error': err_msg,

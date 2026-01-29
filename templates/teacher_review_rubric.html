@@ -187,7 +187,10 @@
                                     <td class="fw-bold">Overall Feedback</td>
                                     <td colspan="2">
                                         {% if ai_feedback and ai_feedback.get('error') %}
-                                        <div class="alert alert-warning py-2 mb-2 small">AI feedback failed. You can edit below or click "Regenerate AI Feedback" above to try again.</div>
+                                        <div class="alert alert-warning py-2 mb-2 small" id="ai-feedback-error-banner">
+                                            <strong>AI feedback failed.</strong>
+                                            <span id="ai-feedback-error-reason">{{ ai_feedback.error }}</span>
+                                        </div>
                                         {% endif %}
                                         <textarea class="form-control form-control-sm" id="overall-feedback" 
                                                   name="overall_feedback" rows="3"
@@ -982,14 +985,37 @@
                 bootstrap.Modal.getInstance(document.getElementById('remarkModal')).hide();
                 setTimeout(() => location.reload(), 800);
             } else {
-                showToast('Error', result.error || result.message || 'Remark failed');
+                const err = result.error || result.message || 'Remark failed';
+                showToast('Error', err);
+                setAIFeedbackErrorBanner(err);
                 runBtn.disabled = false;
                 runBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Run remark';
             }
         } catch (e) {
-            showToast('Error', 'Remark failed');
+            const err = e.message || 'Remark failed';
+            showToast('Error', err);
+            setAIFeedbackErrorBanner(err);
             runBtn.disabled = false;
             runBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Run remark';
+        }
+    }
+    
+    function setAIFeedbackErrorBanner(message) {
+        const reasonEl = document.getElementById('ai-feedback-error-reason');
+        if (reasonEl) {
+            reasonEl.textContent = message;
+        }
+        const banner = document.getElementById('ai-feedback-error-banner');
+        if (!banner && message) {
+            const container = document.getElementById('overall-feedback')?.closest('td');
+            if (container) {
+                const div = document.createElement('div');
+                div.id = 'ai-feedback-error-banner';
+                div.className = 'alert alert-warning py-2 mb-2 small';
+                div.innerHTML = '<strong>AI feedback failed.</strong> <span id="ai-feedback-error-reason"></span>';
+                container.insertBefore(div, document.getElementById('overall-feedback'));
+                document.getElementById('ai-feedback-error-reason').textContent = message;
+            }
         }
     }
     
@@ -1011,12 +1037,16 @@
                 showToast('Success', result.message || 'AI feedback generated.');
                 setTimeout(() => location.reload(), 800);
             } else {
-                showToast('Error', result.error || result.message || 'Failed to generate AI feedback');
+                const err = result.error || result.message || 'Failed to generate AI feedback';
+                showToast('Error', err);
+                setAIFeedbackErrorBanner(err);
                 btn.disabled = false;
                 btn.innerHTML = originalHtml;
             }
         } catch (e) {
-            showToast('Error', 'Failed to generate AI feedback');
+            const err = e.message || 'Failed to generate AI feedback';
+            showToast('Error', err);
+            setAIFeedbackErrorBanner(err);
             btn.disabled = false;
             btn.innerHTML = originalHtml;
         }
