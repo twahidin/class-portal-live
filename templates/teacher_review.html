@@ -231,9 +231,13 @@
                             </tbody>
                             <tfoot class="table-light">
                                 <tr>
-                                    <td colspan="4" class="text-end fw-bold">Total:</td>
+                                    <td colspan="3"></td>
+                                    <td class="text-end fw-bold">Total:</td>
                                     <td>
                                         <div class="d-flex align-items-center gap-2">
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="recalculateTotal()" title="Sum marks from all questions">
+                                                <i class="bi bi-calculator me-1"></i>Recalculate
+                                            </button>
                                             <div class="input-group input-group-sm">
                                                 <input type="number" class="form-control fw-bold" id="total-marks" 
                                                        name="total_marks"
@@ -245,9 +249,6 @@
                                                        value="{{ assignment.total_marks or 100 }}"
                                                        min="0">
                                             </div>
-                                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="recalculateTotal()" title="Sum marks from all questions">
-                                                <i class="bi bi-calculator me-1"></i>Recalculate
-                                            </button>
                                         </div>
                                     </td>
                                 </tr>
