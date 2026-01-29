@@ -233,16 +233,21 @@
                                 <tr>
                                     <td colspan="4" class="text-end fw-bold">Total:</td>
                                     <td>
-                                        <div class="input-group input-group-sm">
-                                            <input type="number" class="form-control fw-bold" id="total-marks" 
-                                                   name="total_marks"
-                                                   value="{{ ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '' }}"
-                                                   min="0">
-                                            <span class="input-group-text">/</span>
-                                            <input type="number" class="form-control fw-bold" id="total-marks-max" 
-                                                   name="total_marks_max"
-                                                   value="{{ assignment.total_marks or 100 }}"
-                                                   min="0">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="input-group input-group-sm">
+                                                <input type="number" class="form-control fw-bold" id="total-marks" 
+                                                       name="total_marks"
+                                                       value="{{ ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '' }}"
+                                                       min="0">
+                                                <span class="input-group-text">/</span>
+                                                <input type="number" class="form-control fw-bold" id="total-marks-max" 
+                                                       name="total_marks_max"
+                                                       value="{{ assignment.total_marks or 100 }}"
+                                                       min="0">
+                                            </div>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="recalculateTotal()" title="Sum marks from all questions">
+                                                <i class="bi bi-calculator me-1"></i>Recalculate
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -661,6 +666,19 @@
                 totalMarksInput.value = total;
             }
         }
+    }
+    
+    function recalculateTotal() {
+        let total = 0;
+        document.querySelectorAll('.marks-input').forEach(input => {
+            const val = parseFloat(input.value) || 0;
+            total += val;
+        });
+        const totalMarksInput = document.getElementById('total-marks');
+        if (totalMarksInput) {
+            totalMarksInput.value = total;
+        }
+        updateMarkBoxColors();
     }
     
     // Handle answer key image upload

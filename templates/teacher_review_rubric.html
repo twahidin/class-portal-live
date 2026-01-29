@@ -194,16 +194,21 @@
                                                   placeholder="Overall assessment of the essay...">{{ submission.get('teacher_feedback', {}).get('overall_feedback') or (ai_feedback.overall_feedback if ai_feedback else '') }}</textarea>
                                     </td>
                                     <td class="total-marks-cell">
-                                        <div class="input-group input-group-sm">
-                                            <input type="number" class="form-control fw-bold" id="total-marks" 
-                                                   name="total_marks"
-                                                   value="{{ submission.get('teacher_feedback', {}).get('total_marks') or (ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '') }}"
-                                                   min="0">
-                                            <span class="input-group-text">/</span>
-                                            <input type="number" class="form-control fw-bold" id="total-marks-max" 
-                                                   name="total_marks_max"
-                                                   value="{{ assignment.total_marks or 100 }}"
-                                                   min="0">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="input-group input-group-sm">
+                                                <input type="number" class="form-control fw-bold" id="total-marks" 
+                                                       name="total_marks"
+                                                       value="{{ submission.get('teacher_feedback', {}).get('total_marks') or (ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '') }}"
+                                                       min="0">
+                                                <span class="input-group-text">/</span>
+                                                <input type="number" class="form-control fw-bold" id="total-marks-max" 
+                                                       name="total_marks_max"
+                                                       value="{{ assignment.total_marks or 100 }}"
+                                                       min="0">
+                                            </div>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="calculateTotal()" title="Sum marks from all criteria">
+                                                <i class="bi bi-calculator me-1"></i>Recalculate
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
