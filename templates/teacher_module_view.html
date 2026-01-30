@@ -76,7 +76,12 @@
             </div>
         </div>
     </div>
-    <p class="text-muted small mt-2">Click any node to edit its prompt and add materials. Drag to pan, use buttons to zoom.</p>
+    <p class="text-muted small mt-2">Click any node to edit; right-click to expand or collapse branches. Drag to pan, use buttons to zoom.</p>
+</div>
+
+<div class="flat-context-menu" id="teacherContextMenu">
+    <button type="button" id="teacherExpandBtn"><i class="bi bi-chevron-down me-1"></i>Expand branch</button>
+    <button type="button" id="teacherCollapseBtn"><i class="bi bi-chevron-up me-1"></i>Collapse branch</button>
 </div>
 
 <!-- Node Editor Sidebar -->
@@ -181,6 +186,11 @@
 .resource-list .resource-item .resource-icon.link { background: rgba(6,182,212,0.1); color: #06b6d4; }
 .resource-list .resource-item .flex-grow-1 { min-width: 0; }
 .resource-list .resource-item .btn-link { padding: 0 0.25rem; font-size: 0.9rem; }
+.flat-context-menu { position: fixed; z-index: 200; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 0.25rem 0; min-width: 140px; display: none; }
+.flat-context-menu.show { display: block; }
+.flat-context-menu button { display: block; width: 100%; text-align: left; border: none; background: none; padding: 0.5rem 1rem; font-size: 0.875rem; cursor: pointer; }
+.flat-context-menu button:hover { background: #f1f5f9; }
+.flat-context-menu button:disabled { opacity: 0.5; cursor: default; }
 </style>
 
 <script>
@@ -215,18 +225,89 @@
     }
     layoutNode(moduleTree, rootX, rootY, 0, 0, 1, [moduleTree.title]);
 
-    let pathD = '';
-    nodesWithPos.forEach(function(item) {
-        (item.node.children || []).forEach(function(c) {
-            const from = nodePositions[item.node.module_id];
-            const to = nodePositions[c.module_id];
-            if (from && to) pathD += '<line class="flat-connection-line" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '"/>';
+    const expandedIds = new Set();
+    function getVisibleIds() {
+        const vis = new Set();
+        vis.add(moduleTree.module_id);
+        function addChildren(n) {
+            if (!expandedIds.has(n.module_id)) return;
+            (n.children || []).forEach(function(c) {
+                vis.add(c.module_id);
+                addChildren(c);
+            });
+        }
+        addChildren(moduleTree);
+        return vis;
+    }
+
+    function redraw() {
+        const visibleIds = getVisibleIds();
+        let pathD = '';
+        nodesWithPos.forEach(function(item) {
+            if (!visibleIds.has(item.node.module_id)) return;
+            (item.node.children || []).forEach(function(c) {
+                if (!visibleIds.has(c.module_id)) return;
+                const from = nodePositions[item.node.module_id];
+                const to = nodePositions[c.module_id];
+                if (from && to) pathD += '<line class="flat-connection-line" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '"/>';
+            });
         });
-    });
-    connectionsSvg.innerHTML = pathD;
-    connectionsSvg.setAttribute('viewBox', '0 0 ' + CANVAS_W + ' ' + CANVAS_H);
-    connectionsSvg.setAttribute('width', '100%');
-    connectionsSvg.setAttribute('height', '100%');
+        connectionsSvg.innerHTML = pathD;
+        connectionsSvg.setAttribute('viewBox', '0 0 ' + CANVAS_W + ' ' + CANVAS_H);
+        connectionsSvg.setAttribute('width', '100%');
+        connectionsSvg.setAttribute('height', '100%');
+
+        modulesLayer.innerHTML = '';
+        nodesWithPos.forEach(function(item) {
+            if (!visibleIds.has(item.node.module_id)) return;
+            const n = item.node;
+            const levelClass = item.depth === 0 ? 'flat-module-root' : (item.depth === 1 ? 'flat-module-l1' : (item.depth === 2 ? 'flat-module-l2' : 'flat-module-l3'));
+            const left = item.cx - item.radius;
+            const top = item.cy - item.radius;
+            const colorStyle = (n.color && n.color.indexOf('#') === 0) ? ('background: linear-gradient(135deg, ' + n.color + ', ' + n.color + 'dd);') : 'background: linear-gradient(135deg, #667eea, #764ba2);';
+            const div = document.createElement('div');
+            div.className = 'flat-module-node ' + levelClass;
+            div.setAttribute('data-node-id', n.module_id);
+            div.style.left = left + 'px';
+            div.style.top = top + 'px';
+            div.innerHTML = '<div class="flat-module-circle" style="' + colorStyle + ' width:' + (item.radius*2) + 'px; height:' + (item.radius*2) + 'px;"><i class="bi ' + (n.icon || 'bi-book') + ' flat-module-icon"></i></div><span class="flat-module-label">' + (n.title.length > 12 ? n.title.slice(0,11) + '…' : n.title) + '</span>';
+            div.onclick = function(e) { e.stopPropagation(); openNodeEditor(n); };
+            div.oncontextmenu = function(e) { e.preventDefault(); showContextMenu(e, n); };
+            modulesLayer.appendChild(div);
+        });
+    }
+
+    let contextNode = null;
+    const teacherContextMenu = document.getElementById('teacherContextMenu');
+    const teacherExpandBtn = document.getElementById('teacherExpandBtn');
+    const teacherCollapseBtn = document.getElementById('teacherCollapseBtn');
+    function showContextMenu(e, node) {
+        contextNode = node;
+        teacherContextMenu.classList.add('show');
+        teacherContextMenu.style.left = e.clientX + 'px';
+        teacherContextMenu.style.top = e.clientY + 'px';
+        const hasChildren = (node.children || []).length > 0;
+        teacherExpandBtn.disabled = !hasChildren || expandedIds.has(node.module_id);
+        teacherCollapseBtn.disabled = !expandedIds.has(node.module_id);
+    }
+    function hideContextMenu() {
+        teacherContextMenu.classList.remove('show');
+        contextNode = null;
+    }
+    teacherExpandBtn.onclick = function() {
+        if (contextNode) expandedIds.add(contextNode.module_id);
+        redraw();
+        hideContextMenu();
+    };
+    teacherCollapseBtn.onclick = function() {
+        if (contextNode) expandedIds.delete(contextNode.module_id);
+        redraw();
+        hideContextMenu();
+    };
+    document.addEventListener('click', hideContextMenu);
+    document.addEventListener('scroll', hideContextMenu, true);
+
+    redraw();
 
     const nodeEditor = document.getElementById('nodeEditor');
     const closeNodeEditor = document.getElementById('closeNodeEditor');
@@ -286,22 +367,6 @@
             });
         } catch (e) { resourceList.innerHTML = '<div class="small text-muted">Could not load resources.</div>'; resourceCount.textContent = '0'; }
     }
-
-    nodesWithPos.forEach(function(item) {
-        const n = item.node;
-        const levelClass = item.depth === 0 ? 'flat-module-root' : (item.depth === 1 ? 'flat-module-l1' : (item.depth === 2 ? 'flat-module-l2' : 'flat-module-l3'));
-        const left = item.cx - item.radius;
-        const top = item.cy - item.radius;
-        const colorStyle = (n.color && n.color.indexOf('#') === 0) ? ('background: linear-gradient(135deg, ' + n.color + ', ' + n.color + 'dd);') : 'background: linear-gradient(135deg, #667eea, #764ba2);';
-        const div = document.createElement('div');
-        div.className = 'flat-module-node ' + levelClass;
-        div.setAttribute('data-node-id', n.module_id);
-        div.style.left = left + 'px';
-        div.style.top = top + 'px';
-        div.innerHTML = '<div class="flat-module-circle" style="' + colorStyle + ' width:' + (item.radius*2) + 'px; height:' + (item.radius*2) + 'px;"><i class="bi ' + (n.icon || 'bi-book') + ' flat-module-icon"></i></div><span class="flat-module-label">' + (n.title.length > 12 ? n.title.slice(0,11) + '…' : n.title) + '</span>';
-        div.onclick = function(e) { e.stopPropagation(); openNodeEditor(n); };
-        modulesLayer.appendChild(div);
-    });
 
     let scale = 1, panX = 0, panY = 0, isPan = false, startX, startY;
     function updateTransform() {

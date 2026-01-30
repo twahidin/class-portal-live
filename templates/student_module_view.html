@@ -72,6 +72,11 @@
 .flat-pan-zoom { width: 100%; height: 100%; cursor: grab; }
 .flat-pan-zoom:active { cursor: grabbing; }
 .flat-pan-zoom-content { position: relative; width: 1400px; height: 900px; transform-origin: center center; }
+.flat-context-menu { position: fixed; z-index: 200; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 0.25rem 0; min-width: 140px; display: none; }
+.flat-context-menu.show { display: block; }
+.flat-context-menu button { display: block; width: 100%; text-align: left; border: none; background: none; padding: 0.5rem 1rem; font-size: 0.875rem; cursor: pointer; }
+.flat-context-menu button:hover { background: #f1f5f9; }
+.flat-context-menu button:disabled { opacity: 0.5; cursor: default; }
 </style>
 
 <div class="flat-module-layout">
@@ -86,6 +91,7 @@
             <button class="flat-control-btn" title="Zoom Out" id="zoomOut"><i class="bi bi-zoom-out"></i></button>
             <button class="flat-control-btn" title="Reset" id="resetView"><i class="bi bi-arrows-fullscreen"></i></button>
         </div>
+        <p class="text-white small mb-0 position-absolute" style="bottom: 1rem; right: 1rem; z-index: 100;">Right-click a node to expand or collapse branches</p>
         <div class="flat-legend">
             <div class="flat-legend-title">Mastery</div>
             <div class="d-flex flex-wrap gap-2 small text-muted">
@@ -102,6 +108,10 @@
                 <div class="flat-modules-layer" id="modulesLayer"></div>
             </div>
         </div>
+    </div>
+    <div class="flat-context-menu" id="studentContextMenu">
+        <button type="button" id="studentExpandBtn"><i class="bi bi-chevron-down me-1"></i>Expand branch</button>
+        <button type="button" id="studentCollapseBtn"><i class="bi bi-chevron-up me-1"></i>Collapse branch</button>
     </div>
     <div class="flat-sidebar-panel">
         <div class="flat-sidebar-header">
@@ -192,24 +202,100 @@
     }
     layoutNode(moduleTree, rootX, rootY, 0, 0, 1, [moduleTree.title]);
 
-    // SVG connections: parent -> each child
-    let pathD = '';
-    nodesWithPos.forEach(function(item) {
-        const children = item.node.children || [];
-        const from = nodePositions[item.node.module_id];
-        if (!from) return;
-        children.forEach(function(c) {
-            const to = nodePositions[c.module_id];
-            if (!to) return;
-            const mastery = (c.mastery_score || 0);
-            const cls = mastery >= 100 ? 'flat-connection-line mastered' : (mastery > 0 ? 'flat-connection-line in-progress' : 'flat-connection-line');
-            pathD += `<line class="${cls}" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"/>`;
+    const expandedIds = new Set();
+    function getVisibleIds() {
+        const vis = new Set();
+        vis.add(moduleTree.module_id);
+        function addChildren(n) {
+            if (!expandedIds.has(n.module_id)) return;
+            (n.children || []).forEach(function(c) {
+                vis.add(c.module_id);
+                addChildren(c);
+            });
+        }
+        addChildren(moduleTree);
+        return vis;
+    }
+
+    function redraw() {
+        const visibleIds = getVisibleIds();
+        let pathD = '';
+        nodesWithPos.forEach(function(item) {
+            if (!visibleIds.has(item.node.module_id)) return;
+            const children = item.node.children || [];
+            const from = nodePositions[item.node.module_id];
+            if (!from) return;
+            children.forEach(function(c) {
+                if (!visibleIds.has(c.module_id)) return;
+                const to = nodePositions[c.module_id];
+                if (!to) return;
+                const mastery = (c.mastery_score || 0);
+                const cls = mastery >= 100 ? 'flat-connection-line mastered' : (mastery > 0 ? 'flat-connection-line in-progress' : 'flat-connection-line');
+                pathD += '<line class="' + cls + '" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '"/>';
+            });
         });
-    });
-    connectionsSvg.innerHTML = pathD;
-    connectionsSvg.setAttribute('viewBox', `0 0 ${CANVAS_W} ${CANVAS_H}`);
-    connectionsSvg.setAttribute('width', '100%');
-    connectionsSvg.setAttribute('height', '100%');
+        connectionsSvg.innerHTML = pathD;
+        connectionsSvg.setAttribute('viewBox', '0 0 ' + CANVAS_W + ' ' + CANVAS_H);
+        connectionsSvg.setAttribute('width', '100%');
+        connectionsSvg.setAttribute('height', '100%');
+
+        modulesLayer.innerHTML = '';
+        nodesWithPos.forEach(function(item) {
+            if (!visibleIds.has(item.node.module_id)) return;
+            const n = item.node;
+            const score = n.mastery_score || 0;
+            const levelClass = item.depth === 0 ? 'flat-module-root' : (item.depth === 1 ? 'flat-module-l1' : (item.depth === 2 ? 'flat-module-l2' : 'flat-module-l3'));
+            const masteryC = masteryClass(score);
+            const left = item.cx - item.radius;
+            const top = item.cy - item.radius;
+            const colorStyle = !n.color || n.color.indexOf('#') !== 0 ? '' : ('background: linear-gradient(135deg, ' + n.color + ', ' + n.color + 'dd);');
+            const div = document.createElement('div');
+            div.className = 'flat-module-node ' + levelClass + ' ' + masteryC;
+            div.setAttribute('data-node-id', n.module_id);
+            div.style.left = left + 'px';
+            div.style.top = top + 'px';
+            div.innerHTML = '<div class="flat-module-circle" style="' + colorStyle + ' width:' + (item.radius*2) + 'px; height:' + (item.radius*2) + 'px;">' +
+                '<i class="bi ' + (n.icon || 'bi-book') + ' flat-module-icon"></i></div>' +
+                '<span class="flat-module-mastery">' + score + '%</span>' +
+                '<span class="flat-module-label">' + (n.title.length > 12 ? n.title.slice(0,11) + '…' : n.title) + '</span>';
+            div.onclick = function(e) { e.stopPropagation(); selectModule(n.module_id); };
+            div.oncontextmenu = function(e) { e.preventDefault(); showContextMenu(e, n); };
+            modulesLayer.appendChild(div);
+        });
+    }
+
+    let contextNode = null;
+    const contextMenu = document.getElementById('studentContextMenu');
+    const studentExpandBtn = document.getElementById('studentExpandBtn');
+    const studentCollapseBtn = document.getElementById('studentCollapseBtn');
+
+    function showContextMenu(e, node) {
+        contextNode = node;
+        contextMenu.classList.add('show');
+        contextMenu.style.left = e.clientX + 'px';
+        contextMenu.style.top = e.clientY + 'px';
+        const hasChildren = (node.children || []).length > 0;
+        studentExpandBtn.disabled = !hasChildren || expandedIds.has(node.module_id);
+        studentCollapseBtn.disabled = !expandedIds.has(node.module_id);
+    }
+    function hideContextMenu() {
+        contextMenu.classList.remove('show');
+        contextNode = null;
+    }
+    studentExpandBtn.onclick = function() {
+        if (contextNode) expandedIds.add(contextNode.module_id);
+        redraw();
+        hideContextMenu();
+    };
+    studentCollapseBtn.onclick = function() {
+        if (contextNode) expandedIds.delete(contextNode.module_id);
+        redraw();
+        hideContextMenu();
+    };
+    document.addEventListener('click', hideContextMenu);
+    document.addEventListener('scroll', hideContextMenu, true);
+
+    redraw();
 
     function selectModule(nodeId) {
         const item = nodesWithPos.find(function(p) { return p.node.module_id === nodeId; });
@@ -236,27 +322,6 @@
             startLearningBtn.style.display = 'none';
         }
     }
-
-    nodesWithPos.forEach(function(item) {
-        const n = item.node;
-        const score = n.mastery_score || 0;
-        const levelClass = item.depth === 0 ? 'flat-module-root' : (item.depth === 1 ? 'flat-module-l1' : (item.depth === 2 ? 'flat-module-l2' : 'flat-module-l3'));
-        const masteryC = masteryClass(score);
-        const left = item.cx - item.radius;
-        const top = item.cy - item.radius;
-        const colorStyle = !n.color || n.color.indexOf('#') !== 0 ? '' : ('background: linear-gradient(135deg, ' + n.color + ', ' + n.color + 'dd);');
-        const div = document.createElement('div');
-        div.className = 'flat-module-node ' + levelClass + ' ' + masteryC;
-        div.setAttribute('data-node-id', n.module_id);
-        div.style.left = left + 'px';
-        div.style.top = top + 'px';
-        div.innerHTML = '<div class="flat-module-circle" style="' + colorStyle + ' width:' + (item.radius*2) + 'px; height:' + (item.radius*2) + 'px;">' +
-            '<i class="bi ' + (n.icon || 'bi-book') + ' flat-module-icon"></i></div>' +
-            '<span class="flat-module-mastery">' + score + '%</span>' +
-            '<span class="flat-module-label">' + (n.title.length > 12 ? n.title.slice(0,11) + '…' : n.title) + '</span>';
-        div.onclick = function(e) { e.stopPropagation(); selectModule(n.module_id); };
-        modulesLayer.appendChild(div);
-    });
 
     // Pan & zoom
     let scale = 1, panX = 0, panY = 0, isPan = false, startX, startY;
