@@ -70,8 +70,8 @@
             </div>
             <div class="flat-pan-zoom" id="teacherPanZoom">
                 <div class="flat-pan-zoom-content" id="teacherPanZoomContent">
-                    <svg class="flat-connections-svg" id="teacherConnectionsSvg"></svg>
                     <div class="flat-modules-layer" id="teacherModulesLayer"></div>
+                    <svg class="flat-connections-svg" id="teacherConnectionsSvg"></svg>
                 </div>
             </div>
         </div>
@@ -161,15 +161,16 @@
 <style>
 .teacher-flat-map-wrapper { height: 560px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
 .flat-map-container.teacher-flat-map { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); height: 100%; }
-.flat-connections-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.flat-modules-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.flat-modules-layer .flat-module-node { pointer-events: auto; }
+.flat-connections-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
 .flat-connection-line { stroke: rgba(255,255,255,0.3); stroke-width: 2; fill: none; }
-.flat-modules-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 .flat-module-node { position: absolute; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; z-index: 10; }
 .flat-module-node:hover { transform: scale(1.1); z-index: 20; }
 .flat-module-node.selected { transform: scale(1.15); z-index: 30; box-shadow: 0 0 0 4px rgba(255,255,255,0.5); }
 .flat-module-circle { border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 3px solid rgba(255,255,255,0.2); position: relative; overflow: hidden; }
 .flat-module-circle::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 40%; background: linear-gradient(to bottom, rgba(255,255,255,0.2), transparent); border-radius: 50% 50% 0 0; }
-.flat-module-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; color: white; font-size: 0.7rem; font-weight: 500; text-align: center; white-space: normal; word-break: break-word; max-width: 160px; line-height: 1.2; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+.flat-module-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; color: white; font-size: 0.7rem; font-weight: 500; text-align: center; white-space: normal; overflow-wrap: break-word; word-break: normal; max-width: 180px; line-height: 1.2; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
 .flat-module-node.dragging { cursor: grabbing; }
 .flat-module-node.dragging .flat-module-circle { cursor: grabbing; }
 .flat-module-icon { color: white; font-size: 1.5rem; position: relative; z-index: 1; }
@@ -180,7 +181,7 @@
 .flat-pan-zoom { width: 100%; height: 100%; cursor: grab; }
 .flat-pan-zoom:active { cursor: grabbing; }
 .flat-pan-zoom-content { position: relative; width: 1400px; height: 900px; transform-origin: center center; }
-.node-editor-sidebar { position: fixed; right: 0; top: 56px; width: 360px; max-height: calc(100vh - 56px); overflow-y: auto; background: white; border-left: 1px solid #e2e8f0; padding: 1.25rem; z-index: 1050; box-shadow: -4px 0 12px rgba(0,0,0,0.08); }
+.node-editor-sidebar { position: fixed; right: 0; top: 56px; bottom: 0; width: 360px; height: calc(100vh - 56px); overflow-y: auto; background: #fff; border-left: 1px solid #e2e8f0; padding: 1.25rem; z-index: 1050; box-shadow: -4px 0 12px rgba(0,0,0,0.08); }
 .resource-list .resource-item { display: flex; align-items: center; padding: 0.5rem; background: #f8fafc; border-radius: 8px; margin-bottom: 0.5rem; }
 .resource-list .resource-item .resource-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 0.5rem; font-size: 1rem; }
 .resource-list .resource-item .resource-icon.youtube { background: rgba(255,0,0,0.1); color: #f00; }

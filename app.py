@@ -5183,7 +5183,23 @@ def manage_module_resources(module_id, node_id):
             logger.error("Error adding resource: %s", e)
             return jsonify({'error': str(e)}), 500
 
-    resources = list(ModuleResource.find({'module_id': node_id}).sort('order', 1))
+    raw = list(ModuleResource.find({'module_id': node_id}).sort('order', 1))
+    resources = []
+    for r in raw:
+        if not isinstance(r, dict):
+            continue
+        doc = {
+            'resource_id': r.get('resource_id'),
+            'module_id': r.get('module_id'),
+            'type': r.get('type', 'link'),
+            'title': r.get('title', ''),
+            'url': r.get('url', ''),
+            'description': r.get('description', ''),
+            'order': r.get('order', 0),
+        }
+        if r.get('created_at'):
+            doc['created_at'] = r['created_at'].isoformat() if hasattr(r['created_at'], 'isoformat') else str(r['created_at'])
+        resources.append(doc)
     return jsonify({'resources': resources})
 
 
