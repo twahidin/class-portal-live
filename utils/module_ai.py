@@ -178,8 +178,18 @@ Respond with JSON only:""",
         response_text = message.content[0].text
         json_match = re.search(r'\{[\s\S]*\}', response_text)
         if json_match:
-            return json.loads(json_match.group())
-        return {'error': 'Could not parse module structure'}
+            json_str = json_match.group()
+            # Try to fix common JSON issues from LLM output
+            # Remove trailing commas before } or ]
+            json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+            # Remove any control characters except newlines/tabs
+            json_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', json_str)
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError as je:
+                logger.error("JSON parse error: %s\nRaw response (first 2000 chars): %s", je, json_str[:2000])
+                return {'error': f'AI returned invalid JSON. Please try again. (Parse error: {je.msg} at position {je.pos})'}
+        return {'error': 'Could not parse module structure from AI response'}
 
     except Exception as e:
         logger.error("Error generating modules: %s", e)
