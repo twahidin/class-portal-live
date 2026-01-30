@@ -10,22 +10,30 @@ import os
 import logging
 import base64
 import re
+import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+# Message shown when no API key is configured (teacher or env)
+AI_UNAVAILABLE_MSG = (
+    "AI service not available. Add your Anthropic API key in Teacher Settings "
+    "(Profile → Settings), or set ANTHROPIC_API_KEY in the server environment."
+)
 
-def get_claude_client():
-    """Get Anthropic client"""
+
+def get_claude_client(api_key: Optional[str] = None):
+    """Get Anthropic client. Uses api_key if provided, else ANTHROPIC_API_KEY env."""
     try:
         from anthropic import Anthropic
     except ImportError:
+        logger.warning("anthropic package not installed; run: pip install anthropic")
         return None
-    api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not api_key:
+    key = api_key or os.getenv("ANTHROPIC_API_KEY")
+    if not key or not key.strip():
         return None
-    return Anthropic(api_key=api_key)
+    return Anthropic(api_key=key.strip())
 
 
 def generate_modules_from_syllabus(
@@ -34,6 +42,7 @@ def generate_modules_from_syllabus(
     subject: str,
     year_level: str,
     teacher_id: str,
+    api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate hierarchical module structure from uploaded syllabus/scheme of work.
@@ -44,13 +53,14 @@ def generate_modules_from_syllabus(
         subject: Subject name
         year_level: e.g., "Secondary 3"
         teacher_id: Owner teacher ID
+        api_key: Optional Anthropic API key (e.g. from teacher settings); else uses ANTHROPIC_API_KEY env.
 
     Returns:
         Dictionary with module tree structure
     """
-    client = get_claude_client()
+    client = get_claude_client(api_key=api_key)
     if not client:
-        return {'error': 'AI service not available'}
+        return {"error": AI_UNAVAILABLE_MSG}
 
     try:
         content = []

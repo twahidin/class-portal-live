@@ -5049,12 +5049,23 @@ def create_module():
             file_content = file.read()
             file_type = 'pdf' if (file.filename or '').lower().endswith('.pdf') else 'docx'
 
+            teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+            api_key = None
+            if teacher and teacher.get('anthropic_api_key'):
+                try:
+                    api_key = decrypt_api_key(teacher['anthropic_api_key'])
+                except Exception:
+                    pass
+            if not api_key:
+                api_key = os.getenv('ANTHROPIC_API_KEY')
+
             result = generate_modules_from_syllabus(
                 file_content=file_content,
                 file_type=file_type,
                 subject=subject,
                 year_level=year_level,
                 teacher_id=session['teacher_id'],
+                api_key=api_key,
             )
 
             if 'error' in result:
