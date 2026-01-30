@@ -56,13 +56,27 @@
         </div>
     </div>
 
-    <div class="card shadow-sm">
-        <div class="card-body p-0">
-            <div id="module-3d-container" class="module-3d-container" style="height: 500px;"></div>
+    <div class="teacher-flat-map-wrapper">
+        <div class="flat-map-container teacher-flat-map" id="teacherMapContainer">
+            <nav class="flat-map-breadcrumb">
+                <span class="text-muted">{{ module.subject }}</span>
+                <span class="mx-2">›</span>
+                <span style="color: #667eea; font-weight: 600;">{{ module.title }}</span>
+            </nav>
+            <div class="flat-map-controls">
+                <button type="button" class="flat-control-btn" title="Zoom In" id="teacherZoomIn"><i class="bi bi-zoom-in"></i></button>
+                <button type="button" class="flat-control-btn" title="Zoom Out" id="teacherZoomOut"><i class="bi bi-zoom-out"></i></button>
+                <button type="button" class="flat-control-btn" title="Reset" id="teacherResetView"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+            <div class="flat-pan-zoom" id="teacherPanZoom">
+                <div class="flat-pan-zoom-content" id="teacherPanZoomContent">
+                    <svg class="flat-connections-svg" id="teacherConnectionsSvg"></svg>
+                    <div class="flat-modules-layer" id="teacherModulesLayer"></div>
+                </div>
+            </div>
         </div>
     </div>
-
-    <p class="text-muted small mt-2">Click any node to edit its prompt and add materials. Drag to rotate the view.</p>
+    <p class="text-muted small mt-2">Click any node to edit its prompt and add materials. Drag to pan, use buttons to zoom.</p>
 </div>
 
 <!-- Node Editor Sidebar -->
@@ -140,6 +154,25 @@
 </div>
 
 <style>
+.teacher-flat-map-wrapper { height: 560px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.flat-map-container.teacher-flat-map { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); height: 100%; }
+.flat-connections-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.flat-connection-line { stroke: rgba(255,255,255,0.3); stroke-width: 2; fill: none; }
+.flat-modules-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.flat-module-node { position: absolute; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; z-index: 10; }
+.flat-module-node:hover { transform: scale(1.1); z-index: 20; }
+.flat-module-node.selected { transform: scale(1.15); z-index: 30; box-shadow: 0 0 0 4px rgba(255,255,255,0.5); }
+.flat-module-circle { border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 3px solid rgba(255,255,255,0.2); position: relative; overflow: hidden; }
+.flat-module-circle::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 40%; background: linear-gradient(to bottom, rgba(255,255,255,0.2), transparent); border-radius: 50% 50% 0 0; }
+.flat-module-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; color: white; font-size: 0.75rem; font-weight: 500; text-align: center; white-space: nowrap; text-shadow: 0 2px 4px rgba(0,0,0,0.5); max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+.flat-module-icon { color: white; font-size: 1.5rem; position: relative; z-index: 1; }
+.flat-map-breadcrumb { position: absolute; top: 1rem; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.95); padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.85rem; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+.flat-map-controls { position: absolute; top: 1rem; right: 1rem; display: flex; flex-direction: column; gap: 0.5rem; z-index: 100; }
+.flat-control-btn { width: 40px; height: 40px; border-radius: 10px; border: none; background: rgba(255,255,255,0.95); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; color: #1e293b; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+.flat-control-btn:hover { background: #667eea; color: white; }
+.flat-pan-zoom { width: 100%; height: 100%; cursor: grab; }
+.flat-pan-zoom:active { cursor: grabbing; }
+.flat-pan-zoom-content { position: relative; width: 1400px; height: 900px; transform-origin: center center; }
 .node-editor-sidebar { position: fixed; right: 0; top: 56px; width: 360px; max-height: calc(100vh - 56px); overflow-y: auto; background: white; border-left: 1px solid #e2e8f0; padding: 1.25rem; z-index: 1050; box-shadow: -4px 0 12px rgba(0,0,0,0.08); }
 .resource-list .resource-item { display: flex; align-items: center; padding: 0.5rem; background: #f8fafc; border-radius: 8px; margin-bottom: 0.5rem; }
 .resource-list .resource-item .resource-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 0.5rem; font-size: 1rem; }
@@ -150,65 +183,51 @@
 .resource-list .resource-item .btn-link { padding: 0 0.25rem; font-size: 0.9rem; }
 </style>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.132.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.132.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 (function() {
     const moduleTree = {{ modules_json|safe }};
-    const container = document.getElementById('module-3d-container');
-    if (!container || !moduleTree) return;
+    const mapContainer = document.getElementById('teacherMapContainer');
+    const panZoomContent = document.getElementById('teacherPanZoomContent');
+    const connectionsSvg = document.getElementById('teacherConnectionsSvg');
+    const modulesLayer = document.getElementById('teacherModulesLayer');
+    if (!moduleTree || !modulesLayer) return;
 
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf8fafc);
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 2000);
-    camera.position.set(0, 200, 400);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    container.appendChild(renderer.domElement);
+    const CANVAS_W = 1400, CANVAS_H = 900;
+    const rootX = 700, rootY = 400;
+    const nodesWithPos = [];
+    const nodePositions = {};
 
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.maxDistance = 800;
-    controls.minDistance = 100;
-
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(100, 200, 100);
-    scene.add(dirLight);
-
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    const meshes = [];
-
-    function addNode(node, parentPos, depth, siblingIndex, siblingCount) {
-        const baseDist = 80 + depth * 30;
-        const angle = (siblingIndex / Math.max(siblingCount, 1)) * Math.PI * 2 + Math.PI / 4;
-        const x = (parentPos ? parentPos.x : 0) + Math.cos(angle) * baseDist;
-        const z = (parentPos ? parentPos.z : 0) + Math.sin(angle) * baseDist;
-        const y = depth * 20;
-        const position = new THREE.Vector3(x, y, z);
-
-        const radius = Math.max(20 - depth * 3, 8);
-        const geometry = new THREE.SphereGeometry(radius, 32, 32);
-        const color = (node.color && node.color.startsWith('#')) ? parseInt(node.color.slice(1), 16) : 0x667eea;
-        const material = new THREE.MeshPhongMaterial({ color: color, shininess: 50 });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.copy(position);
-        mesh.userData = { moduleId: node.module_id, nodeId: node.module_id, title: node.title, isLeaf: node.is_leaf };
-        scene.add(mesh);
-        meshes.push(mesh);
-
+    function layoutNode(node, cx, cy, depth, siblingIndex, siblingCount, pathTitles) {
         const children = node.children || [];
-        children.forEach(function(child, i) { addNode(child, position, depth + 1, i, children.length); });
+        const isRoot = depth === 0;
+        const radius = isRoot ? 70 : (depth === 1 ? 50 : (depth === 2 ? 35 : 25));
+        nodePositions[node.module_id] = { x: cx, y: cy, radius, depth };
+        nodesWithPos.push({ node, cx, cy, radius, depth, pathTitles: pathTitles.slice() });
+        const n = children.length;
+        for (let i = 0; i < n; i++) {
+            const angle = (i / Math.max(n, 1)) * Math.PI * 1.8 + Math.PI * 0.1;
+            const dist = (isRoot ? 220 : 120) + depth * 60;
+            const child = children[i];
+            const nx = cx + Math.cos(angle) * dist;
+            const ny = cy + Math.sin(angle) * dist;
+            layoutNode(child, nx, ny, depth + 1, i, n, pathTitles.concat([child.title]));
+        }
     }
-    addNode(moduleTree, null, 0, 0, 1);
+    layoutNode(moduleTree, rootX, rootY, 0, 0, 1, [moduleTree.title]);
 
-    const rootModuleId = '{{ module.module_id }}';
+    let pathD = '';
+    nodesWithPos.forEach(function(item) {
+        (item.node.children || []).forEach(function(c) {
+            const from = nodePositions[item.node.module_id];
+            const to = nodePositions[c.module_id];
+            if (from && to) pathD += '<line class="flat-connection-line" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '"/>';
+        });
+    });
+    connectionsSvg.innerHTML = pathD;
+    connectionsSvg.setAttribute('viewBox', '0 0 ' + CANVAS_W + ' ' + CANVAS_H);
+    connectionsSvg.setAttribute('width', '100%');
+    connectionsSvg.setAttribute('height', '100%');
+
     const nodeEditor = document.getElementById('nodeEditor');
     const closeNodeEditor = document.getElementById('closeNodeEditor');
     const nodeEditorForm = document.getElementById('nodeEditorForm');
@@ -233,6 +252,9 @@
     }
 
     function openNodeEditor(nodeData) {
+        document.querySelectorAll('#teacherModulesLayer .flat-module-node.selected').forEach(function(el) { el.classList.remove('selected'); });
+        const el = document.querySelector('[data-node-id="' + nodeData.module_id + '"]');
+        if (el) el.classList.add('selected');
         editNodeId.value = nodeData.module_id;
         editTitle.value = nodeData.title || '';
         editDescription.value = nodeData.description || '';
@@ -265,19 +287,58 @@
         } catch (e) { resourceList.innerHTML = '<div class="small text-muted">Could not load resources.</div>'; resourceCount.textContent = '0'; }
     }
 
-    function onMouseClick(event) {
-        const rect = container.getBoundingClientRect();
-        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-        const hits = raycaster.intersectObjects(meshes);
-        if (hits.length > 0) {
-            const nodeId = hits[0].object.userData.nodeId;
-            const nodeData = findNode(moduleTree, nodeId);
-            if (nodeData) openNodeEditor(nodeData);
-        }
+    nodesWithPos.forEach(function(item) {
+        const n = item.node;
+        const levelClass = item.depth === 0 ? 'flat-module-root' : (item.depth === 1 ? 'flat-module-l1' : (item.depth === 2 ? 'flat-module-l2' : 'flat-module-l3'));
+        const left = item.cx - item.radius;
+        const top = item.cy - item.radius;
+        const colorStyle = (n.color && n.color.indexOf('#') === 0) ? ('background: linear-gradient(135deg, ' + n.color + ', ' + n.color + 'dd);') : 'background: linear-gradient(135deg, #667eea, #764ba2);';
+        const div = document.createElement('div');
+        div.className = 'flat-module-node ' + levelClass;
+        div.setAttribute('data-node-id', n.module_id);
+        div.style.left = left + 'px';
+        div.style.top = top + 'px';
+        div.innerHTML = '<div class="flat-module-circle" style="' + colorStyle + ' width:' + (item.radius*2) + 'px; height:' + (item.radius*2) + 'px;"><i class="bi ' + (n.icon || 'bi-book') + ' flat-module-icon"></i></div><span class="flat-module-label">' + (n.title.length > 12 ? n.title.slice(0,11) + '…' : n.title) + '</span>';
+        div.onclick = function(e) { e.stopPropagation(); openNodeEditor(n); };
+        modulesLayer.appendChild(div);
+    });
+
+    let scale = 1, panX = 0, panY = 0, isPan = false, startX, startY;
+    function updateTransform() {
+        panZoomContent.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
     }
-    container.addEventListener('click', onMouseClick);
+    function centerContent() {
+        if (!mapContainer) return;
+        const rect = mapContainer.getBoundingClientRect();
+        panX = (rect.width - CANVAS_W * scale) / 2;
+        panY = (rect.height - CANVAS_H * scale) / 2;
+        updateTransform();
+    }
+    document.getElementById('teacherZoomIn').onclick = function() { scale = Math.min(scale * 1.2, 2); updateTransform(); };
+    document.getElementById('teacherZoomOut').onclick = function() { scale = Math.max(scale / 1.2, 0.4); updateTransform(); };
+    document.getElementById('teacherResetView').onclick = function() { scale = 1; centerContent(); };
+    document.getElementById('teacherPanZoom').addEventListener('mousedown', function(e) {
+        if (e.target.closest('.flat-module-node')) return;
+        isPan = true; startX = e.clientX - panX; startY = e.clientY - panY;
+        document.getElementById('teacherPanZoom').style.cursor = 'grabbing';
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!isPan) return;
+        panX = e.clientX - startX; panY = e.clientY - startY;
+        updateTransform();
+    });
+    document.addEventListener('mouseup', function() {
+        isPan = false;
+        var pz = document.getElementById('teacherPanZoom');
+        if (pz) pz.style.cursor = 'grab';
+    });
+    document.getElementById('teacherPanZoom').addEventListener('wheel', function(e) {
+        e.preventDefault();
+        scale = Math.max(0.4, Math.min(2, scale * (e.deltaY > 0 ? 0.9 : 1.1)));
+        updateTransform();
+    }, { passive: false });
+    window.addEventListener('load', centerContent);
+    window.addEventListener('resize', centerContent);
 
     closeNodeEditor && closeNodeEditor.addEventListener('click', function() { nodeEditor.style.display = 'none'; });
 
@@ -301,6 +362,8 @@
             if (data.success) {
                 var nd = findNode(moduleTree, nodeId);
                 if (nd) { nd.title = editTitle.value.trim(); nd.description = editDescription.value.trim(); nd.learning_objectives = objectives; nd.custom_prompt = editCustomPrompt.value.trim(); }
+                var sel = document.querySelector('[data-node-id="' + nodeId + '"] .flat-module-label');
+                if (sel) sel.textContent = editTitle.value.trim().length > 12 ? editTitle.value.trim().slice(0,11) + '…' : editTitle.value.trim();
                 alert('Saved.');
             } else alert(data.error || 'Save failed');
         } catch (err) { alert('Save failed'); }
@@ -328,21 +391,6 @@
                 if (d.success) { bootstrap.Modal.getInstance(addResourceModal).hide(); loadResources(nodeId); }
                 else alert(d.error || 'Failed to add');
             });
-    });
-
-    function animate() {
-        requestAnimationFrame(animate);
-        controls.update();
-        renderer.render(scene, camera);
-    }
-    animate();
-
-    window.addEventListener('resize', function() {
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-        renderer.setSize(w, h);
     });
 
     document.getElementById('publish-btn') && document.getElementById('publish-btn').addEventListener('click', async function() {
