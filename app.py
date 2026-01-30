@@ -114,16 +114,11 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
 # ============================================================================
 
 def login_required(f):
-    """Require student login. Redirect to dashboard if must_change_password (except for dashboard and change_password)."""
+    """Require student login."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'student_id' not in session:
             return redirect(url_for('login'))
-        student = Student.find_one({'student_id': session['student_id']})
-        if student and student.get('must_change_password'):
-            path = request.path or ''
-            if path != '/dashboard' and path != '/student/change_password':
-                return redirect(url_for('dashboard'))
         return f(*args, **kwargs)
     return decorated_function
 
