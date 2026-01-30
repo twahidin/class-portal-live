@@ -55,7 +55,9 @@
 .flat-module-icon { color: white; font-size: 1.5rem; position: relative; z-index: 1; }
 .flat-module-l2 .flat-module-icon, .flat-module-l3 .flat-module-icon { font-size: 1rem; }
 .flat-module-mastery { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; font-size: 0.65rem; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
-.flat-module-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; color: white; font-size: 0.75rem; font-weight: 500; text-align: center; white-space: nowrap; text-shadow: 0 2px 4px rgba(0,0,0,0.5); max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+.flat-module-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; color: white; font-size: 0.7rem; font-weight: 500; text-align: center; white-space: normal; word-break: break-word; max-width: 160px; line-height: 1.2; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+.flat-module-node.dragging { cursor: grabbing; }
+.flat-module-node.dragging .flat-module-circle { cursor: grabbing; }
 .flat-module-node.selected .flat-module-circle { box-shadow: 0 0 0 4px rgba(255,255,255,0.5), 0 4px 30px rgba(102,126,234,0.5); }
 .flat-sidebar-panel { background: white; border-left: 1px solid #e2e8f0; display: flex; flex-direction: column; overflow: hidden; }
 .flat-sidebar-header { padding: 1.25rem; border-bottom: 1px solid #e2e8f0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
@@ -202,6 +204,38 @@
     }
     layoutNode(moduleTree, rootX, rootY, 0, 0, 1, [moduleTree.title]);
 
+    function escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
+    function screenToContent(clientX, clientY) {
+        const rect = mapContainer.getBoundingClientRect();
+        return {
+            x: (clientX - rect.left - panX) / scale,
+            y: (clientY - rect.top - panY) / scale
+        };
+    }
+    function updateConnectionLines() {
+        const visibleIds = getVisibleIds();
+        let pathD = '';
+        nodesWithPos.forEach(function(item) {
+            if (!visibleIds.has(item.node.module_id)) return;
+            const children = item.node.children || [];
+            const from = nodePositions[item.node.module_id];
+            if (!from) return;
+            children.forEach(function(c) {
+                if (!visibleIds.has(c.module_id)) return;
+                const to = nodePositions[c.module_id];
+                if (!to) return;
+                const mastery = (c.mastery_score || 0);
+                const cls = mastery >= 100 ? 'flat-connection-line mastered' : (mastery > 0 ? 'flat-connection-line in-progress' : 'flat-connection-line');
+                pathD += '<line class="' + cls + '" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '"/>';
+            });
+        });
+        connectionsSvg.innerHTML = pathD;
+    }
+
     const expandedIds = new Set();
     function getVisibleIds() {
         const vis = new Set();
@@ -257,12 +291,55 @@
             div.innerHTML = '<div class="flat-module-circle" style="' + colorStyle + ' width:' + (item.radius*2) + 'px; height:' + (item.radius*2) + 'px;">' +
                 '<i class="bi ' + (n.icon || 'bi-book') + ' flat-module-icon"></i></div>' +
                 '<span class="flat-module-mastery">' + score + '%</span>' +
-                '<span class="flat-module-label">' + (n.title.length > 12 ? n.title.slice(0,11) + '…' : n.title) + '</span>';
-            div.onclick = function(e) { e.stopPropagation(); selectModule(n.module_id); };
+                '<span class="flat-module-label">' + escapeHtml(n.title) + '</span>';
+            div.onclick = function(e) { if (!dragNodeId) { e.stopPropagation(); selectModule(n.module_id); } };
             div.oncontextmenu = function(e) { e.preventDefault(); showContextMenu(e, n); };
+            div.onmousedown = function(e) { if (e.button === 0) startDrag(e, n, item); };
             modulesLayer.appendChild(div);
         });
     }
+
+    let dragNodeId = null, dragOffsetX = 0, dragOffsetY = 0;
+    function startDrag(e, node, item) {
+        e.preventDefault();
+        e.stopPropagation();
+        const pos = screenToContent(e.clientX, e.clientY);
+        dragNodeId = node.module_id;
+        dragOffsetX = pos.x - item.cx;
+        dragOffsetY = pos.y - item.cy;
+        document.body.classList.add('flat-dragging');
+        const div = modulesLayer.querySelector('[data-node-id="' + node.module_id + '"]');
+        if (div) div.classList.add('dragging');
+    }
+    function onDragMove(e) {
+        if (!dragNodeId) return;
+        const pos = screenToContent(e.clientX, e.clientY);
+        const nx = pos.x - dragOffsetX;
+        const ny = pos.y - dragOffsetY;
+        const item = nodesWithPos.find(function(p) { return p.node.module_id === dragNodeId; });
+        if (!item) return;
+        item.cx = nx;
+        item.cy = ny;
+        nodePositions[dragNodeId].x = nx;
+        nodePositions[dragNodeId].y = ny;
+        const div = modulesLayer.querySelector('[data-node-id="' + dragNodeId + '"]');
+        if (div) {
+            div.style.left = (nx - item.radius) + 'px';
+            div.style.top = (ny - item.radius) + 'px';
+        }
+        updateConnectionLines();
+    }
+    function endDrag() {
+        if (dragNodeId) {
+            const div = modulesLayer.querySelector('[data-node-id="' + dragNodeId + '"]');
+            if (div) div.classList.remove('dragging');
+            dragNodeId = null;
+        }
+        document.body.classList.remove('flat-dragging');
+    }
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', endDrag);
+    document.addEventListener('mouseleave', endDrag);
 
     let contextNode = null;
     const contextMenu = document.getElementById('studentContextMenu');
