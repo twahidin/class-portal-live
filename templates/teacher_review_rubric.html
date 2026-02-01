@@ -95,11 +95,11 @@
                         </div>
                     </div>
                 </div>
-                <div class="card-body p-0" style="height: calc(100vh - 180px); overflow: auto; background: #f0f0f0;" id="submission-body">
+                <div class="card-body p-0" style="height: calc((100vh - 180px) / 2); overflow: auto; background: #f0f0f0;" id="submission-body">
                     <div id="submission-viewer" style="display: flex; justify-content: center; align-items: flex-start; padding: 10px;">
                         {% if submission.file_type == 'pdf' %}
                         <iframe id="pdf-viewer" src="{{ url_for('view_submission_file', submission_id=submission.submission_id, file_index=0) }}" 
-                                style="width: 100%; height: calc(100vh - 200px); border: none;"></iframe>
+                                style="width: 100%; height: calc((100vh - 200px) / 2); border: none;"></iframe>
                         {% else %}
                         <img id="page-image" src="{{ url_for('view_submission_file', submission_id=submission.submission_id, file_index=0) }}" 
                              style="width: 100%; height: auto; transform-origin: top center; object-fit: contain;" class="submission-img">
@@ -221,8 +221,12 @@
                     </form>
                 </div>
             </div>
+        </div>
+    </div>
 
-            <!-- Table 2: Detailed Errors/Corrections -->
+    <!-- Detailed Corrections: full width underneath essay viewer and rubric -->
+    <div class="row mt-3">
+        <div class="col-12">
             <div class="card">
                 <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
                     <h6 class="mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Detailed Corrections</h6>
@@ -256,17 +260,17 @@
                                     </td>
                                     <td>
                                         <textarea class="form-control form-control-sm error-input" 
-                                                  name="error_text_{{ idx }}" rows="2"
+                                                  name="error_text_{{ idx }}" rows="4"
                                                   placeholder="Describe the error...">{{ teacher_e.get('error') or error.error or '' }}</textarea>
                                     </td>
                                     <td>
                                         <textarea class="form-control form-control-sm correction-input" 
-                                                  name="error_correction_{{ idx }}" rows="2"
+                                                  name="error_correction_{{ idx }}" rows="4"
                                                   placeholder="Suggested correction...">{{ teacher_e.get('correction') or error.correction or '' }}</textarea>
                                     </td>
                                     <td>
                                         <textarea class="form-control form-control-sm error-feedback-input" 
-                                                  name="error_feedback_{{ idx }}" rows="2"
+                                                  name="error_feedback_{{ idx }}" rows="4"
                                                   placeholder="Feedback on this error...">{{ teacher_e.get('feedback') or error.feedback or '' }}</textarea>
                                     </td>
                                     <td class="text-center">
@@ -455,7 +459,7 @@
 
 #errors-table textarea {
     font-size: 0.85rem;
-    min-height: 50px;
+    min-height: 100px;
     resize: vertical;
 }
 
@@ -636,7 +640,7 @@
         
         submissionPanel.className = 'col-lg-4';
         feedbackPanel.style.display = '';
-        submissionBody.style.height = 'calc(100vh - 180px)';
+        submissionBody.style.height = 'calc((100vh - 180px) / 2)';
         submissionBody.style.background = '#f0f0f0';
         fullscreenBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
         isFullscreen = false;
@@ -789,17 +793,17 @@
             </td>
             <td>
                 <textarea class="form-control form-control-sm error-input" 
-                          name="error_text_${errorIndex}" rows="2"
+                          name="error_text_${errorIndex}" rows="4"
                           placeholder="Describe the error...">${escapeHtml(errorText)}</textarea>
             </td>
             <td>
                 <textarea class="form-control form-control-sm correction-input" 
-                          name="error_correction_${errorIndex}" rows="2"
+                          name="error_correction_${errorIndex}" rows="4"
                           placeholder="Suggested correction...">${escapeHtml(correction)}</textarea>
             </td>
             <td>
                 <textarea class="form-control form-control-sm error-feedback-input" 
-                          name="error_feedback_${errorIndex}" rows="2"
+                          name="error_feedback_${errorIndex}" rows="4"
                           placeholder="Feedback on this error...">${escapeHtml(feedback)}</textarea>
             </td>
             <td class="text-center">
