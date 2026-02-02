@@ -137,8 +137,10 @@
                             </td>
                             <td class="text-end">
                                 <a href="{{ url_for('teacher_submissions', student=student.student_id) }}" 
-                                   class="btn btn-sm btn-outline-primary" title="View submissions">
-                                    <i class="bi bi-inbox"></i>
+                                   class="btn btn-sm btn-outline-primary action-btn" 
+                                   data-submissions-url="{{ url_for('teacher_submissions', student=student.student_id) }}"
+                                   title="View assignment">
+                                    <i class="bi bi-journal-text"></i>
                                 </a>
                             </td>
                         </tr>
@@ -185,9 +187,25 @@
 
 {% block scripts %}
 <script>
+    // Update action buttons: when an assignment is selected, link to that assignment's summary; otherwise link to submissions by student
+    function updateActionButtons(assignmentId) {
+        document.querySelectorAll('.action-btn').forEach(btn => {
+            if (assignmentId) {
+                btn.href = '/teacher/assignment/' + assignmentId + '/summary';
+                btn.title = 'View assignment';
+            } else {
+                btn.href = btn.dataset.submissionsUrl || btn.href;
+                btn.title = 'View submissions';
+            }
+        });
+    }
+
     // Assignment filter - load student statuses when assignment selected
     document.getElementById('assignment-filter').addEventListener('change', async function() {
         const assignmentId = this.value;
+        
+        // Update action buttons to go to assignment summary when an assignment is selected
+        updateActionButtons(assignmentId);
         
         // Reset all statuses if no assignment selected
         if (!assignmentId) {

@@ -111,6 +111,26 @@
                         {% endif %}
                         
                         <div class="mb-3">
+                            <label class="form-label">When to send feedback to student</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="send_ai_feedback_immediately" id="feedback_teacher_first" value="off"
+                                       {% if not assignment.get('send_ai_feedback_immediately', False) %}checked{% endif %}>
+                                <label class="form-check-label" for="feedback_teacher_first">
+                                    <i class="bi bi-person-check me-1"></i>Teacher reviews first (default)
+                                </label>
+                                <small class="text-muted d-block ms-4">AI generates feedback but students only see it after you review and send</small>
+                            </div>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="radio" name="send_ai_feedback_immediately" id="feedback_ai_straightaway" value="on"
+                                       {% if assignment.get('send_ai_feedback_immediately', False) %}checked{% endif %}>
+                                <label class="form-check-label" for="feedback_ai_straightaway">
+                                    <i class="bi bi-robot me-1"></i>Send AI feedback to student straight away
+                                </label>
+                                <small class="text-muted d-block ms-4">Students see AI feedback as soon as they submit (you can still review and add comments later)</small>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
                             <label for="instructions" class="form-label">Instructions (optional)</label>
                             <textarea class="form-control" id="instructions" name="instructions" rows="3">{{ assignment.instructions or '' }}</textarea>
                         </div>

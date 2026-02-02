@@ -1279,12 +1279,16 @@ def student_submit_files():
                 )
                 logger.info(f"Auto-rejected submission {submission_id} due to 413 request_too_large; student can resubmit.")
             else:
+                update_fields = {
+                    'ai_feedback': ai_result,
+                    'status': 'ai_reviewed'
+                }
+                # If assignment is set to send AI feedback straight away, student can see feedback without teacher review
+                if assignment.get('send_ai_feedback_immediately') and not ai_result.get('error'):
+                    update_fields['feedback_sent'] = True
                 Submission.update_one(
                     {'submission_id': submission_id},
-                    {'$set': {
-                        'ai_feedback': ai_result,
-                        'status': 'ai_reviewed'
-                    }}
+                    {'$set': update_fields}
                 )
         except Exception as e:
             logger.error(f"AI feedback error: {e}")
@@ -3206,6 +3210,9 @@ def create_assignment():
             if marking_type == 'standard':
                 award_marks = data.get('award_marks', 'on') == 'on'
             
+            # When to send feedback: teacher reviews first (default) or send AI feedback to student straight away
+            send_ai_feedback_immediately = data.get('send_ai_feedback_immediately', 'off') == 'on'
+            
             # Build assignment document
             assignment_doc = {
                 'assignment_id': assignment_id,
@@ -3216,6 +3223,7 @@ def create_assignment():
                 'total_marks': total_marks,
                 'marking_type': marking_type,  # 'standard' or 'rubric'
                 'award_marks': award_marks,  # True = show marks; False = show Correct/Partial/Incorrect only (standard only)
+                'send_ai_feedback_immediately': send_ai_feedback_immediately,  # True = student sees AI feedback right after submit; False = teacher reviews first
                 'question_paper_id': question_paper_id,
                 'answer_key_id': answer_key_id,
                 'question_paper_name': question_paper.filename if question_paper and question_paper.filename else (question_paper_name.replace('DRIVE:', '') if question_paper_name and question_paper_name.startswith('DRIVE:') else None),
@@ -3344,6 +3352,8 @@ def edit_assignment(assignment_id):
             if assignment.get('marking_type') == 'standard':
                 award_marks = data.get('award_marks', 'on') == 'on'
             
+            send_ai_feedback_immediately = data.get('send_ai_feedback_immediately', 'off') == 'on'
+            
             update_data = {
                 'title': data.get('title', assignment['title']),
                 'subject': data.get('subject', assignment['subject']),
@@ -3353,6 +3363,7 @@ def edit_assignment(assignment_id):
                 'status': 'published' if data.get('publish') else 'draft',
                 'ai_model': ai_model,
                 'award_marks': award_marks,
+                'send_ai_feedback_immediately': send_ai_feedback_immediately,
                 'feedback_instructions': data.get('feedback_instructions', ''),
                 'grading_instructions': data.get('grading_instructions', ''),
                 'target_type': target_type,
