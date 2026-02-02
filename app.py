@@ -374,10 +374,10 @@ def dashboard():
             not_submitted_count += 1
         elif submission.get('status') == 'rejected':
             not_submitted_count += 1  # Rejected with no newer submission = can resubmit
-        elif submission.get('status') in ['submitted', 'ai_reviewed']:
-            pending_review_count += 1
         elif submission.get('feedback_sent', False) or submission.get('status') in ['reviewed', 'approved']:
-            feedback_received_count += 1
+            feedback_received_count += 1  # AI feedback sent or teacher reviewed
+        elif submission.get('status') in ['submitted', 'ai_reviewed']:
+            pending_review_count += 1  # Waiting for teacher (or AI not sent yet)
     
     assignment_stats = {
         'not_submitted': not_submitted_count,
@@ -1964,9 +1964,13 @@ def teacher_dashboard():
     assignments = list(Assignment.find({'teacher_id': session['teacher_id']}))
     assignment_ids = [a['assignment_id'] for a in assignments]
     
+    # Pending Review = waiting for teacher (exclude AI feedback already sent)
     pending_submissions = Submission.count({
         'assignment_id': {'$in': assignment_ids},
-        'status': {'$in': ['submitted', 'ai_reviewed']}
+        '$or': [
+            {'status': 'submitted'},
+            {'status': 'ai_reviewed', 'feedback_sent': {'$ne': True}}
+        ]
     })
     
     approved_submissions = Submission.count({
@@ -1974,10 +1978,13 @@ def teacher_dashboard():
         'status': 'approved'
     })
     
-    # Get recent pending submissions
+    # Get recent pending submissions (exclude AI feedback sent)
     recent_pending = list(Submission.find({
         'assignment_id': {'$in': assignment_ids},
-        'status': {'$in': ['submitted', 'ai_reviewed']}
+        '$or': [
+            {'status': 'submitted'},
+            {'status': 'ai_reviewed', 'feedback_sent': {'$ne': True}}
+        ]
     }).sort('submitted_at', -1).limit(10))
     
     # Add details
@@ -2231,16 +2238,21 @@ def get_student_statuses():
         
         if submission:
             status = submission.get('status', 'submitted')
-            # Pending Review: student has submitted (including AI auto-reviewed)
-            if status in ['submitted', 'ai_reviewed']:
-                statuses[student_id] = {'status': 'pending', 'label': 'Pending Review', 'class': 'warning'}
+            sub_id = submission.get('submission_id')
+            feedback_sent = submission.get('feedback_sent', False)
+            # AI Feedback Sent: AI reviewed and feedback already sent to student
+            if status == 'ai_reviewed' and feedback_sent:
+                statuses[student_id] = {'status': 'ai_feedback_sent', 'label': 'AI Feedback Sent', 'class': 'info', 'submission_id': sub_id}
+            # Pending Review: waiting for teacher (submitted or ai_reviewed but not sent)
+            elif status in ['submitted', 'ai_reviewed']:
+                statuses[student_id] = {'status': 'pending', 'label': 'Pending Review', 'class': 'warning', 'submission_id': sub_id}
             # Returned: teacher has reviewed and returned
             elif status in ['reviewed', 'approved']:
-                statuses[student_id] = {'status': 'returned', 'label': 'Returned', 'class': 'success'}
+                statuses[student_id] = {'status': 'returned', 'label': 'Returned', 'class': 'success', 'submission_id': sub_id}
             else:
-                statuses[student_id] = {'status': status, 'label': status.title(), 'class': 'secondary'}
+                statuses[student_id] = {'status': status, 'label': status.title(), 'class': 'secondary', 'submission_id': sub_id}
         else:
-            statuses[student_id] = {'status': 'none', 'label': 'No Submission', 'class': 'light'}
+            statuses[student_id] = {'status': 'none', 'label': 'No Submission', 'class': 'light', 'submission_id': None}
     
     return jsonify({'success': True, 'statuses': statuses})
 
@@ -2367,21 +2379,31 @@ def assignment_summary(assignment_id):
     student_submissions = []
     for student in sorted(all_students, key=lambda x: x.get('name', '')):
         sub = submission_map.get(student['student_id'])
+        status = sub['status'] if sub else 'not_submitted'
+        feedback_sent = sub.get('feedback_sent', False) if sub else False
+        display_status = 'ai_feedback_sent' if (status == 'ai_reviewed' and feedback_sent) else ('pending' if status in ('submitted', 'ai_reviewed') else status)
         display_marks, percentage = _submission_display_marks(sub, total_marks) if sub else (None, 0)
         
         student_submissions.append({
             'student': student,
             'submission': sub,
-            'status': sub['status'] if sub else 'not_submitted',
+            'status': status,
+            'display_status': display_status,
             'percentage': percentage,
             'display_marks': display_marks
         })
     
-    # Sort: pending first, then by score descending
-    student_submissions.sort(key=lambda x: (
-        0 if x['status'] in ['submitted', 'ai_reviewed'] else 1,
-        -x['percentage']
-    ))
+    # Sort: pending first, then ai_feedback_sent, then reviewed, then not_submitted; within group by score descending
+    def _sort_order(item):
+        ds = item.get('display_status', item.get('status'))
+        if ds == 'pending':
+            return (0, -item['percentage'])
+        if ds == 'ai_feedback_sent':
+            return (1, -item['percentage'])
+        if ds in ('reviewed', 'approved'):
+            return (2, -item['percentage'])
+        return (3, -item['percentage'])
+    student_submissions.sort(key=_sort_order)
     
     return render_template('teacher_assignment_summary.html',
                          teacher=teacher,
@@ -3710,9 +3732,13 @@ def get_next_pending_submission(teacher_id, current_submission_id=None, assignme
     if not assignment_ids:
         return None
     
+    # Only truly pending (waiting for teacher), exclude AI feedback already sent
     query = {
         'assignment_id': {'$in': assignment_ids},
-        'status': {'$in': ['submitted', 'ai_reviewed']}
+        '$or': [
+            {'status': 'submitted'},
+            {'status': 'ai_reviewed', 'feedback_sent': {'$ne': True}}
+        ]
     }
     if current_submission_id:
         query['submission_id'] = {'$ne': current_submission_id}
@@ -3796,18 +3822,29 @@ def teacher_submissions():
                     # Treat manual+rejected as pending so teacher sees "Pending Review" and can still review.
                     if sub and sub.get('submitted_via') == 'manual' and status == 'rejected':
                         status = 'ai_reviewed'
+                    # Display status: AI Feedback Sent vs Pending Review (only when truly waiting for teacher)
+                    feedback_sent = sub.get('feedback_sent', False) if sub else False
+                    if status == 'ai_reviewed' and feedback_sent:
+                        display_status = 'ai_feedback_sent'
+                    elif status in ('submitted', 'ai_reviewed'):
+                        display_status = 'pending'
+                    else:
+                        display_status = status
                     display_marks, percentage = _submission_display_marks(sub, total_marks) if sub else (None, 0)
                     row = {
                         'student': student,
                         'submission': sub,
                         'status': status,
+                        'display_status': display_status,
                         'percentage': percentage,
                         'final_marks': display_marks,
                         'total_marks': int(total_marks)
                     }
                     if status_filter == 'all':
                         student_rows.append(row)
-                    elif status_filter == 'pending' and status in ('submitted', 'ai_reviewed'):
+                    elif status_filter == 'pending' and display_status == 'pending':
+                        student_rows.append(row)
+                    elif status_filter == 'ai_feedback_sent' and display_status == 'ai_feedback_sent':
                         student_rows.append(row)
                     elif status_filter == 'approved' and status in ('reviewed', 'approved'):
                         student_rows.append(row)
@@ -6365,17 +6402,21 @@ def teacher_reset_student_passwords():
         if not student_ids:
             return jsonify({'error': 'No students selected'}), 400
         
-        # Verify teacher has access to these students
+        # Verify teacher has access to these students (classes, teachers list, or teaching groups)
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
         teacher_classes = teacher.get('classes', [])
+        teaching_group_student_ids = set()
+        for group in TeachingGroup.find({'teacher_id': session['teacher_id']}):
+            teaching_group_student_ids.update(group.get('student_ids', []))
         
-        # Get students that belong to teacher's classes
+        # Get students that belong to teacher's classes, teachers list, or teaching groups
         valid_students = list(Student.find({
             'student_id': {'$in': student_ids},
             '$or': [
                 {'class': {'$in': teacher_classes}},
                 {'classes': {'$in': teacher_classes}},
-                {'teachers': session['teacher_id']}
+                {'teachers': session['teacher_id']},
+                {'student_id': {'$in': list(teaching_group_student_ids)}}
             ]
         }))
         

@@ -100,6 +100,7 @@
                 <div class="col-md-6">
                     <div class="d-flex gap-2 flex-wrap mt-3 mt-md-4">
                         <span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending Review</span>
+                        <span class="badge bg-info"><i class="bi bi-robot me-1"></i>AI Feedback Sent</span>
                         <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Returned</span>
                         <span class="badge bg-light text-muted"><i class="bi bi-dash me-1"></i>No Submission</span>
                     </div>
@@ -139,9 +140,21 @@
                                 <a href="{{ url_for('teacher_submissions', student=student.student_id) }}" 
                                    class="btn btn-sm btn-outline-primary action-btn" 
                                    data-submissions-url="{{ url_for('teacher_submissions', student=student.student_id) }}"
-                                   title="View assignment">
-                                    <i class="bi bi-journal-text"></i>
+                                   title="Assignment summary">
+                                    <i class="bi bi-bar-chart"></i>
                                 </a>
+                                <a href="{{ url_for('teacher_submissions', student=student.student_id) }}" 
+                                   class="btn btn-sm btn-outline-secondary view-submission-btn ms-1" 
+                                   data-submissions-url="{{ url_for('teacher_submissions', student=student.student_id) }}"
+                                   title="View student submission">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <button type="button" class="btn btn-sm btn-outline-warning ms-1 reset-password-btn"
+                                        data-student-id="{{ student.student_id }}"
+                                        data-student-name="{{ student.name }}"
+                                        title="Reset password">
+                                    <i class="bi bi-key"></i>
+                                </button>
                             </td>
                         </tr>
                         {% endfor %}
@@ -183,19 +196,52 @@
     </div>
     {% endif %}
 </div>
+
+<!-- Reset Student Password Modal -->
+<div class="modal fade" id="reset-password-modal" tabindex="-1" aria-labelledby="reset-password-modal-label" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="reset-password-modal-label">
+                    <i class="bi bi-key me-2"></i>Reset Student Password
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3" id="reset-password-student-info"></p>
+                <label for="reset-password-input" class="form-label">New password (optional)</label>
+                <input type="text" class="form-control" id="reset-password-input" placeholder="Leave blank for default: student123">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" id="reset-password-confirm-btn">
+                    <i class="bi bi-key me-1"></i>Reset password
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // Update action buttons: when an assignment is selected, link to that assignment's summary; otherwise link to submissions by student
+    // Update action buttons: when an assignment is selected, summary -> assignment summary; view-submission -> set when statuses load
     function updateActionButtons(assignmentId) {
         document.querySelectorAll('.action-btn').forEach(btn => {
             if (assignmentId) {
                 btn.href = '/teacher/assignment/' + assignmentId + '/summary';
-                btn.title = 'View assignment';
+                btn.title = 'Assignment summary';
             } else {
                 btn.href = btn.dataset.submissionsUrl || btn.href;
                 btn.title = 'View submissions';
+            }
+        });
+        document.querySelectorAll('.view-submission-btn').forEach(btn => {
+            if (!assignmentId) {
+                btn.href = btn.dataset.submissionsUrl || btn.href;
+                btn.title = 'View submissions';
+                btn.classList.remove('disabled');
+                btn.removeAttribute('aria-disabled');
             }
         });
     }
@@ -207,10 +253,16 @@
         // Update action buttons to go to assignment summary when an assignment is selected
         updateActionButtons(assignmentId);
         
-        // Reset all statuses if no assignment selected
+        // Reset all statuses and view-submission links if no assignment selected
         if (!assignmentId) {
             document.querySelectorAll('.student-status').forEach(cell => {
                 cell.innerHTML = '<span class="badge bg-light text-muted">Select an assignment</span>';
+            });
+            document.querySelectorAll('.view-submission-btn').forEach(btn => {
+                btn.href = btn.dataset.submissionsUrl || '#';
+                btn.title = 'View submissions';
+                btn.classList.remove('disabled');
+                btn.removeAttribute('aria-disabled');
             });
             return;
         }
@@ -238,11 +290,13 @@
             const data = await response.json();
             
             if (data.success && data.statuses) {
-                // Update each student's status
+                const assignmentId = document.getElementById('assignment-filter').value;
+                // Update each student's status and view-submission link
                 document.querySelectorAll('[data-student-id]').forEach(row => {
                     const studentId = row.dataset.studentId;
                     const statusCell = row.querySelector('.student-status');
                     const status = data.statuses[studentId];
+                    const viewSubmissionBtn = row.querySelector('.view-submission-btn');
                     
                     if (status) {
                         let icon = '';
@@ -250,6 +304,8 @@
                         if (status.status === 'pending') {
                             icon = '<i class="bi bi-clock me-1"></i>';
                             textClass = ' text-dark';
+                        } else if (status.status === 'ai_feedback_sent') {
+                            icon = '<i class="bi bi-robot me-1"></i>';
                         } else if (status.status === 'returned') {
                             icon = '<i class="bi bi-check-circle me-1"></i>';
                         } else if (status.status === 'none') {
@@ -257,6 +313,22 @@
                         }
                         
                         statusCell.innerHTML = `<span class="badge bg-${status.class}${textClass}">${icon}${status.label}</span>`;
+                        
+                        // Link to student submission when assignment selected and submission exists
+                        if (viewSubmissionBtn && assignmentId) {
+                            if (status.submission_id) {
+                                viewSubmissionBtn.href = '/teacher/submissions/' + status.submission_id + '/review';
+                                viewSubmissionBtn.title = 'View student submission';
+                                viewSubmissionBtn.classList.remove('disabled');
+                                viewSubmissionBtn.removeAttribute('aria-disabled');
+                            } else {
+                                viewSubmissionBtn.removeAttribute('href');
+                                viewSubmissionBtn.href = '#';
+                                viewSubmissionBtn.title = 'No submission';
+                                viewSubmissionBtn.classList.add('disabled');
+                                viewSubmissionBtn.setAttribute('aria-disabled', 'true');
+                            }
+                        }
                     }
                 });
             }
@@ -267,5 +339,53 @@
             });
         }
     });
+
+    // Reset password modal
+    const resetPasswordModal = document.getElementById('reset-password-modal');
+    if (resetPasswordModal) {
+        const modal = new bootstrap.Modal(resetPasswordModal);
+        let currentStudentId = null;
+
+        document.querySelectorAll('.reset-password-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                currentStudentId = this.dataset.studentId;
+                const studentName = this.dataset.studentName || currentStudentId;
+                document.getElementById('reset-password-student-info').textContent =
+                    'Reset password for ' + studentName + ' (' + currentStudentId + ')?';
+                document.getElementById('reset-password-input').value = '';
+                modal.show();
+            });
+        });
+
+        document.getElementById('reset-password-confirm-btn').addEventListener('click', async function() {
+            if (!currentStudentId) return;
+            const passwordInput = document.getElementById('reset-password-input').value.trim();
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Resetting...';
+            try {
+                const response = await fetch('/teacher/reset_student_passwords', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        student_ids: [currentStudentId],
+                        password: passwordInput || undefined
+                    })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    modal.hide();
+                    alert('Password reset to: ' + (data.password || 'student123'));
+                } else {
+                    alert(data.error || 'Failed to reset password');
+                }
+            } catch (e) {
+                console.error(e);
+                alert('Failed to reset password');
+            } finally {
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-key me-1"></i>Reset password';
+            }
+        });
+    }
 </script>
 {% endblock %}

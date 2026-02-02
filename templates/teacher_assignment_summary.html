@@ -256,7 +256,8 @@
                     <div class="btn-group btn-group-sm">
                         <button class="btn btn-outline-secondary active" onclick="filterStudents('all')">All</button>
                         <button class="btn btn-outline-success" onclick="filterStudents('reviewed')">Reviewed</button>
-                        <button class="btn btn-outline-warning" onclick="filterStudents('pending')">Pending</button>
+                        <button class="btn btn-outline-warning" onclick="filterStudents('pending')">Pending Review</button>
+                        <button class="btn btn-outline-info" onclick="filterStudents('ai_feedback_sent')">AI Feedback Sent</button>
                         <button class="btn btn-outline-danger" onclick="filterStudents('not_submitted')">Not Submitted</button>
                     </div>
                 </div>
@@ -274,17 +275,19 @@
                             </thead>
                             <tbody>
                                 {% for item in student_submissions %}
-                                <tr data-status="{{ item.status }}">
+                                <tr data-status="{{ item.display_status }}">
                                     <td>
                                         <strong>{{ item.student.name }}</strong>
                                         <br><small class="text-muted">{{ item.student.student_id }}</small>
                                     </td>
                                     <td>{{ item.student.class }}</td>
                                     <td>
-                                        {% if item.status == 'reviewed' %}
+                                        {% if item.status == 'reviewed' or item.status == 'approved' %}
                                         <span class="badge bg-success">Reviewed</span>
-                                        {% elif item.status == 'ai_reviewed' %}
-                                        <span class="badge bg-info">AI Reviewed</span>
+                                        {% elif item.display_status == 'ai_feedback_sent' %}
+                                        <span class="badge bg-info"><i class="bi bi-robot me-1"></i>AI Feedback Sent</span>
+                                        {% elif item.display_status == 'pending' %}
+                                        <span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending Review</span>
                                         {% elif item.status == 'submitted' %}
                                         <span class="badge bg-warning text-dark">Pending</span>
                                         {% else %}
@@ -353,9 +356,11 @@ function filterStudents(status) {
         if (status === 'all') {
             row.style.display = '';
         } else if (status === 'reviewed') {
-            row.style.display = rowStatus === 'reviewed' ? '' : 'none';
+            row.style.display = (rowStatus === 'reviewed' || rowStatus === 'approved') ? '' : 'none';
         } else if (status === 'pending') {
-            row.style.display = ['submitted', 'ai_reviewed'].includes(rowStatus) ? '' : 'none';
+            row.style.display = rowStatus === 'pending' ? '' : 'none';
+        } else if (status === 'ai_feedback_sent') {
+            row.style.display = rowStatus === 'ai_feedback_sent' ? '' : 'none';
         } else if (status === 'not_submitted') {
             row.style.display = rowStatus === 'not_submitted' ? '' : 'none';
         }

@@ -107,6 +107,7 @@
                         <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
                         <option value="not_submitted" {% if status_filter == 'not_submitted' %}selected{% endif %}>Not submitted</option>
                         <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending Review</option>
+                        <option value="ai_feedback_sent" {% if status_filter == 'ai_feedback_sent' %}selected{% endif %}>AI Feedback Sent</option>
                         <option value="approved" {% if status_filter == 'approved' %}selected{% endif %}>Reviewed</option>
                         <option value="rejected" {% if status_filter == 'rejected' %}selected{% endif %}>Rejected</option>
                     </select>
@@ -154,7 +155,9 @@
                         <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Reviewed</span>
                         {% elif row.status == 'rejected' %}
                         <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Rejected</span>
-                        {% elif row.status in ('submitted', 'ai_reviewed') %}
+                        {% elif row.display_status == 'ai_feedback_sent' %}
+                        <span class="badge bg-info"><i class="bi bi-robot me-1"></i>AI Feedback Sent</span>
+                        {% elif row.display_status == 'pending' %}
                         <span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending Review</span>
                         {% else %}
                         <span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Not submitted</span>
