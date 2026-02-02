@@ -2887,7 +2887,11 @@ def analyze_class_insights(submissions: list) -> dict:
         questions = ai_feedback.get('questions', [])
         
         for q in questions:
-            q_num = q.get('question_num', 0)
+            raw = q.get('question_num', 0)
+            try:
+                q_num = int(raw) if raw not in (None, '') else 0
+            except (TypeError, ValueError):
+                q_num = 0
             if q_num not in question_stats:
                 question_stats[q_num] = {
                     'correct': 0, 
@@ -2912,7 +2916,14 @@ def analyze_class_insights(submissions: list) -> dict:
             if q.get('improvement'):
                 question_stats[q_num]['feedbacks'].append(q.get('improvement'))
     
-    for q_num, stats in sorted(question_stats.items()):
+    def _question_sort_key(item):
+        q_num, _ = item
+        try:
+            return (0, int(q_num))
+        except (TypeError, ValueError):
+            return (1, str(q_num))
+
+    for q_num, stats in sorted(question_stats.items(), key=_question_sort_key):
         if stats['total'] > 0:
             correct_pct = stats['correct'] / stats['total'] * 100
             incorrect_pct = stats['incorrect'] / stats['total'] * 100
