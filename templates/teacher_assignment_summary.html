@@ -33,7 +33,11 @@
                     <h3><i class="bi bi-bar-chart me-2"></i>{{ assignment.title }}</h3>
                     <p class="text-muted mb-0">
                         <span class="badge bg-primary me-2">{{ assignment.subject }}</span>
+                        {% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
                         Total Marks: {{ assignment.total_marks }}
+                        {% else %}
+                        Grading: Correct / Partial correct / Incorrect
+                        {% endif %}
                         {% if assignment.due_date %} | Due: {{ assignment.due_date }}{% endif %}
                     </p>
                 </div>
@@ -72,6 +76,7 @@
                 </div>
             </div>
         </div>
+        {% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
         <div class="col-md-3">
             <div class="card text-center h-100">
                 <div class="card-body">
@@ -92,17 +97,36 @@
                 </div>
             </div>
         </div>
+        {% else %}
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h2 class="text-success mb-0">{{ stats.correct_count|default(0) }}</h2>
+                    <p class="text-muted mb-0">Correct</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h2 class="text-warning mb-0">{{ stats.partial_count|default(0) }}</h2>
+                    <p class="text-muted mb-0">Partial / Incorrect</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
     
     <div class="row">
         <!-- Left Column: Score Distribution & Insights -->
         <div class="col-lg-5 mb-4">
-            <!-- Score Distribution -->
+            <!-- Score Distribution (marks) or Result Distribution (Correct/Partial/Incorrect) -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-pie-chart me-2"></i>Score Distribution</h5>
+                    <h5 class="mb-0"><i class="bi bi-pie-chart me-2"></i>{% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}Score Distribution{% else %}Result Distribution{% endif %}</h5>
                 </div>
                 <div class="card-body">
+                    {% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
                     {% for grade, data in score_distribution.items() %}
                     <div class="mb-3">
                         <div class="d-flex justify-content-between mb-1">
@@ -116,6 +140,26 @@
                         </div>
                     </div>
                     {% endfor %}
+                    {% else %}
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Correct</span>
+                            <span>{{ stats.correct_count|default(0) }} students</span>
+                        </div>
+                        <div class="progress" style="height: 25px;">
+                            <div class="progress-bar bg-success" style="width: {% if stats.submitted > 0 %}{{ (stats.correct_count|default(0) / stats.submitted * 100)|round }}{% else %}0{% endif %}%">{{ stats.correct_count|default(0) }}</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Partial correct</span>
+                            <span>{{ stats.partial_count|default(0) }} students</span>
+                        </div>
+                        <div class="progress" style="height: 25px;">
+                            <div class="progress-bar bg-warning" style="width: {% if stats.submitted > 0 %}{{ (stats.partial_count|default(0) / stats.submitted * 100)|round }}{% else %}0{% endif %}%">{{ stats.partial_count|default(0) }}</div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
             
@@ -224,7 +268,7 @@
                                     <th>Student</th>
                                     <th>Class</th>
                                     <th>Status</th>
-                                    <th>Score</th>
+                                    <th>{% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}Score{% else %}Result{% endif %}</th>
                                     <th>Action</th>
                                 </tr>
                             </thead>
@@ -249,10 +293,20 @@
                                     </td>
                                     <td>
                                         {% if item.submission and item.submission.final_marks is not none %}
+                                        {% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
                                         <span class="{% if item.percentage >= 70 %}text-success{% elif item.percentage >= 50 %}text-warning{% else %}text-danger{% endif %} fw-bold">
                                             {{ item.submission.final_marks }}/{{ assignment.total_marks }}
                                         </span>
                                         <br><small class="text-muted">{{ "%.0f"|format(item.percentage) }}%</small>
+                                        {% else %}
+                                        {% if item.percentage >= 99.9 %}
+                                        <span class="badge bg-success">Correct</span>
+                                        {% elif item.percentage <= 0.01 %}
+                                        <span class="badge bg-danger">Incorrect</span>
+                                        {% else %}
+                                        <span class="badge bg-warning text-dark">Partial correct</span>
+                                        {% endif %}
+                                        {% endif %}
                                         {% else %}
                                         <span class="text-muted">-</span>
                                         {% endif %}

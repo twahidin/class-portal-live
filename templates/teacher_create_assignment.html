@@ -102,6 +102,25 @@
                             </div>
                         </div>
                         
+                        <!-- Award marks vs Correct/Partial/Incorrect (Standard only; rubric always uses marks) -->
+                        <div class="mb-3" id="award-marks-container">
+                            <label class="form-label">Grading display (Standard only)</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="award_marks" id="award_marks_yes" value="on" checked>
+                                <label class="form-check-label" for="award_marks_yes">
+                                    <i class="bi bi-star me-1"></i>Award marks
+                                </label>
+                                <small class="text-muted d-block ms-4">Students see marks per question and total score</small>
+                            </div>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="radio" name="award_marks" id="award_marks_no" value="off">
+                                <label class="form-check-label" for="award_marks_no">
+                                    <i class="bi bi-check2-all me-1"></i>No marks (Correct / Partial correct / Incorrect)
+                                </label>
+                                <small class="text-muted d-block ms-4">Students see only result per question: Correct, Partial correct, or Incorrect</small>
+                            </div>
+                        </div>
+                        
                         <div class="mb-3">
                             <label for="instructions" class="form-label">Instructions (optional)</label>
                             <textarea class="form-control" id="instructions" name="instructions" rows="3"
@@ -412,6 +431,10 @@
                             <span>Total Marks:</span>
                             <strong id="summary-marks">100</strong>
                         </div>
+                        <div class="summary-item" id="summary-award-marks-row">
+                            <span>Grading display:</span>
+                            <strong id="summary-award-marks">Marks</strong>
+                        </div>
                         
                         <hr>
                         
@@ -630,6 +653,14 @@
     });
     
     function updateMarkingTypeUI(isRubric) {
+        // Show/hide award marks option (Standard only; rubric always uses marks)
+        const awardMarksContainer = document.getElementById('award-marks-container');
+        if (awardMarksContainer) {
+            awardMarksContainer.style.display = isRubric ? 'none' : 'block';
+            if (isRubric) {
+                document.getElementById('award_marks_yes').checked = true;
+            }
+        }
         // Update answer key section
         const answerKeyTitle = document.getElementById('answer-key-title');
         const answerKeyDesc = document.getElementById('answer-key-desc');
@@ -683,9 +714,30 @@
             
             summaryMarkingType.innerHTML = '<span class="text-primary">Standard</span>';
         }
+        updateSummaryAwardMarks();
     }
     
-    // Initial validation
+    function updateSummaryAwardMarks() {
+        const isRubric = document.getElementById('marking_rubric')?.checked;
+        const row = document.getElementById('summary-award-marks-row');
+        const el = document.getElementById('summary-award-marks');
+        if (!row || !el) return;
+        if (isRubric) {
+            row.style.display = 'none';
+            return;
+        }
+        row.style.display = 'flex';
+        el.textContent = document.getElementById('award_marks_yes')?.checked ? 'Marks' : 'Correct / Partial / Incorrect';
+    }
+    
+    document.querySelectorAll('input[name="award_marks"]').forEach(radio => {
+        radio.addEventListener('change', updateSummaryAwardMarks);
+    });
+    
+    // Initial validation and UI (marking type + award marks)
+    const initialRubric = document.getElementById('marking_rubric')?.checked;
+    updateMarkingTypeUI(!!initialRubric);
+    updateSummaryAwardMarks();
     validateForm();
     
     // Google Drive file browser

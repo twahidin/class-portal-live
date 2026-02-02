@@ -86,6 +86,30 @@
                             </div>
                         </div>
                         
+                        {% if assignment.marking_type == 'standard' %}
+                        <div class="mb-3" id="award-marks-container">
+                            <label class="form-label">Grading display</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="award_marks" id="award_marks_yes" value="on"
+                                       {% if assignment.get('award_marks', True) %}checked{% endif %}>
+                                <label class="form-check-label" for="award_marks_yes">
+                                    <i class="bi bi-star me-1"></i>Award marks
+                                </label>
+                                <small class="text-muted d-block ms-4">Students see marks per question and total score</small>
+                            </div>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="radio" name="award_marks" id="award_marks_no" value="off"
+                                       {% if not assignment.get('award_marks', True) %}checked{% endif %}>
+                                <label class="form-check-label" for="award_marks_no">
+                                    <i class="bi bi-check2-all me-1"></i>No marks (Correct / Partial correct / Incorrect)
+                                </label>
+                                <small class="text-muted d-block ms-4">Students see only result per question: Correct, Partial correct, or Incorrect</small>
+                            </div>
+                        </div>
+                        {% else %}
+                        <input type="hidden" name="award_marks" value="on">
+                        {% endif %}
+                        
                         <div class="mb-3">
                             <label for="instructions" class="form-label">Instructions (optional)</label>
                             <textarea class="form-control" id="instructions" name="instructions" rows="3">{{ assignment.instructions or '' }}</textarea>

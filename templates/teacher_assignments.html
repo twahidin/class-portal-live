@@ -107,8 +107,13 @@
                     <span>{{ assignment.questions|length }} questions</span>
                 </div>
                 <div class="stat">
+                    {% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
                     <i class="bi bi-star"></i>
                     <span>{{ assignment.total_marks }} marks</span>
+                    {% else %}
+                    <i class="bi bi-check2-all"></i>
+                    <span>Correct / Partial / Incorrect</span>
+                    {% endif %}
                 </div>
                 {% if assignment.due_date %}
                 <div class="stat">

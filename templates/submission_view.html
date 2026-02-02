@@ -64,6 +64,7 @@
                 <div class="col-md-4 text-md-end mt-3 mt-md-0">
                     {% if submission.get('feedback_sent', False) and submission.get('final_marks') is not none %}
                     <div class="score-box">
+                        {% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
                         <div class="score-value">{{ submission.get('final_marks', 0) }}<span class="score-total">/{{ assignment.get('total_marks', 100) }}</span></div>
                         <div class="score-label">Your Score</div>
                         {% set final_marks_num = submission.get('final_marks', 0)|float %}
@@ -74,6 +75,19 @@
                                  style="width: {{ percentage }}%"></div>
                         </div>
                         <small class="text-muted">{{ "%.1f"|format(percentage) }}%</small>
+                        {% else %}
+                        {% set final_marks_num = submission.get('final_marks', 0)|float %}
+                        {% set total_marks_num = assignment.get('total_marks', 100)|float %}
+                        {% set percentage = (final_marks_num / total_marks_num * 100) if total_marks_num > 0 else 0 %}
+                        {% if percentage >= 99.9 %}
+                        <div class="score-value text-success"><i class="bi bi-check-circle me-1"></i>Correct</div>
+                        {% elif percentage <= 0.01 %}
+                        <div class="score-value text-danger"><i class="bi bi-x-circle me-1"></i>Incorrect</div>
+                        {% else %}
+                        <div class="score-value text-warning"><i class="bi bi-dash-circle me-1"></i>Partial correct</div>
+                        {% endif %}
+                        <div class="score-label">Your Result</div>
+                        {% endif %}
                     </div>
                     {% endif %}
                 </div>
@@ -151,6 +165,7 @@
                         
                         {% if questions %}
                         {% set include_answer_key = submission.get('include_answer_key', False) %}
+                        {% set show_marks_column = assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
                         <!-- Standard: Feedback Table by Question -->
                         <div class="table-responsive">
                             <table class="table table-sm feedback-table">
@@ -161,12 +176,16 @@
                                         <th style="width: 35%;">Answer Key</th>
                                         {% endif %}
                                         <th>Feedback</th>
-                                        <th style="width: 70px;">Marks</th>
+                                        <th style="width: 70px;">{% if show_marks_column %}Marks{% else %}Result{% endif %}</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for q in questions %}
                                     {% set teacher_q = teacher_feedback.get('questions', {}).get(q.question_num|string, {}) %}
+                                    {% set marks = teacher_q.get('marks') if teacher_q.get('marks') is not none else q.get('marks_awarded') %}
+                                    {% set marks_total_val = (q.marks_total|float) if (q.marks_total and q.marks_total|float > 0) else 1 %}
+                                    {% set marks_num = marks|float if marks is not none else None %}
+                                    {% set q_pct = (marks_num / marks_total_val * 100) if (marks_num is not none and marks_total_val > 0) else None %}
                                     <tr class="{% if q.is_correct %}table-success{% elif q.is_correct == false %}table-danger{% elif q.needs_review %}table-warning{% endif %}">
                                         <td class="text-center">
                                             <strong>{{ q.question_num }}</strong>
@@ -208,15 +227,26 @@
                                             {% endif %}
                                         </td>
                                         <td class="text-center">
-                                            {% set marks = teacher_q.get('marks') if teacher_q.get('marks') is not none else q.get('marks_awarded') %}
+                                            {% if show_marks_column %}
                                             {% if marks is not none %}
-                                            {% set marks_num = marks|float if marks is not none else 0 %}
-                                            {% set marks_total_num = q.marks_total|float if q.marks_total else 0 %}
-                                            <span class="badge {% if marks_num == marks_total_num %}bg-success{% elif marks_num > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                            <span class="badge {% if marks_num == marks_total_val %}bg-success{% elif marks_num and marks_num > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
                                                 {{ marks }}/{{ q.marks_total or '?' }}
                                             </span>
                                             {% else %}
                                             <span class="badge bg-secondary">?/{{ q.marks_total or '?' }}</span>
+                                            {% endif %}
+                                            {% else %}
+                                            {% if q_pct is not none %}
+                                            {% if q_pct >= 99.9 %}
+                                            <span class="badge bg-success">Correct</span>
+                                            {% elif q_pct <= 0.01 %}
+                                            <span class="badge bg-danger">Incorrect</span>
+                                            {% else %}
+                                            <span class="badge bg-warning text-dark">Partial correct</span>
+                                            {% endif %}
+                                            {% else %}
+                                            <span class="text-muted">—</span>
+                                            {% endif %}
                                             {% endif %}
                                         </td>
                                     </tr>

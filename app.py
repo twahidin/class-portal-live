@@ -2292,6 +2292,20 @@ def assignment_summary(assignment_id):
     pass_count = len([s for s in scores if s >= total_marks * 0.5])
     pass_rate = (pass_count / len(scores) * 100) if scores else 0
     
+    # For no-marks mode (standard only): correct (100%), incorrect (0%), partial (else)
+    award_marks = assignment.get('award_marks', True)
+    no_marks_mode = assignment.get('marking_type') == 'standard' and not award_marks
+    correct_count = partial_count = incorrect_count = 0
+    if no_marks_mode and total_marks > 0:
+        for s in scores:
+            pct = (s / total_marks * 100)
+            if pct >= 99.9:
+                correct_count += 1
+            elif pct <= 0.01:
+                incorrect_count += 1
+            else:
+                partial_count += 1
+    
     stats = {
         'total_students': total_students,
         'submitted': len(submissions),
@@ -2299,7 +2313,10 @@ def assignment_summary(assignment_id):
         'pending': pending_count,
         'avg_marks': avg_marks,
         'avg_score': avg_score,
-        'pass_rate': round(pass_rate)
+        'pass_rate': round(pass_rate),
+        'correct_count': correct_count,
+        'partial_count': partial_count + incorrect_count,
+        'incorrect_count': incorrect_count
     }
     
     # Score distribution
@@ -3184,6 +3201,11 @@ def create_assignment():
             target_class_id = data.get('target_class_id', '').strip() or None
             target_group_id = data.get('target_group_id', '').strip() or None
             
+            # Award marks: for standard only; rubric always uses marks (no change)
+            award_marks = True
+            if marking_type == 'standard':
+                award_marks = data.get('award_marks', 'on') == 'on'
+            
             # Build assignment document
             assignment_doc = {
                 'assignment_id': assignment_id,
@@ -3193,6 +3215,7 @@ def create_assignment():
                 'instructions': data.get('instructions', ''),
                 'total_marks': total_marks,
                 'marking_type': marking_type,  # 'standard' or 'rubric'
+                'award_marks': award_marks,  # True = show marks; False = show Correct/Partial/Incorrect only (standard only)
                 'question_paper_id': question_paper_id,
                 'answer_key_id': answer_key_id,
                 'question_paper_name': question_paper.filename if question_paper and question_paper.filename else (question_paper_name.replace('DRIVE:', '') if question_paper_name and question_paper_name.startswith('DRIVE:') else None),
@@ -3316,6 +3339,11 @@ def edit_assignment(assignment_id):
             target_class_id = data.get('target_class_id', '').strip() or None
             target_group_id = data.get('target_group_id', '').strip() or None
             
+            # Award marks: only for standard; rubric stays as-is
+            award_marks = assignment.get('award_marks', True)
+            if assignment.get('marking_type') == 'standard':
+                award_marks = data.get('award_marks', 'on') == 'on'
+            
             update_data = {
                 'title': data.get('title', assignment['title']),
                 'subject': data.get('subject', assignment['subject']),
@@ -3324,6 +3352,7 @@ def edit_assignment(assignment_id):
                 'due_date': data.get('due_date') or None,
                 'status': 'published' if data.get('publish') else 'draft',
                 'ai_model': ai_model,
+                'award_marks': award_marks,
                 'feedback_instructions': data.get('feedback_instructions', ''),
                 'grading_instructions': data.get('grading_instructions', ''),
                 'target_type': target_type,

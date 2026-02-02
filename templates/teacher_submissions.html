@@ -129,7 +129,7 @@
                     <th>Student</th>
                     <th>Submitted</th>
                     <th>Status</th>
-                    <th>Score</th>
+                    <th>{% if selected_assignment and (selected_assignment.marking_type == 'rubric' or selected_assignment.get('award_marks', True)) %}Score{% else %}Result{% endif %}</th>
                     <th>Action</th>
                 </tr>
             </thead>
@@ -162,8 +162,18 @@
                     </td>
                     <td>
                         {% if row.final_marks is not none %}
+                        {% if selected_assignment and (selected_assignment.marking_type == 'rubric' or selected_assignment.get('award_marks', True)) %}
                         <strong>{{ "%.0f"|format(row.final_marks) }}</strong>/{{ row.total_marks }}
                         <small class="text-muted">({{ "%.0f"|format(row.percentage) }}%)</small>
+                        {% else %}
+                        {% if row.percentage >= 99.9 %}
+                        <span class="badge bg-success">Correct</span>
+                        {% elif row.percentage <= 0.01 %}
+                        <span class="badge bg-danger">Incorrect</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">Partial correct</span>
+                        {% endif %}
+                        {% endif %}
                         {% else %}
                         <span class="text-muted">—</span>
                         {% endif %}
