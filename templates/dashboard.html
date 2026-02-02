@@ -30,6 +30,13 @@
                     </a>
                 </li>
                 {% endif %}
+                {% if student_has_python_lab_access %}
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('student_python_lab') }}">
+                        <i class="bi bi-code-slash me-1"></i>Python Lab
+                    </a>
+                </li>
+                {% endif %}
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('student_submissions') }}">
                         <i class="bi bi-check2-square me-1"></i>Submissions
@@ -146,6 +153,19 @@
                 </div>
             </a>
         </div>
+        {% if student_has_python_lab_access %}
+        <div class="col-md-4">
+            <a href="{{ url_for('student_python_lab') }}" class="stat-card stat-success text-decoration-none">
+                <div class="stat-icon">
+                    <i class="bi bi-code-slash"></i>
+                </div>
+                <div class="stat-info">
+                    <h3>Python Lab</h3>
+                    <p>Write and run Python code</p>
+                </div>
+            </a>
+        </div>
+        {% endif %}
     </div>
     
     <!-- Teachers Section -->

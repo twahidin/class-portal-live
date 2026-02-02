@@ -137,17 +137,23 @@
                     <label class="form-label small">Type</label>
                     <select class="form-select form-select-sm" id="resType">
                         <option value="youtube">YouTube / Video</option>
-                        <option value="link">Link</option>
-                        <option value="pdf">PDF (link)</option>
+                        <option value="pdf">PDF (link or upload)</option>
+                        <option value="link">Website / Link</option>
+                        <option value="slides">Google Slides</option>
                     </select>
                 </div>
                 <div class="mb-2">
                     <label class="form-label small">Title</label>
                     <input type="text" class="form-control form-control-sm" id="resTitle" placeholder="e.g. Introduction Video">
                 </div>
-                <div class="mb-2">
+                <div class="mb-2" id="resUrlWrap">
                     <label class="form-label small">URL</label>
                     <input type="url" class="form-control form-control-sm" id="resUrl" placeholder="https://...">
+                </div>
+                <div class="mb-2 d-none" id="resPdfUploadWrap">
+                    <label class="form-label small">Or upload PDF</label>
+                    <input type="file" class="form-control form-control-sm" id="resPdfFile" accept="application/pdf">
+                    <p class="form-text small mb-0">Max 10 MB. Leave URL empty to use upload only.</p>
                 </div>
             </div>
             <div class="modal-footer">
@@ -187,6 +193,7 @@
 .resource-list .resource-item .resource-icon.youtube { background: rgba(255,0,0,0.1); color: #f00; }
 .resource-list .resource-item .resource-icon.pdf { background: rgba(239,68,68,0.1); color: #ef4444; }
 .resource-list .resource-item .resource-icon.link { background: rgba(6,182,212,0.1); color: #06b6d4; }
+.resource-list .resource-item .resource-icon.slides { background: rgba(234,88,12,0.1); color: #ea580c; }
 .resource-list .resource-item .flex-grow-1 { min-width: 0; }
 .resource-list .resource-item .btn-link { padding: 0 0.25rem; font-size: 0.9rem; }
 .flat-context-menu { position: fixed; z-index: 200; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 0.25rem 0; min-width: 140px; display: none; }
@@ -419,8 +426,9 @@
             const list = (data.resources || []);
             resourceCount.textContent = list.length;
             resourceList.innerHTML = list.map(function(r) {
-                const icon = r.type === 'youtube' ? 'bi-youtube' : (r.type === 'pdf' ? 'bi-file-pdf' : 'bi-link-45deg');
-                const iconCls = r.type === 'youtube' ? 'youtube' : (r.type === 'pdf' ? 'pdf' : 'link');
+                const icons = { youtube: 'bi-youtube', pdf: 'bi-file-pdf', slides: 'bi-file-earmark-slides', link: 'bi-link-45deg' };
+                const icon = icons[r.type] || 'bi-link-45deg';
+                const iconCls = r.type === 'youtube' ? 'youtube' : (r.type === 'pdf' ? 'pdf' : (r.type === 'slides' ? 'slides' : 'link'));
                 return '<div class="resource-item"><div class="resource-icon ' + iconCls + '"><i class="bi ' + icon + '"></i></div><div class="flex-grow-1 small text-truncate" title="' + (r.title || '') + '">' + (r.title || 'Resource') + '</div><button type="button" class="btn btn-link text-danger p-0 delete-resource" data-resource-id="' + (r.resource_id || '') + '"><i class="bi bi-trash"></i></button></div>';
             }).join('');
             resourceList.querySelectorAll('.delete-resource').forEach(function(btn) {
@@ -501,9 +509,16 @@
         } catch (err) { alert('Save failed'); }
     });
 
+    document.getElementById('resType').addEventListener('change', function() {
+        const wrap = document.getElementById('resPdfUploadWrap');
+        if (wrap) wrap.classList.toggle('d-none', this.value !== 'pdf');
+    });
     addResourceBtn && addResourceBtn.addEventListener('click', function() {
         document.getElementById('resTitle').value = '';
         document.getElementById('resUrl').value = '';
+        const pdfInput = document.getElementById('resPdfFile');
+        if (pdfInput) { pdfInput.value = ''; }
+        document.getElementById('resPdfUploadWrap').classList.toggle('d-none', document.getElementById('resType').value !== 'pdf');
         addResourceModal.setAttribute('data-edit-node-id', editNodeId.value);
         new bootstrap.Modal(addResourceModal).show();
     });
@@ -512,11 +527,18 @@
         const type = document.getElementById('resType').value;
         const title = document.getElementById('resTitle').value.trim();
         const url = document.getElementById('resUrl').value.trim();
-        if (!title || !url) { alert('Title and URL required'); return; }
+        const pdfFile = document.getElementById('resPdfFile').files[0];
+        const MAX_PDF_MB = 10;
+        if (!title) { alert('Title required'); return; }
+        if (type === 'pdf') {
+            if (!url && !pdfFile) { alert('Provide a PDF link (URL) or upload a PDF file'); return; }
+            if (pdfFile && pdfFile.size > MAX_PDF_MB * 1024 * 1024) { alert('PDF must be ' + MAX_PDF_MB + ' MB or smaller'); return; }
+        } else if (!url) { alert('URL required'); return; }
         const formData = new FormData();
         formData.append('type', type);
         formData.append('title', title);
-        formData.append('url', url);
+        formData.append('url', url || '');
+        if (pdfFile) formData.append('file', pdfFile);
         fetch('{{ url_for("manage_module_resources", module_id=module.module_id, node_id="__NODE__") }}'.replace('__NODE__', encodeURIComponent(nodeId)), { method: 'POST', body: formData })
             .then(function(r) { return r.json(); })
             .then(function(d) {

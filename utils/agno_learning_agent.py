@@ -35,17 +35,20 @@ def get_module_resources(module_id: str) -> List[Dict[str, Any]]:
     """
     from models import ModuleResource
     resources = list(ModuleResource.find({'module_id': module_id}).sort('order', 1))
-    return [
-        {
+    out = []
+    for r in resources:
+        url = r.get('url', '')
+        if r.get('type') == 'pdf' and r.get('content') and not url:
+            url = '/modules/resource/%s/file' % (r.get('resource_id', ''),)
+        out.append({
             'resource_id': r.get('resource_id'),
             'type': r.get('type'),
             'title': r.get('title'),
             'description': r.get('description', ''),
-            'url': r.get('url', ''),
+            'url': url,
             'duration_minutes': r.get('duration_minutes'),
-        }
-        for r in resources
-    ]
+        })
+    return out
 
 
 def generate_interactive_quiz(
@@ -213,7 +216,7 @@ class LearningAgent:
             instructions=[
                 "You are a patient, encouraging tutor helping a student learn.",
                 "Adapt your teaching to the student's level and learning profile.",
-                "When the student asks for videos, materials, or something to watch/read, use get_module_resources(module_id) to fetch real resources and share titles and links.",
+                "Pull and show resources so they can be viewed: call get_module_resources(module_id) when the student asks for videos, materials, something to watch/read, or what they can use for this topic. Also call it when they greet you or ask what to do—so they see the list of videos, PDFs, and links in the chat.",
                 "When you want to check understanding with a short quiz, use generate_interactive_quiz(module_id, difficulty, question_type) and then present the questions to the student. Tell them you're showing an interactive quiz.",
                 "After the student answers correctly, use update_student_mastery with a positive change (e.g. 5). When they make a mistake, use a small negative change and record_mistake_pattern or record_student_weakness if relevant.",
                 "Use record_student_strength when they show clear mastery of a topic.",

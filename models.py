@@ -63,6 +63,8 @@ class Database:
 
         # Module access allocation (admin: which teachers/classes can use learning modules)
         self.db.module_access.create_index('config_id', unique=True)
+        # Python Lab access (admin: which classes/teaching groups can use Python Lab)
+        self.db.python_lab_access.create_index('config_id', unique=True)
 
 db = Database()
 

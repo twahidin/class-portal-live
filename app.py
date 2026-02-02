@@ -22,6 +22,8 @@ import math
 import uuid
 import json
 import base64
+import subprocess
+import tempfile
 import PyPDF2
 
 # Load environment variables
@@ -1766,7 +1768,21 @@ def learning_page(module_id, node_id):
         LearningSession.insert_one(session_doc)
         existing_session = session_doc
 
-    resources = list(ModuleResource.find({'module_id': node_id}).sort('order', 1))
+    raw_resources = list(ModuleResource.find({'module_id': node_id}).sort('order', 1))
+    # Build resource list with view URL for uploaded PDFs (no external url)
+    resources = []
+    for r in raw_resources:
+        res = {
+            'resource_id': r.get('resource_id'),
+            'type': r.get('type', 'link'),
+            'title': r.get('title', ''),
+            'url': r.get('url', ''),
+            'description': r.get('description', ''),
+            'order': r.get('order', 0),
+        }
+        if res['type'] == 'pdf' and r.get('content') and not res['url']:
+            res['url'] = url_for('serve_module_resource_file', resource_id=res['resource_id'])
+        resources.append(res)
     mastery = StudentModuleMastery.find_one({
         'student_id': session['student_id'],
         'module_id': node_id,
@@ -1787,6 +1803,86 @@ def learning_page(module_id, node_id):
         profile=profile,
         overall_mastery=overall_mastery,
     )
+
+
+@app.route('/modules/resource/<resource_id>/file')
+@login_required
+def serve_module_resource_file(resource_id):
+    """Serve uploaded PDF content for a module resource. Student must have access to the module."""
+    if not _student_has_module_access(session['student_id']):
+        return 'Forbidden', 403
+    res = ModuleResource.find_one({'resource_id': resource_id})
+    if not res or res.get('type') != 'pdf' or not res.get('content'):
+        return 'Not found', 404
+    module = Module.find_one({'module_id': res['module_id']})
+    if not module:
+        return 'Not found', 404
+    root_id = module.get('parent_id') or res['module_id']
+    root_module = Module.find_one({'module_id': root_id})
+    if not root_module or root_module.get('status') != 'published':
+        return 'Not found', 404
+    teacher_ids = get_student_teacher_ids(session['student_id'])
+    if root_module.get('teacher_id') not in teacher_ids:
+        return 'Forbidden', 403
+    try:
+        pdf_bytes = base64.b64decode(res['content'])
+    except Exception:
+        return 'Invalid resource', 500
+    from flask import Response
+    return Response(pdf_bytes, mimetype='application/pdf', headers={
+        'Content-Disposition': 'inline; filename="%s.pdf"' % (res.get('title', 'resource') or 'resource',),
+    })
+
+
+# ============================================================================
+# PYTHON LAB - In-browser Python interpreter (classes/teaching groups only)
+# ============================================================================
+
+PYTHON_EXECUTE_TIMEOUT = 5
+PYTHON_OUTPUT_MAX_BYTES = 100000
+
+@app.route('/python-lab')
+@login_required
+def student_python_lab():
+    """Python Lab page: write and run Python code. Access controlled by admin (classes/teaching groups)."""
+    if not _student_has_python_lab_access(session['student_id']):
+        return redirect(url_for('dashboard'))
+    return render_template('python_lab.html', execute_timeout=PYTHON_EXECUTE_TIMEOUT)
+
+
+@app.route('/api/python/execute', methods=['POST'])
+@login_required
+def student_python_execute():
+    """Execute Python code server-side. Only for students with Python Lab access."""
+    if not _student_has_python_lab_access(session['student_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    try:
+        data = request.get_json() or {}
+        code = (data.get('code') or '').strip()
+        if not code:
+            return jsonify({'error': 'No code provided'}), 400
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                [os.environ.get('PYTHON_EXECUTABLE', 'python3'), '-c', code],
+                capture_output=True,
+                timeout=PYTHON_EXECUTE_TIMEOUT,
+                cwd=tmpdir,
+                env={**os.environ, 'PYTHONIOENCODING': 'utf-8'},
+            )
+        out = (result.stdout or b'').decode('utf-8', errors='replace')
+        err = (result.stderr or b'').decode('utf-8', errors='replace')
+        if len(out) > PYTHON_OUTPUT_MAX_BYTES:
+            out = out[:PYTHON_OUTPUT_MAX_BYTES] + '\n... (output truncated)'
+        if len(err) > PYTHON_OUTPUT_MAX_BYTES:
+            err = err[:PYTHON_OUTPUT_MAX_BYTES] + '\n... (output truncated)'
+        combined = (out + (('\n' + err) if err else '')).strip() or '(no output)'
+        return jsonify({'output': combined, 'executed': True})
+    except subprocess.TimeoutExpired:
+        return jsonify({'output': 'Execution timed out (max %s seconds).' % PYTHON_EXECUTE_TIMEOUT, 'executed': False})
+    except Exception as e:
+        logger.exception("Python execute error")
+        return jsonify({'output': str(e), 'executed': False}), 500
+
 
 @app.route('/api/learning/chat', methods=['POST'])
 @login_required
@@ -5056,14 +5152,65 @@ def _student_has_module_access(student_id):
     return bool(set(student_classes) & set(config['class_ids']))
 
 
+# ============================================================================
+# PYTHON LAB ACCESS - Which classes/teaching groups can use Python Lab (admin-set)
+# ============================================================================
+
+PYTHON_LAB_ACCESS_CONFIG_ID = 'default'
+
+def _get_python_lab_access_config():
+    """Return { class_ids: [], teaching_group_ids: [] } from admin allocation."""
+    doc = db.db.python_lab_access.find_one({'config_id': PYTHON_LAB_ACCESS_CONFIG_ID})
+    if not doc:
+        return {'class_ids': [], 'teaching_group_ids': []}
+    return {
+        'class_ids': list(doc.get('class_ids') or []),
+        'teaching_group_ids': list(doc.get('teaching_group_ids') or []),
+    }
+
+def _save_python_lab_access_config(class_ids, teaching_group_ids):
+    """Save which classes and teaching groups have access to Python Lab."""
+    db.db.python_lab_access.update_one(
+        {'config_id': PYTHON_LAB_ACCESS_CONFIG_ID},
+        {'$set': {
+            'config_id': PYTHON_LAB_ACCESS_CONFIG_ID,
+            'class_ids': list(class_ids or []),
+            'teaching_group_ids': list(teaching_group_ids or []),
+            'updated_at': datetime.utcnow(),
+        }},
+        upsert=True,
+    )
+
+def _student_has_python_lab_access(student_id):
+    """True if this student is in an allowed class OR in an allowed teaching group."""
+    config = _get_python_lab_access_config()
+    student = Student.find_one({'student_id': student_id})
+    if not student:
+        return False
+    # Check class access
+    student_classes = student.get('classes', [])
+    if not student_classes and student.get('class'):
+        student_classes = [student.get('class')]
+    if config['class_ids'] and set(student_classes) & set(config['class_ids']):
+        return True
+    # Check teaching group access
+    if config['teaching_group_ids']:
+        for gid in config['teaching_group_ids']:
+            group = TeachingGroup.find_one({'group_id': gid})
+            if group and student_id in group.get('student_ids', []):
+                return True
+    return False
+
+
 @app.context_processor
 def inject_module_access():
-    """Make teacher_has_module_access and student_has_module_access available in all templates."""
-    out = {'teacher_has_module_access': False, 'student_has_module_access': False}
+    """Make teacher_has_module_access, student_has_module_access, student_has_python_lab_access available in all templates."""
+    out = {'teacher_has_module_access': False, 'student_has_module_access': False, 'student_has_python_lab_access': False}
     if session.get('teacher_id'):
         out['teacher_has_module_access'] = _teacher_has_module_access(session['teacher_id'])
     if session.get('student_id'):
         out['student_has_module_access'] = _student_has_module_access(session['student_id'])
+        out['student_has_python_lab_access'] = _student_has_python_lab_access(session['student_id'])
     return out
 
 
@@ -5411,10 +5558,17 @@ def manage_module_resources(module_id, node_id):
             if resource_type == 'youtube':
                 resource_doc['url'] = request.form.get('url', '')
             elif resource_type == 'pdf':
+                # PDF: link (URL) and/or file upload (max 10 MB)
+                resource_doc['url'] = request.form.get('url', '')
                 f = request.files.get('file')
-                if f:
-                    resource_doc['content'] = base64.b64encode(f.read()).decode('utf-8')
-            elif resource_type == 'link':
+                if f and f.filename:
+                    raw = f.read()
+                    if len(raw) > 10 * 1024 * 1024:  # 10 MB
+                        return jsonify({'error': 'PDF must be 10 MB or smaller'}), 400
+                    resource_doc['content'] = base64.b64encode(raw).decode('utf-8')
+                if not resource_doc.get('url') and not resource_doc.get('content'):
+                    return jsonify({'error': 'Provide a PDF link (URL) or upload a PDF file'}), 400
+            elif resource_type in ('link', 'slides'):
                 resource_doc['url'] = request.form.get('url', '')
             ModuleResource.insert_one(resource_doc)
             return jsonify({'success': True, 'resource_id': resource_doc['resource_id']})
@@ -6027,13 +6181,21 @@ def admin_dashboard():
 
     # Module access allocation (which teachers/classes can use learning modules)
     module_access = _get_module_access_config()
+    # Python Lab access (which classes/teaching groups can use Python Lab)
+    python_lab_access = _get_python_lab_access_config()
+    teaching_groups = list(TeachingGroup.find({}))
+    for g in teaching_groups:
+        g['student_count'] = len(g.get('student_ids') or [])
 
     return render_template('admin_dashboard.html',
                          stats=stats,
                          teachers=teachers,
                          classes=classes,
+                         teaching_groups=teaching_groups,
                          module_access_teacher_ids=module_access['teacher_ids'],
-                         module_access_class_ids=module_access['class_ids'])
+                         module_access_class_ids=module_access['class_ids'],
+                         python_lab_class_ids=python_lab_access['class_ids'],
+                         python_lab_teaching_group_ids=python_lab_access['teaching_group_ids'])
 
 
 @app.route('/admin/module-access', methods=['POST'])
@@ -6048,6 +6210,21 @@ def admin_save_module_access():
         return jsonify({'success': True, 'message': 'Learning module access updated.'})
     except Exception as e:
         logger.error("Error saving module access: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/python-lab-access', methods=['POST'])
+@admin_required
+def admin_save_python_lab_access():
+    """Save which classes and teaching groups have access to Python Lab."""
+    try:
+        data = request.get_json()
+        class_ids = list(data.get('class_ids') or [])
+        teaching_group_ids = list(data.get('teaching_group_ids') or [])
+        _save_python_lab_access_config(class_ids, teaching_group_ids)
+        return jsonify({'success': True, 'message': 'Python Lab access updated.'})
+    except Exception as e:
+        logger.error("Error saving Python Lab access: %s", e)
         return jsonify({'error': str(e)}), 500
 
 

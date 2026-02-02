@@ -63,6 +63,12 @@
                 <div class="p-3 text-white text-center">
                     <a href="{{ res.url or '#' }}" target="_blank" rel="noopener" class="btn btn-primary"><i class="bi bi-file-pdf me-1"></i>{{ res.title }}</a>
                 </div>
+                {% elif res.type == 'slides' %}
+                <div class="p-4 text-center text-white">
+                    <i class="bi bi-file-earmark-slides display-4"></i>
+                    <p class="mb-2">{{ res.title }}</p>
+                    <a href="{{ res.url or '#' }}" target="_blank" rel="noopener" class="btn btn-light btn-sm">Open Slides</a>
+                </div>
                 {% else %}
                 <div class="p-4 text-center text-white">
                     <i class="bi bi-link-45deg display-4"></i>
@@ -85,6 +91,23 @@
         <div class="learning-main">
             <div class="learning-chat card shadow-sm">
                 <div class="chat-messages card-body" id="chat-messages">
+                    {% if resources %}
+                    <div class="chat-message assistant tool-resources">
+                        <div class="bubble border bg-light rounded p-2">
+                            <strong class="d-block mb-2"><i class="bi bi-collection-play me-1"></i>Resources for this topic</strong>
+                            <div class="d-flex flex-column gap-1">
+                                {% for res in resources %}
+                                <a href="{{ res.url or '#' }}" target="_blank" rel="noopener" class="resource-link small resource-item" data-resource-id="{{ res.resource_id }}">
+                                    {% if res.type == 'youtube' %}<i class="bi bi-youtube me-1"></i>
+                                    {% elif res.type == 'pdf' %}<i class="bi bi-file-pdf me-1"></i>
+                                    {% elif res.type == 'slides' %}<i class="bi bi-file-earmark-slides me-1"></i>
+                                    {% else %}<i class="bi bi-link-45deg me-1"></i>{% endif %}{{ res.title }}
+                                </a>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                     {% for msg in (session_data.chat_history or []) %}
                     <div class="chat-message {{ msg.role }}">
                         <div class="bubble" style="white-space: pre-wrap;">{{ (msg.content or '(image)')|e }}</div>
@@ -141,6 +164,7 @@
                             <span class="resource-icon {{ res.type }} me-2">
                                 {% if res.type == 'youtube' %}<i class="bi bi-youtube"></i>
                                 {% elif res.type == 'pdf' %}<i class="bi bi-file-pdf"></i>
+                                {% elif res.type == 'slides' %}<i class="bi bi-file-earmark-slides"></i>
                                 {% else %}<i class="bi bi-link-45deg"></i>{% endif %}
                             </span>
                             <span>{{ res.title }}</span>
@@ -204,7 +228,7 @@
             a.target = '_blank';
             a.rel = 'noopener';
             a.className = 'resource-link small';
-            const icon = r.type === 'youtube' ? 'bi-youtube' : (r.type === 'pdf' ? 'bi-file-pdf' : 'bi-link-45deg');
+            const icon = r.type === 'youtube' ? 'bi-youtube' : (r.type === 'pdf' ? 'bi-file-pdf' : (r.type === 'slides' ? 'bi-file-earmark-slides' : 'bi-link-45deg'));
             a.innerHTML = '<i class="bi ' + icon + ' me-1"></i>' + escapeHtml(r.title || 'Resource');
             list.appendChild(a);
         });
@@ -436,6 +460,7 @@
 .resource-icon.youtube { background: rgba(255,0,0,0.1); color: #f00; }
 .resource-icon.pdf { background: rgba(239,68,68,0.1); color: #ef4444; }
 .resource-icon.link { background: rgba(6,182,212,0.1); color: #06b6d4; }
+.resource-icon.slides { background: rgba(234,88,12,0.1); color: #ea580c; }
 .media-viewer-section { min-height: 200px; }
 .media-tabs { display: flex; gap: 0.5rem; }
 .media-tab { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border: none; background: #f1f5f9; border-radius: 8px; font-size: 0.85rem; cursor: pointer; }
