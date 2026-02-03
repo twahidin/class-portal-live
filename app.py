@@ -3421,12 +3421,12 @@ def create_assignment():
                 reference_materials_content, reference_materials_name = get_file_content(reference_materials, reference_materials_drive_id, 'reference materials')
                 rubrics_content, rubrics_name = get_file_content(rubrics, rubrics_drive_id, 'rubrics')
             except Exception as e:
-            return render_template('teacher_create_assignment.html',
-                                 teacher=teacher,
-                                 classes=classes,
-                                 teaching_groups=teaching_groups,
-                                 teacher_modules=teacher_modules,
-                                 error=str(e))
+                return render_template('teacher_create_assignment.html',
+                                     teacher=teacher,
+                                     classes=classes,
+                                     teaching_groups=teaching_groups,
+                                     teacher_modules=teacher_modules,
+                                     error=str(e))
             
             # Extract text from PDFs for cost-effective AI processing
             question_paper_text = extract_text_from_pdf(question_paper_content) if question_paper_content else ""
