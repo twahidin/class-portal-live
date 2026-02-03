@@ -66,7 +66,11 @@ def _get_embedding_function():
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
             return None
-        return ef.OpenAIEmbeddingFunction(api_key=api_key, model_name="text-embedding-3-small")
+        # ChromaDB version compatibility: newer uses model_name, older may only accept api_key
+        try:
+            return ef.OpenAIEmbeddingFunction(api_key=api_key, model_name="text-embedding-3-small")
+        except TypeError:
+            return ef.OpenAIEmbeddingFunction(api_key=api_key)
     except Exception as e:
         logger.warning("OpenAI embedding function not available: %s", e)
         return None
