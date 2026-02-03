@@ -85,12 +85,16 @@ def _get_chroma_client():
     """Return persistent ChromaDB client. Data stored under data/chromadb."""
     try:
         import chromadb
+        from chromadb.config import Settings
     except ImportError:
         logger.warning("chromadb not installed; run: pip install chromadb")
         return None
     data_dir = os.getenv("CHROMA_DATA_PATH", os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chromadb"))
     os.makedirs(data_dir, exist_ok=True)
-    return chromadb.PersistentClient(path=data_dir)
+    return chromadb.PersistentClient(
+        path=data_dir,
+        settings=Settings(anonymized_telemetry=False),
+    )
 
 
 def _collection_name(module_id: str) -> str:
