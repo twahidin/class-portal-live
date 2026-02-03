@@ -4111,6 +4111,35 @@ def teacher_submissions():
             teaching_group_filter = selected_assignment.get('target_group_id') or ''
         elif selected_assignment.get('target_type') == 'class':
             class_filter = selected_assignment.get('target_class_id') or ''
+
+    # Recent submissions across all assignments (so teacher can find "yesterday's" AI-marked ones)
+    assignment_ids_teacher = [a['assignment_id'] for a in all_teacher_assignments]
+    recent_submissions_raw = list(
+        Submission.find({'assignment_id': {'$in': assignment_ids_teacher}})
+        .sort('submitted_at', -1)
+        .limit(25)
+    )
+    assignment_map = {a['assignment_id']: a for a in all_teacher_assignments}
+    student_ids_recent = list({s['student_id'] for s in recent_submissions_raw})
+    student_map = {st['student_id']: st for st in Student.find({'student_id': {'$in': student_ids_recent}})}
+    recent_submissions = []
+    for s in recent_submissions_raw:
+        a = assignment_map.get(s['assignment_id'], {})
+        st = student_map.get(s['student_id'], {})
+        status = (s.get('status') or 'submitted')
+        feedback_sent = s.get('feedback_sent', False)
+        if status == 'ai_reviewed' and feedback_sent:
+            display_status = 'ai_feedback_sent'
+        elif status in ('submitted', 'ai_reviewed'):
+            display_status = 'pending'
+        else:
+            display_status = status
+        recent_submissions.append({
+            'submission': s,
+            'assignment': a,
+            'student': st,
+            'display_status': display_status,
+        })
     
     return render_template('teacher_submissions.html',
                          teacher=teacher,
@@ -4122,7 +4151,8 @@ def teacher_submissions():
                          teaching_groups=teaching_groups,
                          classes_for_dropdown=classes_for_dropdown,
                          teaching_group_filter=teaching_group_filter,
-                         class_filter=class_filter)
+                         class_filter=class_filter,
+                         recent_submissions=recent_submissions)
 
 @app.route('/teacher/submissions/<submission_id>/review', methods=['GET'])
 @app.route('/teacher/review/<submission_id>', methods=['GET'])

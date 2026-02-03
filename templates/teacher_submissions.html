@@ -21,6 +21,58 @@
         {% endif %}
     </div>
     
+    <!-- Recent submissions across all assignments (quick find) -->
+    {% if recent_submissions %}
+    <div class="card mb-4 border-primary">
+        <div class="card-header bg-light">
+            <i class="bi bi-clock-history me-2"></i><strong>Recent submissions</strong>
+            <span class="text-muted small ms-2">— last 25 across all assignments. Use this to find yesterday’s AI-marked work if you’re not sure which assignment.</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Assignment</th>
+                            <th>Student</th>
+                            <th>Submitted</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in recent_submissions %}
+                        <tr>
+                            <td>
+                                <a href="{{ url_for('teacher_submissions', assignment=item.submission.assignment_id, class_id=item.assignment.get('target_class_id') or '', teaching_group=item.assignment.get('target_group_id') or '') }}">{{ item.assignment.get('title') or item.submission.assignment_id }}</a>
+                            </td>
+                            <td>{{ item.student.name or item.submission.student_id }} <small class="text-muted">{{ item.student.student_id or item.submission.student_id }}</small></td>
+                            <td>{% if item.submission.submitted_at %}{{ (item.submission.submitted_at|sgt).strftime('%d %b %Y, %H:%M') }} SGT{% else %}—{% endif %}</td>
+                            <td>
+                                {% if item.display_status == 'ai_feedback_sent' %}
+                                <span class="badge bg-info"><i class="bi bi-robot me-1"></i>AI Feedback Sent</span>
+                                {% elif item.display_status == 'pending' %}
+                                <span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending Review</span>
+                                {% elif item.display_status in ('reviewed', 'approved') %}
+                                <span class="badge bg-success">Reviewed</span>
+                                {% elif item.display_status == 'rejected' %}
+                                <span class="badge bg-danger">Rejected</span>
+                                {% else %}
+                                <span class="badge bg-secondary">{{ item.display_status }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="{{ url_for('review_submission', submission_id=item.submission.submission_id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye me-1"></i>Review</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Filters: Teaching Group, Class, Assignment, Status -->
     <div class="card mb-4">
         <div class="card-body">
