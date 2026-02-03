@@ -3,18 +3,8 @@
 {% block title %}Feedback & Summary Report - Teacher Portal{% endblock %}
 
 {% block navbar %}
-<nav class="navbar navbar-expand-lg navbar-dark teacher-nav">
-    <div class="container">
-        <a class="navbar-brand" href="{{ url_for('teacher_dashboard') }}">
-            <i class="bi bi-mortarboard-fill me-2"></i>Teacher Portal
-        </a>
-        <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="{{ url_for('assignment_summary', assignment_id=assignment.assignment_id) }}">Summary</a>
-            <a class="nav-link" href="{{ url_for('teacher_assignments') }}">Assignments</a>
-            <a class="nav-link" href="{{ url_for('teacher_logout') }}">Logout</a>
-        </div>
-    </div>
-</nav>
+{% set active_nav = 'assignments' %}
+{% include 'partials/teacher_navbar.html' %}
 {% endblock %}
 
 {% block content %}
