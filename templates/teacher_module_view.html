@@ -58,11 +58,6 @@
 
     <div class="teacher-flat-map-wrapper">
         <div class="flat-map-container teacher-flat-map" id="teacherMapContainer">
-            <nav class="flat-map-breadcrumb">
-                <span class="text-muted">{{ module.subject }}</span>
-                <span class="mx-2">›</span>
-                <span style="color: #667eea; font-weight: 600;">{{ module.title }}</span>
-            </nav>
             <div class="flat-map-controls">
                 <button type="button" class="flat-control-btn" title="Zoom In" id="teacherZoomIn"><i class="bi bi-zoom-in"></i></button>
                 <button type="button" class="flat-control-btn" title="Zoom Out" id="teacherZoomOut"><i class="bi bi-zoom-out"></i></button>
@@ -180,7 +175,6 @@
 .flat-module-node.dragging { cursor: grabbing; }
 .flat-module-node.dragging .flat-module-circle { cursor: grabbing; }
 .flat-module-icon { color: white; font-size: 1.5rem; position: relative; z-index: 1; }
-.flat-map-breadcrumb { position: absolute; top: 1rem; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.95); padding: 0.5rem 1rem; border-radius: 20px; font-size: 0.85rem; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
 .flat-map-controls { position: absolute; top: 1rem; right: 1rem; display: flex; flex-direction: column; gap: 0.5rem; z-index: 100; }
 .flat-control-btn { width: 40px; height: 40px; border-radius: 10px; border: none; background: rgba(255,255,255,0.95); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; color: #1e293b; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
 .flat-control-btn:hover { background: #667eea; color: white; }
