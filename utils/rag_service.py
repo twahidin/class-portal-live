@@ -94,17 +94,20 @@ def ingest_textbook(
     module_id: str,
     pdf_bytes: bytes,
     title: Optional[str] = None,
+    append: bool = True,
 ) -> Dict[str, Any]:
     """
     Ingest a textbook PDF for a module tree: extract text, chunk, embed, store in ChromaDB.
+    By default appends to existing content so you can upload chapters one at a time.
 
     Args:
-        module_id: Root module_id of the module tree (one textbook per tree).
+        module_id: Root module_id of the module tree.
         pdf_bytes: Raw PDF file bytes.
-        title: Optional display name for the textbook.
+        title: Optional display name for this upload (e.g. chapter name).
+        append: If True (default), add to existing RAG content. If False, replace all content.
 
     Returns:
-        Dict with success, chunk_count, error.
+        Dict with success, chunk_count (this upload), total_chunk_count (total in RAG), error.
     """
     client = _get_chroma_client()
     if not client:
@@ -124,22 +127,36 @@ def ingest_textbook(
 
     coll_name = _collection_name(module_id)
     try:
+        if not append:
+            try:
+                client.delete_collection(coll_name)
+            except Exception:
+                pass
         try:
-            client.delete_collection(coll_name)
+            collection = client.get_collection(name=coll_name, embedding_function=emb_fn)
         except Exception:
-            pass
-        collection = client.create_collection(
-            name=coll_name,
-            embedding_function=emb_fn,
-            metadata={"hnsw:space": "cosine"},
-        )
+            collection = client.create_collection(
+                name=coll_name,
+                embedding_function=emb_fn,
+                metadata={"hnsw:space": "cosine"},
+            )
         ids = [str(uuid.uuid4()) for _ in chunks]
-        metadatas = [{"page_chunk": i + 1, "total_chunks": len(chunks)} for i in range(len(chunks))]
+        upload_title = (title or "Textbook").strip()[:200]
+        metadatas = [
+            {"page_chunk": i + 1, "batch_chunks": len(chunks), "upload_title": upload_title}
+            for i in range(len(chunks))
+        ]
         collection.add(ids=ids, documents=chunks, metadatas=metadatas)
-        return {"success": True, "chunk_count": len(chunks), "title": title or "Textbook"}
+        total = collection.count()
+        return {
+            "success": True,
+            "chunk_count": len(chunks),
+            "total_chunk_count": total,
+            "title": title or "Textbook",
+        }
     except Exception as e:
         logger.exception("Error ingesting textbook for module %s: %s", module_id, e)
-        return {"success": False, "error": str(e), "chunk_count": 0}
+        return {"success": False, "error": str(e), "chunk_count": 0, "total_chunk_count": 0}
 
 
 def query_textbook(

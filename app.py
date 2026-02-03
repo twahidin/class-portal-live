@@ -5821,6 +5821,7 @@ def module_textbook(module_id):
             'name': doc.get('name', '') if doc else '',
             'file_name': doc.get('file_name', '') if doc else '',
             'chunk_count': doc.get('chunk_count', 0) if doc else 0,
+            'upload_count': doc.get('upload_count', 0) if doc else 0,
             'updated_at': doc.get('updated_at').isoformat() if doc and doc.get('updated_at') else None,
         })
 
@@ -5840,9 +5841,10 @@ def module_textbook(module_id):
         pdf_bytes = f.read()
         if len(pdf_bytes) < 100:
             return jsonify({'error': 'File is too small or empty'}), 400
-        result = rag_service.ingest_textbook(module_id, pdf_bytes, title=title)
+        result = rag_service.ingest_textbook(module_id, pdf_bytes, title=title, append=True)
         if not result.get('success'):
             return jsonify({'error': result.get('error', 'Ingest failed')}), 500
+        total_chunks = result.get('total_chunk_count', result.get('chunk_count', 0))
         ModuleTextbook.update_one(
             {'module_id': module_id},
             {
@@ -5850,15 +5852,17 @@ def module_textbook(module_id):
                     'module_id': module_id,
                     'name': title,
                     'file_name': f.filename,
-                    'chunk_count': result.get('chunk_count', 0),
+                    'chunk_count': total_chunks,
                     'updated_at': datetime.utcnow(),
                 },
+                '$inc': {'upload_count': 1},
             },
             upsert=True,
         )
         return jsonify({
             'success': True,
             'chunk_count': result.get('chunk_count', 0),
+            'total_chunk_count': total_chunks,
             'name': title,
         })
     except Exception as e:

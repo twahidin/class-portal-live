@@ -89,7 +89,11 @@ The app can store a textbook PDF per module (RAG) so the AI tutor can answer fro
 
 1. **Build**: The repo includes `nixpacks.toml` so Nixpacks installs GCC/gnumake before `pip install`. That allows `chromadb` to compile and the build to succeed. No extra step needed.
 2. **Env**: Set `OPENAI_API_KEY` in your web service variables (used for embedding textbook chunks). Without it, textbook upload will show "Embeddings not available (set OPENAI_API_KEY)".
-3. **Storage**: ChromaDB data is written under `data/chromadb`. On Railway the filesystem is ephemeral by default, so textbook data may be lost on redeploy unless you attach a [Railway Volume](https://docs.railway.app/reference/volumes) and set `CHROMA_DATA_PATH` to a path inside that volume.
+3. **Storage (optional, for persistent textbooks)**: ChromaDB data is written under `data/chromadb` by default. On Railway the filesystem is ephemeral, so textbook data may be lost on redeploy. To persist it using a [Railway Volume](https://docs.railway.app/guides/volumes):
+   - In your project, create a **Volume** (e.g. via **⌘K** or right‑click on the canvas → Add Volume) and attach it to your **web service**.
+   - When Railway asks for the **mount path**, choose a path where the volume will appear in the container, e.g. **`/data`**. (Railway will then set `RAILWAY_VOLUME_MOUNT_PATH` to this value automatically.)
+   - In your web service → **Variables**, add **`CHROMA_DATA_PATH`** = **`/data/chromadb`** (i.e. the same path you used as the mount path, plus `/chromadb`). The app will then store ChromaDB data on the volume, and it will survive redeploys.
+   - If you mounted the volume at a different path (e.g. `/app/data`), set `CHROMA_DATA_PATH` to that path plus `/chromadb` (e.g. `/app/data/chromadb`).
 
 ### To Link MongoDB:
 1. Click on your web service

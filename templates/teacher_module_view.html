@@ -61,20 +61,20 @@
             <div id="textbook-status" class="mb-3">
                 <span class="text-muted">Loading…</span>
             </div>
-            <div id="textbook-upload-area" style="display: none;">
+            <div id="textbook-upload-area">
                 <form id="textbook-upload-form" enctype="multipart/form-data">
                     <div class="mb-2">
                         <label class="form-label small">Title (optional)</label>
-                        <input type="text" class="form-control form-control-sm" id="textbook-title" name="title" placeholder="e.g. Mathematics Year 3 Textbook">
+                        <input type="text" class="form-control form-control-sm" id="textbook-title" name="title" placeholder="e.g. Chapter 1 or Mathematics Year 3">
                     </div>
                     <div class="mb-2">
                         <input type="file" class="form-control form-control-sm" id="textbook-file" name="textbook_file" accept=".pdf" required>
                     </div>
                     <button type="submit" class="btn btn-primary btn-sm" id="textbook-upload-btn">
-                        <i class="bi bi-upload me-1"></i>Upload PDF
+                        <i class="bi bi-upload me-1"></i>Add PDF (chapter or full book)
                     </button>
                 </form>
-                <p class="form-text small mb-0">Requires OPENAI_API_KEY. Large PDFs may take a minute to process.</p>
+                <p class="form-text small mb-0">Upload as many PDFs as you like—each upload is added to the RAG (e.g. chapter by chapter). Requires OPENAI_API_KEY.</p>
             </div>
             <div id="textbook-delete-area" style="display: none;">
                 <button type="button" class="btn btn-outline-danger btn-sm" id="textbook-delete-btn">
@@ -597,11 +597,13 @@
             .then(function(d) {
                 if (d.has_textbook) {
                     textbookStatus.innerHTML = '<i class="bi bi-journal-check text-success me-1"></i><strong>' + (d.name || 'Textbook') + '</strong>';
-                    if (d.chunk_count) textbookStatus.innerHTML += ' <span class="text-muted">(' + d.chunk_count + ' chunks)</span>';
-                    textbookUploadArea.style.display = 'none';
+                    if (d.chunk_count) textbookStatus.innerHTML += ' <span class="text-muted">(' + d.chunk_count + ' chunks';
+                    if (d.upload_count > 0) textbookStatus.innerHTML += ' · ' + d.upload_count + ' upload' + (d.upload_count === 1 ? '' : 's');
+                    if (d.chunk_count) textbookStatus.innerHTML += ')</span>';
+                    textbookUploadArea.style.display = 'block';
                     textbookDeleteArea.style.display = 'block';
                 } else {
-                    textbookStatus.innerHTML = '<span class="text-muted">No textbook attached. Upload a PDF so the AI tutor can answer from it.</span>';
+                    textbookStatus.innerHTML = '<span class="text-muted">No content yet. Upload a PDF (or add chapters one at a time) so the AI tutor can answer from it.</span>';
                     textbookUploadArea.style.display = 'block';
                     textbookDeleteArea.style.display = 'none';
                 }
@@ -623,7 +625,14 @@
         fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/textbook', { method: 'POST', body: formData })
             .then(function(r) { return r.json().catch(function() { return {}; }); })
             .then(function(d) {
-                if (d.success) { showTextbookMessage('Textbook uploaded: ' + (d.chunk_count || 0) + ' chunks indexed.'); loadTextbookStatus(); document.getElementById('textbook-file').value = ''; }
+                if (d.success) {
+                    var msg = d.total_chunk_count != null
+                        ? 'Added ' + (d.chunk_count || 0) + ' chunks; total ' + d.total_chunk_count + ' chunks.'
+                        : 'Uploaded: ' + (d.chunk_count || 0) + ' chunks indexed.';
+                    showTextbookMessage(msg);
+                    loadTextbookStatus();
+                    document.getElementById('textbook-file').value = '';
+                }
                 else showTextbookMessage(d.error || 'Upload failed', true);
             })
             .catch(function() { showTextbookMessage('Network error', true); })
