@@ -5,7 +5,7 @@ from functools import wraps
 import os
 import io
 from datetime import datetime, timedelta, timezone
-from models import db, Student, Teacher, Message, Class, TeachingGroup, Assignment, Submission, Module, ModuleResource, StudentModuleMastery, StudentLearningProfile, LearningSession
+from models import db, Student, Teacher, Message, Class, TeachingGroup, Assignment, Submission, Module, ModuleResource, ModuleTextbook, StudentModuleMastery, StudentLearningProfile, LearningSession
 from utils.auth import hash_password, verify_password, validate_password, generate_assignment_id, generate_submission_id, encrypt_api_key, decrypt_api_key
 from utils.ai_marking import get_teacher_ai_service, mark_submission
 from utils.google_drive import get_teacher_drive_manager, upload_assignment_file
@@ -17,6 +17,7 @@ from utils.module_ai import (
     generate_interactive_assessment,
     analyze_writing_submission,
 )
+from utils import rag_service
 import logging
 import math
 import uuid
@@ -1385,6 +1386,11 @@ def student_submit_files():
                     {'submission_id': submission_id},
                     {'$set': update_fields}
                 )
+                # Update profile/mastery when assignment is linked to module and feedback is sent
+                if update_fields.get('feedback_sent'):
+                    submission_after = Submission.find_one({'submission_id': submission_id})
+                    if submission_after:
+                        _update_profile_and_mastery_from_assignment(session['student_id'], assignment, submission_after)
         except Exception as e:
             logger.error(f"AI feedback error: {e}")
         
@@ -1956,6 +1962,14 @@ def learning_chat():
             agent = None
 
         if agent:
+            root_module_id = root_module.get('module_id')
+            textbook_context = None
+            if root_module_id:
+                rag_result = rag_service.query_textbook(root_module_id, message or module.get('title', ''))
+                if rag_result.get('success') and rag_result.get('chunks'):
+                    textbook_context = "\n\n---\n\n".join(
+                        c.get('content', '') for c in rag_result['chunks'] if c.get('content')
+                    )
             result = agent.chat(
                 message=message,
                 student_id=session['student_id'],
@@ -1964,6 +1978,8 @@ def learning_chat():
                 student_profile=profile,
                 chat_history=chat_history,
                 image_data=writing_bytes,
+                root_module_id=root_module_id,
+                textbook_context=textbook_context,
             )
             if not result.get('success') and 'error' in result and 'response' not in result:
                 return jsonify({'error': result.get('error', 'Agent error')}), 500
@@ -2003,12 +2019,21 @@ def learning_chat():
             })
 
         # Fallback: raw Claude (no tools)
+        root_module_id = root_module.get('module_id')
+        textbook_context = None
+        if root_module_id:
+            rag_result = rag_service.query_textbook(root_module_id, message or module.get('title', ''))
+            if rag_result.get('success') and rag_result.get('chunks'):
+                textbook_context = "\n\n---\n\n".join(
+                    c.get('content', '') for c in rag_result['chunks'] if c.get('content')
+                )
         result = assess_student_understanding(
             student_message=message,
             module=module,
             chat_history=chat_history,
             student_profile=profile,
             writing_image=writing_bytes,
+            textbook_context=textbook_context,
         )
 
         if 'error' in result and 'response' not in result:
@@ -3357,12 +3382,14 @@ def create_assignment():
                                          teacher=teacher,
                                          classes=classes,
                                          teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
                                          error='Question paper PDF is required')
                 if not rubrics_drive_id and (not rubrics or not rubrics.filename):
                     return render_template('teacher_create_assignment.html',
                                          teacher=teacher,
                                          classes=classes,
                                          teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
                                          error='Rubrics PDF is required for rubric-based marking')
             else:
                 # For standard: question paper and answer key are required
@@ -3371,12 +3398,14 @@ def create_assignment():
                                          teacher=teacher,
                                          classes=classes,
                                          teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
                                          error='Question paper PDF is required')
                 if not answer_key_drive_id and (not answer_key or not answer_key.filename):
                     return render_template('teacher_create_assignment.html',
                                          teacher=teacher,
                                          classes=classes,
                                          teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
                                          error='Answer key PDF is required')
             
             assignment_id = generate_assignment_id()
@@ -3392,11 +3421,12 @@ def create_assignment():
                 reference_materials_content, reference_materials_name = get_file_content(reference_materials, reference_materials_drive_id, 'reference materials')
                 rubrics_content, rubrics_name = get_file_content(rubrics, rubrics_drive_id, 'rubrics')
             except Exception as e:
-                return render_template('teacher_create_assignment.html',
-                                     teacher=teacher,
-                                     classes=classes,
-                                     teaching_groups=teaching_groups,
-                                     error=str(e))
+            return render_template('teacher_create_assignment.html',
+                                 teacher=teacher,
+                                 classes=classes,
+                                 teaching_groups=teaching_groups,
+                                 teacher_modules=teacher_modules,
+                                 error=str(e))
             
             # Extract text from PDFs for cost-effective AI processing
             question_paper_text = extract_text_from_pdf(question_paper_content) if question_paper_content else ""
@@ -3538,6 +3568,7 @@ def create_assignment():
                 'enable_question_help': data.get('enable_question_help') == 'on',
                 'question_help_limit': int(data.get('question_help_limit', 5)),
                 'notify_student_telegram': data.get('notify_student_telegram') == 'on',
+                'linked_module_id': (data.get('linked_module_id') or '').strip() or None,  # Link to module tree for profile/mastery
                 'created_at': datetime.utcnow(),
                 'updated_at': datetime.utcnow()
             }
@@ -3575,12 +3606,14 @@ def create_assignment():
                                  teacher=teacher,
                                  classes=classes,
                                  teaching_groups=teaching_groups,
+                                 teacher_modules=teacher_modules,
                                  error=f'Failed to create assignment: {str(e)}')
     
     return render_template('teacher_create_assignment.html',
                          teacher=teacher,
                          classes=classes,
-                         teaching_groups=teaching_groups)
+                         teaching_groups=teaching_groups,
+                         teacher_modules=teacher_modules)
 
 @app.route('/teacher/assignments/<assignment_id>/edit', methods=['GET', 'POST'])
 @teacher_required
@@ -3619,6 +3652,13 @@ def edit_assignment(assignment_id):
     
     # Get teaching groups for this teacher
     teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
+    
+    # Teacher's module trees (for linking assignment to module)
+    teacher_modules = []
+    if _teacher_has_module_access(session['teacher_id']):
+        teacher_modules = list(
+            Module.find({'teacher_id': session['teacher_id'], 'parent_id': None}).sort('title', 1)
+        )
     
     if request.method == 'POST':
         try:
@@ -3661,6 +3701,7 @@ def edit_assignment(assignment_id):
                 'enable_question_help': data.get('enable_question_help') == 'on',
                 'question_help_limit': int(data.get('question_help_limit', 5)),
                 'notify_student_telegram': data.get('notify_student_telegram') == 'on',
+                'linked_module_id': (data.get('linked_module_id') or '').strip() or None,
                 'updated_at': datetime.utcnow()
             }
             
@@ -3788,7 +3829,8 @@ def edit_assignment(assignment_id):
                          teacher=teacher,
                          assignment=assignment,
                          classes=classes,
-                         teaching_groups=teaching_groups)
+                         teaching_groups=teaching_groups,
+                         teacher_modules=teacher_modules)
 
 @app.route('/teacher/assignments/<assignment_id>/file/<file_type>')
 @teacher_required
@@ -4460,6 +4502,10 @@ def send_feedback_to_student(submission_id):
                 'reviewed_at': datetime.utcnow()
             }}
         )
+        # Update student module mastery and learning profile when assignment is linked to a module
+        submission_after = Submission.find_one({'submission_id': submission_id})
+        if submission_after:
+            _update_profile_and_mastery_from_assignment(submission['student_id'], assignment, submission_after)
         
         # Send Telegram notification if student has linked account
         if student and student.get('telegram_id'):
@@ -4619,6 +4665,9 @@ def send_rubric_feedback_to_student(submission_id):
                 'reviewed_at': datetime.utcnow()
             }}
         )
+        submission_after = Submission.find_one({'submission_id': submission_id})
+        if submission_after:
+            _update_profile_and_mastery_from_assignment(submission['student_id'], assignment, submission_after)
         
         # Send Telegram notification if student has linked account
         if student and student.get('telegram_id'):
@@ -5402,6 +5451,68 @@ def _calculate_tree_mastery(root_module_id, student_id):
     m = StudentModuleMastery.find_one({'student_id': student_id, 'module_id': root_module_id})
     return m.get('mastery_score', 0) if m else 0
 
+def _update_profile_and_mastery_from_assignment(student_id, assignment, submission):
+    """
+    When an assignment is linked to a module and feedback has been sent, update the student's
+    module mastery and learning profile from the assignment score. Builds profile from every assignment.
+    """
+    linked_module_id = assignment.get('linked_module_id')
+    if not linked_module_id:
+        return
+    total_marks = assignment.get('total_marks') or 100
+    if total_marks <= 0:
+        return
+    display_marks, percentage = _submission_display_marks(submission, total_marks)
+    if display_marks is None and percentage <= 0:
+        return
+    try:
+        # Update module mastery for the linked (root) module: set to assignment score %
+        score_int = round(percentage)
+        StudentModuleMastery.update_one(
+            {'student_id': student_id, 'module_id': linked_module_id},
+            {
+                '$set': {
+                    'mastery_score': min(100, max(0, score_int)),
+                    'status': 'mastered' if score_int >= 100 else ('in_progress' if score_int > 0 else 'not_started'),
+                    'updated_at': datetime.utcnow(),
+                    'last_activity': datetime.utcnow(),
+                },
+                '$inc': {'time_spent_minutes': 1},
+            },
+            upsert=True,
+        )
+        # Optionally propagate to parent (root is top-level so no parent)
+        module = Module.find_one({'module_id': linked_module_id})
+        if module and module.get('parent_id'):
+            _propagate_mastery_to_parent(student_id, module['parent_id'])
+
+        # Update learning profile (strengths/weaknesses) by subject
+        subject = assignment.get('subject') or 'General'
+        topic = assignment.get('title') or (module.get('title') if module else 'Assignment')
+        profile = StudentLearningProfile.find_one({'student_id': student_id, 'subject': subject})
+        update_ops = {'$set': {'last_updated': datetime.utcnow()}}
+        if percentage >= 80:
+            entry = {'topic': topic, 'confidence': percentage / 100.0, 'recorded_at': datetime.utcnow().isoformat(), 'source': 'assignment'}
+            if profile:
+                update_ops.setdefault('$push', {})['strengths'] = entry
+            else:
+                update_ops.setdefault('$set', {})['strengths'] = [entry]
+        elif percentage < 50:
+            entry = {'topic': topic, 'notes': f'Assignment score {round(percentage)}%', 'recorded_at': datetime.utcnow().isoformat(), 'source': 'assignment'}
+            if profile:
+                update_ops.setdefault('$push', {})['weaknesses'] = entry
+            else:
+                update_ops.setdefault('$set', {})['weaknesses'] = [entry]
+        if '$push' in update_ops or ('$set' in update_ops and any(k in update_ops['$set'] for k in ('strengths', 'weaknesses'))):
+            StudentLearningProfile.update_one(
+                {'student_id': student_id, 'subject': subject},
+                update_ops,
+                upsert=True,
+            )
+    except Exception as e:
+        logger.warning("Error updating profile/mastery from assignment: %s", e)
+
+
 def _update_student_profile(student_id, subject, updates):
     """Update student's learning profile with new insights."""
     profile = StudentLearningProfile.find_one({'student_id': student_id, 'subject': subject})
@@ -5450,6 +5561,9 @@ def teacher_modules():
     )
     for module in root_modules:
         module['total_modules'] = len(_get_all_module_ids_in_tree(module['module_id']))
+        tb = ModuleTextbook.find_one({'module_id': module['module_id']})
+        module['has_textbook'] = bool(tb) and rag_service.textbook_has_content(module['module_id'])
+        module['textbook_name'] = (tb.get('name', '') if tb else '') or ''
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
     return render_template('teacher_modules.html', modules=root_modules, teacher=teacher)
 
@@ -5687,6 +5801,70 @@ def publish_module(module_id):
     for mid in ids:
         Module.update_one({'module_id': mid}, {'$set': {'status': 'published', 'updated_at': datetime.utcnow()}})
     return jsonify({'success': True})
+
+
+@app.route('/teacher/modules/<module_id>/textbook', methods=['GET', 'POST', 'DELETE'])
+@teacher_required
+def module_textbook(module_id):
+    """Get textbook status, upload a textbook PDF for RAG, or delete the textbook."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    root = Module.find_one({'module_id': module_id, 'teacher_id': session['teacher_id']})
+    if not root:
+        return jsonify({'error': 'Module not found'}), 404
+
+    if request.method == 'GET':
+        doc = ModuleTextbook.find_one({'module_id': module_id})
+        has_content = rag_service.textbook_has_content(module_id)
+        return jsonify({
+            'has_textbook': bool(doc) and has_content,
+            'name': doc.get('name', '') if doc else '',
+            'file_name': doc.get('file_name', '') if doc else '',
+            'chunk_count': doc.get('chunk_count', 0) if doc else 0,
+            'updated_at': doc.get('updated_at').isoformat() if doc and doc.get('updated_at') else None,
+        })
+
+    if request.method == 'DELETE':
+        rag_service.delete_textbook(module_id)
+        ModuleTextbook.delete_one({'module_id': module_id})
+        return jsonify({'success': True})
+
+    # POST: upload PDF
+    if 'textbook_file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    f = request.files['textbook_file']
+    if not f or not f.filename or not f.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Please upload a PDF file'}), 400
+    title = (request.form.get('title') or f.filename or 'Textbook').strip()[:200]
+    try:
+        pdf_bytes = f.read()
+        if len(pdf_bytes) < 100:
+            return jsonify({'error': 'File is too small or empty'}), 400
+        result = rag_service.ingest_textbook(module_id, pdf_bytes, title=title)
+        if not result.get('success'):
+            return jsonify({'error': result.get('error', 'Ingest failed')}), 500
+        ModuleTextbook.update_one(
+            {'module_id': module_id},
+            {
+                '$set': {
+                    'module_id': module_id,
+                    'name': title,
+                    'file_name': f.filename,
+                    'chunk_count': result.get('chunk_count', 0),
+                    'updated_at': datetime.utcnow(),
+                },
+            },
+            upsert=True,
+        )
+        return jsonify({
+            'success': True,
+            'chunk_count': result.get('chunk_count', 0),
+            'name': title,
+        })
+    except Exception as e:
+        logger.exception("Error uploading textbook: %s", e)
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/teacher/modules/<module_id>/mastery')
 @teacher_required

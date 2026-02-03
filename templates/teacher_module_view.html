@@ -50,6 +50,40 @@
         </div>
     </div>
     <p class="text-muted small mt-2">Click any node to edit; right-click to expand or collapse branches. Drag to pan, use buttons to zoom.</p>
+
+    <!-- Textbook RAG: store entire textbook for this module tree -->
+    <div class="card mt-4 shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-journal-book me-2"></i>Textbook (RAG)</span>
+            <small class="text-muted">AI tutor can use this to answer from your textbook</small>
+        </div>
+        <div class="card-body">
+            <div id="textbook-status" class="mb-3">
+                <span class="text-muted">Loading…</span>
+            </div>
+            <div id="textbook-upload-area" style="display: none;">
+                <form id="textbook-upload-form" enctype="multipart/form-data">
+                    <div class="mb-2">
+                        <label class="form-label small">Title (optional)</label>
+                        <input type="text" class="form-control form-control-sm" id="textbook-title" name="title" placeholder="e.g. Mathematics Year 3 Textbook">
+                    </div>
+                    <div class="mb-2">
+                        <input type="file" class="form-control form-control-sm" id="textbook-file" name="textbook_file" accept=".pdf" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm" id="textbook-upload-btn">
+                        <i class="bi bi-upload me-1"></i>Upload PDF
+                    </button>
+                </form>
+                <p class="form-text small mb-0">Requires OPENAI_API_KEY. Large PDFs may take a minute to process.</p>
+            </div>
+            <div id="textbook-delete-area" style="display: none;">
+                <button type="button" class="btn btn-outline-danger btn-sm" id="textbook-delete-btn">
+                    <i class="bi bi-trash me-1"></i>Remove textbook
+                </button>
+            </div>
+            <div id="textbook-message" class="alert d-none mt-2"></div>
+        </div>
+    </div>
 </div>
 
 <div class="flat-context-menu" id="teacherContextMenu">
@@ -540,6 +574,68 @@
                 else { alert(data.error || 'Delete failed'); btn.disabled = false; }
             })
             .catch(function() { alert('Delete failed'); btn.disabled = false; });
+    });
+
+    // Textbook RAG
+    const moduleId = '{{ module.module_id }}';
+    const textbookStatus = document.getElementById('textbook-status');
+    const textbookUploadArea = document.getElementById('textbook-upload-area');
+    const textbookDeleteArea = document.getElementById('textbook-delete-area');
+    const textbookMessage = document.getElementById('textbook-message');
+
+    function showTextbookMessage(msg, isError) {
+        textbookMessage.textContent = msg;
+        textbookMessage.className = 'alert alert-' + (isError ? 'danger' : 'success') + ' mt-2';
+        textbookMessage.classList.remove('d-none');
+    }
+    function hideTextbookMessage() { textbookMessage.classList.add('d-none'); }
+
+    function loadTextbookStatus() {
+        textbookStatus.innerHTML = '<span class="text-muted">Loading…</span>';
+        fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/textbook')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.has_textbook) {
+                    textbookStatus.innerHTML = '<i class="bi bi-journal-check text-success me-1"></i><strong>' + (d.name || 'Textbook') + '</strong>';
+                    if (d.chunk_count) textbookStatus.innerHTML += ' <span class="text-muted">(' + d.chunk_count + ' chunks)</span>';
+                    textbookUploadArea.style.display = 'none';
+                    textbookDeleteArea.style.display = 'block';
+                } else {
+                    textbookStatus.innerHTML = '<span class="text-muted">No textbook attached. Upload a PDF so the AI tutor can answer from it.</span>';
+                    textbookUploadArea.style.display = 'block';
+                    textbookDeleteArea.style.display = 'none';
+                }
+            })
+            .catch(function() { textbookStatus.innerHTML = '<span class="text-danger">Could not load status</span>'; textbookUploadArea.style.display = 'block'; });
+    }
+    loadTextbookStatus();
+
+    document.getElementById('textbook-upload-form') && document.getElementById('textbook-upload-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const file = document.getElementById('textbook-file').files[0];
+        if (!file) { showTextbookMessage('Please select a PDF file', true); return; }
+        const formData = new FormData();
+        formData.append('textbook_file', file);
+        formData.append('title', document.getElementById('textbook-title').value.trim());
+        const btn = document.getElementById('textbook-upload-btn');
+        btn.disabled = true;
+        hideTextbookMessage();
+        fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/textbook', { method: 'POST', body: formData })
+            .then(function(r) { return r.json().catch(function() { return {}; }); })
+            .then(function(d) {
+                if (d.success) { showTextbookMessage('Textbook uploaded: ' + (d.chunk_count || 0) + ' chunks indexed.'); loadTextbookStatus(); document.getElementById('textbook-file').value = ''; }
+                else showTextbookMessage(d.error || 'Upload failed', true);
+            })
+            .catch(function() { showTextbookMessage('Network error', true); })
+            .finally(function() { btn.disabled = false; });
+    });
+
+    document.getElementById('textbook-delete-btn') && document.getElementById('textbook-delete-btn').addEventListener('click', function() {
+        if (!confirm('Remove the textbook from this module? The AI will no longer use it for answers.')) return;
+        fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/textbook', { method: 'DELETE' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { if (d.success) { loadTextbookStatus(); hideTextbookMessage(); } else showTextbookMessage(d.error || 'Delete failed', true); })
+            .catch(function() { showTextbookMessage('Network error', true); });
     });
 })();
 </script>

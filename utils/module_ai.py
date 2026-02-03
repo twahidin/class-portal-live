@@ -285,6 +285,7 @@ def assess_student_understanding(
     chat_history: List[Dict],
     student_profile: Optional[Dict] = None,
     writing_image: Optional[bytes] = None,
+    textbook_context: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     AI learning agent that assesses student understanding and provides teaching.
@@ -295,6 +296,7 @@ def assess_student_understanding(
         chat_history: Previous messages in this session
         student_profile: Student's learning profile (strengths/weaknesses)
         writing_image: Optional image of student's handwritten work
+        textbook_context: Optional RAG passages from the course textbook to ground answers
 
     Returns:
         Dictionary with response, assessment, and profile updates
@@ -324,11 +326,18 @@ TEACHER'S CUSTOM PROMPT FOR THIS MODULE (follow these instructions):
 {custom_prompt}
 
 """
+        book_block = ""
+        if textbook_context and textbook_context.strip():
+            book_block = f"""
+RELEVANT TEXTBOOK PASSAGES (use these to ground your answer when appropriate):
+{textbook_context}
+
+"""
         system_prompt = f"""You are an expert, patient tutor helping a student learn.
 
 CURRENT MODULE: {module.get('title', 'Unknown')}
 LEARNING OBJECTIVES: {', '.join(module.get('learning_objectives', []))}
-{custom_block}{profile_context}
+{custom_block}{book_block}{profile_context}
 
 YOUR ROLE:
 1. TEACH: Explain concepts clearly, use examples, adapt to student's level
@@ -487,6 +496,93 @@ Respond with valid JSON only:
     except Exception as e:
         logger.error("Error generating assessment: %s", e)
         return {'error': str(e)}
+
+
+def generate_guided_interactive(
+    module: Dict,
+    concept: str,
+    interactive_type: str = "guided_steps",
+) -> Dict[str, Any]:
+    """
+    Generate an on-the-fly interactive to help when the student is unable to understand.
+    Types: guided_steps (step-by-step walkthrough), practice_one (one question with feedback),
+    order_steps (put steps in correct order).
+
+    Args:
+        module: Current module context
+        concept: What the student is struggling with (e.g. "solving 2x + 3 = 7")
+        interactive_type: "guided_steps" | "practice_one" | "order_steps"
+
+    Returns:
+        Structured payload for the frontend to render
+    """
+    client = get_claude_client()
+    if not client:
+        return {'error': 'AI service not available'}
+
+    type_instructions = {
+        "guided_steps": """Create a "do it together" walkthrough: 3-5 short steps. Each step has "instruction" (what the student should do or think) and optional "hint". Student will click "Next" after each step. Include "title" and "message_after" (encouragement when they finish).""",
+        "practice_one": """Create ONE practice item: "question", optional "options" (array of choices for MCQ), "correct_answer" (letter like "B" or the exact short answer), "hint", and "explanation" (shown after they check). Use "title". If no options, student types short answer.""",
+        "order_steps": """Create 3-5 steps that must be in a specific order (e.g. steps to solve an equation). Return "steps" as array of strings in RANDOM order, and "correct_order" as array of 0-based indices (e.g. [2,0,1]). Include "title" and "message_after".""",
+    }
+    instruction = type_instructions.get(
+        interactive_type,
+        type_instructions["guided_steps"],
+    )
+
+    try:
+        system_prompt = f"""You are creating a small interactive to help a student who is struggling.
+
+MODULE: {module.get('title')}
+LEARNING OBJECTIVES: {', '.join(module.get('learning_objectives', []))}
+WHAT THE STUDENT IS STRUGGLING WITH: {concept}
+INTERACTIVE TYPE: {interactive_type}
+
+{instruction}
+
+Respond with valid JSON only. No markdown, no text outside the JSON."""
+
+        schema = {
+            "guided_steps": {
+                "title": "string",
+                "steps": [{"instruction": "string", "hint": "string or null"}],
+                "message_after": "string",
+            },
+            "practice_one": {
+                "title": "string",
+                "question": "string",
+                "options": "array of strings or null for short answer",
+                "correct_answer": "string (letter like B or exact answer)",
+                "hint": "string",
+                "explanation": "string",
+            },
+            "order_steps": {
+                "title": "string",
+                "steps": ["string", "..."],
+                "correct_order": [0, 1, 2],
+                "message_after": "string",
+            },
+        }
+        user_content = f"Generate a {interactive_type} interactive. Schema: {schema.get(interactive_type, schema['guided_steps'])}"
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1500,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}],
+        )
+
+        response_text = message.content[0].text
+        json_match = re.search(r'\{[\s\S]*\}', response_text)
+        if json_match:
+            out = json.loads(json_match.group())
+            out["interactive_type"] = interactive_type
+            return out
+        return {'error': 'Could not generate interactive', 'interactive_type': interactive_type}
+
+    except Exception as e:
+        logger.error("Error generating guided interactive: %s", e)
+        return {'error': str(e), 'interactive_type': interactive_type}
 
 
 def analyze_writing_submission(

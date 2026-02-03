@@ -227,7 +227,8 @@
             a.href = r.url || '#';
             a.target = '_blank';
             a.rel = 'noopener';
-            a.className = 'resource-link small';
+            a.className = 'resource-link small resource-item';
+            if (r.resource_id) a.setAttribute('data-resource-id', r.resource_id);
             const icon = r.type === 'youtube' ? 'bi-youtube' : (r.type === 'pdf' ? 'bi-file-pdf' : (r.type === 'slides' ? 'bi-file-earmark-slides' : 'bi-link-45deg'));
             a.innerHTML = '<i class="bi ' + icon + ' me-1"></i>' + escapeHtml(r.title || 'Resource');
             list.appendChild(a);
@@ -295,6 +296,137 @@
         scrollChat();
     }
 
+    function addGuidedInteractiveFromToolCall(toolCall) {
+        const r = toolCall.result;
+        if (!r || r.error) return;
+        const type = r.interactive_type || 'guided_steps';
+        const wrap = document.createElement('div');
+        wrap.className = 'chat-message assistant tool-guided-interactive';
+        const card = document.createElement('div');
+        card.className = 'bubble border bg-light rounded p-3';
+        card.innerHTML = '<strong class="d-block mb-2"><i class="bi bi-hand-index me-1"></i>' + escapeHtml(r.title || 'Try it') + '</strong>';
+
+        if (type === 'guided_steps' && r.steps && r.steps.length) {
+            const container = document.createElement('div');
+            container.className = 'guided-steps-container';
+            let stepIdx = 0;
+            function showStep() {
+                container.innerHTML = '';
+                const step = r.steps[stepIdx];
+                const stepDiv = document.createElement('div');
+                stepDiv.className = 'mb-2';
+                stepDiv.innerHTML = '<div class="fw-medium mb-1">Step ' + (stepIdx + 1) + ' of ' + r.steps.length + '</div><div class="small">' + escapeHtml(step.instruction || '') + '</div>';
+                if (step.hint) {
+                    const hintBtn = document.createElement('button');
+                    hintBtn.type = 'button';
+                    hintBtn.className = 'btn btn-link btn-sm p-0 mt-1';
+                    hintBtn.textContent = 'Show hint';
+                    hintBtn.addEventListener('click', function() { hintBtn.textContent = escapeHtml(step.hint); hintBtn.classList.add('text-muted'); });
+                    stepDiv.appendChild(hintBtn);
+                }
+                container.appendChild(stepDiv);
+                const nextBtn = document.createElement('button');
+                nextBtn.type = 'button';
+                nextBtn.className = 'btn btn-primary btn-sm mt-2';
+                nextBtn.textContent = stepIdx < r.steps.length - 1 ? 'Next step' : 'Done';
+                nextBtn.addEventListener('click', function() {
+                    stepIdx++;
+                    if (stepIdx < r.steps.length) showStep();
+                    else { container.innerHTML = '<p class="text-success small mb-0 mt-2">' + escapeHtml(r.message_after || 'Well done!') + '</p>'; }
+                });
+                container.appendChild(nextBtn);
+            }
+            showStep();
+            card.appendChild(container);
+        } else if (type === 'practice_one' && r.question) {
+            const form = document.createElement('div');
+            form.className = 'practice-one-form';
+            form.innerHTML = '<div class="mb-2 small">' + escapeHtml(r.question) + '</div>';
+            let answerEl = null;
+            if (r.options && r.options.length) {
+                r.options.forEach(function(opt, i) {
+                    const label = document.createElement('label');
+                    label.className = 'd-block small';
+                    const letter = String.fromCharCode(65 + i);
+                    label.innerHTML = '<input type="radio" name="practice-one" value="' + letter + '"> ' + escapeHtml(opt);
+                    form.appendChild(label);
+                });
+            } else {
+                answerEl = document.createElement('input');
+                answerEl.type = 'text';
+                answerEl.className = 'form-control form-control-sm mt-1';
+                answerEl.placeholder = 'Your answer';
+                form.appendChild(answerEl);
+            }
+            const checkBtn = document.createElement('button');
+            checkBtn.type = 'button';
+            checkBtn.className = 'btn btn-primary btn-sm mt-2';
+            checkBtn.textContent = 'Check';
+            const feedback = document.createElement('div');
+            feedback.className = 'mt-2 small d-none';
+            checkBtn.addEventListener('click', function() {
+                const correct = (r.correct_answer || '').toString().trim();
+                const correctUpper = correct.toUpperCase();
+                const chosen = form.querySelector('input[name="practice-one"]:checked') || answerEl;
+                const val = chosen ? (chosen.value || '').toString().trim() : '';
+                const valUpper = val.toUpperCase();
+                const right = val && (valUpper === correctUpper || val === correct);
+                feedback.classList.remove('d-none');
+                feedback.innerHTML = right ? '<span class="text-success">Correct! </span>' + escapeHtml(r.explanation || '') : '<span class="text-danger">Not quite.</span> ' + (r.hint ? escapeHtml(r.hint) : '') + (r.explanation ? '<br>' + escapeHtml(r.explanation) : '');
+            });
+            form.appendChild(checkBtn);
+            form.appendChild(feedback);
+            card.appendChild(form);
+        } else if (type === 'order_steps' && r.steps && r.steps.length && r.correct_order && r.correct_order.length === r.steps.length) {
+            const list = document.createElement('div');
+            list.className = 'order-steps-list mb-2';
+            const order = r.steps.map(function(_, i) { return i; });
+            function renderOrder() {
+                list.innerHTML = '';
+                order.forEach(function(idx, pos) {
+                    const row = document.createElement('div');
+                    row.className = 'd-flex align-items-center gap-2 mb-1 p-2 border rounded bg-white';
+                    row.innerHTML = '<span class="text-muted">' + (pos + 1) + '.</span> <span class="small flex-grow-1">' + escapeHtml(r.steps[idx]) + '</span>';
+                    const up = document.createElement('button');
+                    up.type = 'button';
+                    up.className = 'btn btn-outline-secondary btn-sm py-0';
+                    up.innerHTML = '<i class="bi bi-arrow-up"></i>';
+                    const down = document.createElement('button');
+                    down.type = 'button';
+                    down.className = 'btn btn-outline-secondary btn-sm py-0';
+                    down.innerHTML = '<i class="bi bi-arrow-down"></i>';
+                    up.addEventListener('click', function() { if (pos > 0) { order[pos] = order[pos - 1]; order[pos - 1] = idx; renderOrder(); } });
+                    down.addEventListener('click', function() { if (pos < order.length - 1) { order[pos] = order[pos + 1]; order[pos + 1] = idx; renderOrder(); } });
+                    row.appendChild(up);
+                    row.appendChild(down);
+                    list.appendChild(row);
+                });
+            }
+            renderOrder();
+            card.appendChild(list);
+            const checkBtn = document.createElement('button');
+            checkBtn.type = 'button';
+            checkBtn.className = 'btn btn-primary btn-sm';
+            checkBtn.textContent = 'Check order';
+            const feedback = document.createElement('div');
+            feedback.className = 'mt-2 small d-none';
+            checkBtn.addEventListener('click', function() {
+                const correct = (r.correct_order || []).join(',');
+                const current = order.join(',');
+                feedback.classList.remove('d-none');
+                if (current === correct) feedback.innerHTML = '<span class="text-success">' + escapeHtml(r.message_after || 'Correct order!') + '</span>';
+                else feedback.innerHTML = '<span class="text-warning">Not quite the right order. Try again!</span>';
+            });
+            card.appendChild(checkBtn);
+            card.appendChild(feedback);
+        } else {
+            card.innerHTML += '<p class="text-muted small mb-0">Could not load this activity.</p>';
+        }
+        wrap.appendChild(card);
+        chatMessages.appendChild(wrap);
+        scrollChat();
+    }
+
     async function sendMessage(text, writingImage) {
         if (!text && !writingImage) return;
         addMessage('student', text || '(Submitted work)');
@@ -316,6 +448,7 @@
                 data.tool_calls.forEach(function(tc) {
                     if (tc.name === 'get_module_resources') addResourceCardsFromToolCall(tc);
                     if (tc.name === 'generate_interactive_quiz') addQuizFromToolCall(tc);
+                    if (tc.name === 'generate_guided_interactive') addGuidedInteractiveFromToolCall(tc);
                 });
             }
 
@@ -419,15 +552,16 @@
         });
     });
 
-    document.querySelectorAll('.resource-item[data-resource-id]').forEach(function(el) {
-        el.addEventListener('click', function() {
-            const id = el.getAttribute('data-resource-id');
-            if (id) fetch('{{ url_for("mark_resource_viewed") }}', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ resource_id: id, session_id: sessionId }),
-            }).catch(function() {});
-        });
+    // Use delegation so resource links added by the agent (tool call) also trigger mark viewed
+    chatMessages.addEventListener('click', function(e) {
+        const el = e.target && (e.target.closest('.resource-item[data-resource-id]'));
+        if (!el) return;
+        const id = el.getAttribute('data-resource-id');
+        if (id) fetch('{{ url_for("mark_resource_viewed") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resource_id: id, session_id: sessionId }),
+        }).catch(function() {});
     });
 
     scrollChat();

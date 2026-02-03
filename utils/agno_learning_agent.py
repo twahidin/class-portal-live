@@ -185,6 +185,43 @@ def record_mistake_pattern(
     return {'recorded': True, 'pattern': pattern}
 
 
+def generate_guided_interactive(
+    module_id: str,
+    concept: str,
+    interactive_type: str = "guided_steps",
+) -> Dict[str, Any]:
+    """
+    Create an on-the-fly interactive when the student is unable to understand.
+    Call this when explanations aren't enough and the student needs to "do it" step-by-step or try one practice.
+    Args: module_id (current leaf module), concept (what they're struggling with, e.g. "solving for x"),
+    interactive_type: "guided_steps" (walk through together), "practice_one" (one question with feedback), "order_steps" (put steps in order).
+    """
+    from models import Module
+    from utils.module_ai import generate_guided_interactive as gen
+    module = Module.find_one({'module_id': module_id})
+    if not module:
+        return {'error': 'Module not found'}
+    return gen(module, concept, interactive_type=interactive_type)
+
+
+def query_textbook(root_module_id: str, query: str) -> Dict[str, Any]:
+    """
+    Query the textbook attached to this module tree for relevant passages.
+    Call this when the student asks about definitions, examples, or content from the course textbook.
+    Use root_module_id from the session context.
+    """
+    try:
+        from utils import rag_service
+        result = rag_service.query_textbook(root_module_id, query, k=5)
+        if not result.get('success') or not result.get('chunks'):
+            return {'passages': [], 'message': 'No relevant textbook passages found.'}
+        passages = [c.get('content', '') for c in result['chunks'] if c.get('content')]
+        return {'passages': passages, 'message': f'Found {len(passages)} relevant passage(s).'}
+    except Exception as e:
+        logger.warning("query_textbook error: %s", e)
+        return {'passages': [], 'message': str(e)}
+
+
 # ============================================================================
 # LEARNING AGENT
 # ============================================================================
@@ -207,21 +244,25 @@ class LearningAgent:
             tools=[
                 get_module_resources,
                 generate_interactive_quiz,
+                generate_guided_interactive,
                 update_student_mastery,
                 record_student_strength,
                 record_student_weakness,
                 record_mistake_pattern,
+                query_textbook,
             ],
-            description="Expert tutor that teaches, assesses, and tracks student learning. You can fetch module resources and generate quizzes during the conversation.",
+            description="Expert tutor that teaches, assesses, and tracks student learning. You can fetch module resources, query the textbook (RAG), generate quizzes, and create on-the-fly interactives when the student is struggling.",
             instructions=[
                 "You are a patient, encouraging tutor helping a student learn.",
                 "Adapt your teaching to the student's level and learning profile.",
+                "When the student is unable to understand after your explanation—e.g. they say 'I still don't get it', 'can you break it down?', 'I'm confused'—use generate_guided_interactive(module_id, concept, interactive_type) to create a small interactive: use 'guided_steps' for a step-by-step walkthrough they do with you, 'practice_one' for one practice question with immediate feedback, or 'order_steps' for putting steps in the right order. Pass the concept or topic they're stuck on (e.g. 'solving 2x + 3 = 7'). Then briefly say you're showing a short activity to try together.",
+                "When a textbook is attached to this module tree, use query_textbook(root_module_id, query) to pull relevant passages—e.g. when the student asks for a definition, an example from the book, or 'what does the textbook say'. Use the student's question or the current topic as the query. Then teach using those passages.",
                 "Pull and show resources so they can be viewed: call get_module_resources(module_id) when the student asks for videos, materials, something to watch/read, or what they can use for this topic. Also call it when they greet you or ask what to do—so they see the list of videos, PDFs, and links in the chat.",
                 "When you want to check understanding with a short quiz, use generate_interactive_quiz(module_id, difficulty, question_type) and then present the questions to the student. Tell them you're showing an interactive quiz.",
                 "After the student answers correctly, use update_student_mastery with a positive change (e.g. 5). When they make a mistake, use a small negative change and record_mistake_pattern or record_student_weakness if relevant.",
                 "Use record_student_strength when they show clear mastery of a topic.",
                 "Never give answers directly—guide them to discover. Be encouraging and celebrate progress.",
-                "Always use the student_id, module_id, and subject provided in the session context when calling tools.",
+                "Always use the student_id, module_id, root_module_id, and subject provided in the session context when calling tools.",
             ],
             markdown=True,
         )
@@ -233,6 +274,8 @@ class LearningAgent:
         subject: str,
         student_profile: Optional[Dict] = None,
         chat_history: Optional[List[Dict]] = None,
+        root_module_id: Optional[str] = None,
+        textbook_context: Optional[str] = None,
     ) -> str:
         profile_text = ""
         if student_profile:
@@ -262,13 +305,23 @@ TEACHER'S CUSTOM PROMPT FOR THIS MODULE (follow these instructions when teaching
 {custom_prompt}
 
 """
+        root_line = f"- root_module_id: {root_module_id}" if root_module_id else "- root_module_id: (same as module_id for root)"
+        book_block = ""
+        if textbook_context and textbook_context.strip():
+            book_block = f"""
+RELEVANT TEXTBOOK PASSAGES (use these to ground your answer):
+{textbook_context}
+
+"""
         return f"""CURRENT SESSION (use these values when calling tools):
 - student_id: {student_id}
 - module_id: {module.get('module_id')}
+{root_line}
 - subject: {subject}
 - Module title: {module.get('title')}
 - Learning objectives: {', '.join(module.get('learning_objectives', []))}
 {custom_block}{profile_text}
+{book_block}
 {history_text}
 """
 
@@ -281,14 +334,19 @@ TEACHER'S CUSTOM PROMPT FOR THIS MODULE (follow these instructions when teaching
         student_profile: Optional[Dict] = None,
         chat_history: Optional[List[Dict]] = None,
         image_data: Optional[bytes] = None,
+        root_module_id: Optional[str] = None,
+        textbook_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a student message. The agent may call tools to pull resources
         or generate a quiz; tool_calls are returned so the frontend can render them.
+        textbook_context: optional pre-fetched RAG passages to inject.
         """
         try:
             context = self._session_context(
-                student_id, module, subject, student_profile, chat_history
+                student_id, module, subject, student_profile, chat_history,
+                root_module_id=root_module_id or module.get('module_id'),
+                textbook_context=textbook_context,
             )
             user_input = f"{context}\n\nSTUDENT MESSAGE: {message}"
 

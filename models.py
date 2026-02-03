@@ -35,6 +35,7 @@ class Database:
         self.db.teaching_groups.create_index([('class_id', 1), ('teacher_id', 1)])
         self.db.assignments.create_index([('teacher_id', 1), ('subject', 1)])
         self.db.assignments.create_index('assignment_id', unique=True)
+        self.db.assignments.create_index('linked_module_id', sparse=True)
         self.db.submissions.create_index([('student_id', 1), ('assignment_id', 1)])
         self.db.submissions.create_index([('assignment_id', 1), ('status', 1)])
         self.db.submissions.create_index('submission_id', unique=True)
@@ -63,6 +64,8 @@ class Database:
 
         # Module access allocation (admin: which teachers/classes can use learning modules)
         self.db.module_access.create_index('config_id', unique=True)
+        # Module textbooks (RAG: one textbook PDF per module tree)
+        self.db.module_textbooks.create_index('module_id', unique=True)
         # Python Lab access (admin: which classes/teaching groups can use Python Lab)
         self.db.python_lab_access.create_index('config_id', unique=True)
 
@@ -346,6 +349,29 @@ class StudentLearningProfile:
     @staticmethod
     def update_one(query, update, upsert=False):
         return db.db.student_learning_profiles.update_one(query, update, upsert=upsert)
+
+
+class ModuleTextbook:
+    """RAG textbook metadata per module tree (one textbook per root module)."""
+    @staticmethod
+    def find_one(query):
+        return db.db.module_textbooks.find_one(query)
+
+    @staticmethod
+    def find(query):
+        return db.db.module_textbooks.find(query)
+
+    @staticmethod
+    def insert_one(document):
+        return db.db.module_textbooks.insert_one(document).inserted_id
+
+    @staticmethod
+    def update_one(query, update, upsert=False):
+        return db.db.module_textbooks.update_one(query, update, upsert=upsert)
+
+    @staticmethod
+    def delete_one(query):
+        return db.db.module_textbooks.delete_one(query)
 
 
 class LearningSession:

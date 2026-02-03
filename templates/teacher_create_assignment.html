@@ -135,6 +135,18 @@
                             <textarea class="form-control" id="instructions" name="instructions" rows="3"
                                       placeholder="Add any special instructions for students..."></textarea>
                         </div>
+                        {% if teacher_modules is defined and teacher_modules %}
+                        <div class="mb-3">
+                            <label for="linked_module_id" class="form-label">Link to module (optional)</label>
+                            <select class="form-select" id="linked_module_id" name="linked_module_id">
+                                <option value="">— No link —</option>
+                                {% for mod in teacher_modules %}
+                                <option value="{{ mod.module_id }}">{{ mod.title }} ({{ mod.subject }}{% if mod.year_level %} · {{ mod.year_level }}{% endif %})</option>
+                                {% endfor %}
+                            </select>
+                            <small class="form-text text-muted">Linking to a module updates the student's mastery and learning profile when feedback is sent. You can link to draft (unpublished) modules.</small>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
                 
