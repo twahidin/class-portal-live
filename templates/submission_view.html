@@ -62,7 +62,7 @@
                     </div>
                 </div>
                 <div class="col-md-4 text-md-end mt-3 mt-md-0">
-                    {% if submission.get('feedback_sent', False) %}
+                    {% if submission.get('feedback_sent', False) and assignment.marking_type != 'rubric' %}
                     <div class="d-flex flex-wrap gap-2 justify-content-md-end mb-2">
                         <button type="button" class="btn btn-primary" id="btn-send-corrections" 
                                 data-submission-id="{{ submission.submission_id }}"
@@ -278,23 +278,21 @@
                             </table>
                         </div>
                         {% elif is_rubric and criteria %}
-                        <!-- Rubric: same structure as teacher review -->
+                        <!-- Rubric: criteria assessment (no correction/challenge column; students can submit a new version instead) -->
                         <h6 class="mb-2"><i class="bi bi-list-check me-2"></i>Rubric Criteria Assessment</h6>
                         <div class="table-responsive">
                             <table class="table table-sm table-bordered feedback-table">
                                 <thead class="table-light">
                                     <tr>
-                                        <th style="width: 12%;">Criterion</th>
-                                        <th style="width: 28%;">Reasoning for Mark</th>
-                                        <th style="width: 28%;">Feedback / Area for Improvement</th>
-                                        <th style="width: 12%;">Marks</th>
-                                        <th style="width: 20%;">Your correction / challenge</th>
+                                        <th style="width: 15%;">Criterion</th>
+                                        <th style="width: 35%;">Reasoning for Mark</th>
+                                        <th style="width: 35%;">Feedback / Area for Improvement</th>
+                                        <th style="width: 15%;">Marks</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for criterion in criteria %}
                                     {% set teacher_c = teacher_feedback.get('criteria', {}).get(criterion.name|string, {}) %}
-                                    {% set c_correction = student_corrections.get('criteria', {}).get(criterion.name|string, '') %}
                                     <tr>
                                         <td class="fw-bold">{{ criterion.name }}</td>
                                         <td class="small">
@@ -312,13 +310,6 @@
                                             <span class="text-muted">—/{{ mx }}</span>
                                             {% endif %}
                                         </td>
-                                        <td class="correction-cell">
-                                            {% if correction_sent %}
-                                            <div class="small text-muted">{{ c_correction or '—' }}</div>
-                                            {% else %}
-                                            <textarea class="form-control form-control-sm correction-input rubric-criterion" data-criterion="{{ criterion.name }}" rows="2" placeholder="Your correction or challenge...">{{ c_correction }}</textarea>
-                                            {% endif %}
-                                        </td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
@@ -331,43 +322,30 @@
                                         <td class="text-center fw-bold">
                                             {{ submission.get('teacher_feedback', {}).get('total_marks') or ai_feedback.total_marks or '—' }}/{{ assignment.total_marks or 100 }}
                                         </td>
-                                        <td></td>
                                     </tr>
                                 </tfoot>
                             </table>
                         </div>
                         {% set display_errors = teacher_feedback.get('errors') or ai_feedback.get('errors') or [] %}
-                        {% set errors_corrections = student_corrections.get('errors', []) %}
                         {% if display_errors %}
                         <h6 class="mt-4 mb-2"><i class="bi bi-exclamation-triangle me-2"></i>Detailed Corrections</h6>
                         <div class="table-responsive">
                             <table class="table table-sm table-bordered">
                                 <thead class="table-light">
                                     <tr>
-                                        <th style="width: 12%;">Location</th>
-                                        <th style="width: 20%;">Error</th>
-                                        <th style="width: 24%;">Suggested Correction</th>
-                                        <th style="width: 24%;">Feedback</th>
-                                        <th style="width: 20%;">Your correction / challenge</th>
+                                        <th style="width: 15%;">Location</th>
+                                        <th style="width: 28%;">Error</th>
+                                        <th style="width: 28%;">Suggested Correction</th>
+                                        <th style="width: 29%;">Feedback</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for err in display_errors %}
-                                    {% set err_idx = loop.index0 %}
-                                    {% set err_correction_raw = errors_corrections[err_idx] if err_idx < errors_corrections|length else '' %}
-                                    {% set err_correction_text = err_correction_raw.get('text', err_correction_raw) if err_correction_raw is mapping else err_correction_raw %}
                                     <tr>
                                         <td class="small">{{ err.location or '—' }}</td>
                                         <td class="small">{{ err.error or '—' }}</td>
                                         <td class="small">{{ err.correction or '—' }}</td>
                                         <td class="small">{{ err.feedback or '—' }}</td>
-                                        <td class="correction-cell">
-                                            {% if correction_sent %}
-                                            <div class="small text-muted">{{ err_correction_text or '—' }}</div>
-                                            {% else %}
-                                            <textarea class="form-control form-control-sm correction-input rubric-error" data-error-index="{{ err_idx }}" rows="2" placeholder="Your correction or challenge...">{{ err_correction_text }}</textarea>
-                                            {% endif %}
-                                        </td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
