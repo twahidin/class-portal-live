@@ -135,15 +135,20 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ code: c.content }),
         })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            return r.json().then(function(data) {
+                if (!r.ok) throw new Error(data.error || data.output || 'Request failed');
+                return data;
+            });
+        })
         .then(function(data) {
             c.running = false;
             c.output = data.output || data.error || '(no output)';
             renderCells();
         })
-        .catch(function() {
+        .catch(function(err) {
             c.running = false;
-            c.output = 'Request failed. Try again.';
+            c.output = 'Error: ' + (err.message || 'Request failed. Try again.');
             renderCells();
         });
     }

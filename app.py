@@ -133,6 +133,17 @@ def teacher_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def student_or_teacher_required(f):
+    """Require either student or teacher login. For API routes, return JSON 401 so fetch works."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if session.get('student_id') or session.get('teacher_id'):
+            return f(*args, **kwargs)
+        if request.is_json or request.path.startswith('/api/'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        return redirect(url_for('login'))
+    return decorated_function
+
 def admin_required(f):
     """Require admin login"""
     @wraps(f)
@@ -1860,7 +1871,7 @@ def teacher_python_lab():
 
 
 @app.route('/api/python/execute', methods=['POST'])
-@login_required
+@student_or_teacher_required
 def student_python_execute():
     """Execute Python code server-side. For students or teachers with Python Lab access."""
     if session.get('student_id'):
