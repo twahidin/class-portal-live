@@ -33,7 +33,17 @@
                         | Submitted: {{ (submission.submitted_at|sgt).strftime('%d %b %Y %H:%M') if submission.submitted_at else 'N/A' }} SGT
                     </p>
                 </div>
-                <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#questionPaperModal" title="View question paper">
+                        <i class="bi bi-file-earmark-text me-1"></i>Question paper
+                    </button>
+                    {% endif %}
+                    {% if assignment.answer_key_id or assignment.get('drive_file_refs', {}).get('answer_key_drive_id') %}
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#answerKeyModal" title="View answer key">
+                        <i class="bi bi-key me-1"></i>Answer key
+                    </button>
+                    {% endif %}
                     <div class="form-check me-2">
                         <input class="form-check-input" type="checkbox" id="include-answer-key" 
                                {% if submission.get('include_answer_key', False) %}checked{% endif %}>
@@ -299,6 +309,40 @@
                                   placeholder="Overall comments and suggestions...">{{ ai_feedback.overall_feedback if ai_feedback else '' }}</textarea>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Question paper modal -->
+<div class="modal fade" id="questionPaperModal" tabindex="-1" aria-labelledby="questionPaperModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="questionPaperModalLabel"><i class="bi bi-file-earmark-text me-2"></i>Question paper</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0" style="min-height: 70vh;">
+                <iframe src="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
+                        style="width: 100%; height: 70vh; border: none;" 
+                        title="Question paper"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Answer key modal -->
+<div class="modal fade" id="answerKeyModal" tabindex="-1" aria-labelledby="answerKeyModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="answerKeyModalLabel"><i class="bi bi-key me-2"></i>Answer key</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0" style="min-height: 70vh;">
+                <iframe src="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='answer_key') }}" 
+                        style="width: 100%; height: 70vh; border: none;" 
+                        title="Answer key"></iframe>
             </div>
         </div>
     </div>

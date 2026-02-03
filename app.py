@@ -2402,48 +2402,55 @@ def teacher_assignments():
 @teacher_required
 def get_student_statuses():
     """Get submission statuses for students by assignment"""
-    assignment_id = request.args.get('assignment_id')
-    student_ids = request.args.getlist('student_ids[]')
-    
-    if not assignment_id or not student_ids:
-        return jsonify({'error': 'Missing parameters'}), 400
-    
-    # Verify teacher owns this assignment
-    assignment = Assignment.find_one({
-        'assignment_id': assignment_id,
-        'teacher_id': session['teacher_id']
-    })
-    
-    if not assignment:
-        return jsonify({'error': 'Assignment not found'}), 404
-    
-    # Get submissions for these students
-    statuses = {}
-    for student_id in student_ids:
-        submission = Submission.find_one({
+    try:
+        assignment_id = request.args.get('assignment_id')
+        student_ids = request.args.getlist('student_ids[]')
+        
+        if not assignment_id or not student_ids:
+            return jsonify({'success': False, 'error': 'Missing parameters'}), 400
+        
+        # Verify teacher owns this assignment
+        assignment = Assignment.find_one({
             'assignment_id': assignment_id,
-            'student_id': student_id
+            'teacher_id': session['teacher_id']
         })
         
-        if submission:
-            status = submission.get('status', 'submitted')
-            sub_id = submission.get('submission_id')
-            feedback_sent = submission.get('feedback_sent', False)
-            # AI Feedback Sent: AI reviewed and feedback already sent to student
-            if status == 'ai_reviewed' and feedback_sent:
-                statuses[student_id] = {'status': 'ai_feedback_sent', 'label': 'AI Feedback Sent', 'class': 'info', 'submission_id': sub_id}
-            # Pending Review: waiting for teacher (submitted or ai_reviewed but not sent)
-            elif status in ['submitted', 'ai_reviewed']:
-                statuses[student_id] = {'status': 'pending', 'label': 'Pending Review', 'class': 'warning', 'submission_id': sub_id}
-            # Returned: teacher has reviewed and returned
-            elif status in ['reviewed', 'approved']:
-                statuses[student_id] = {'status': 'returned', 'label': 'Returned', 'class': 'success', 'submission_id': sub_id}
+        if not assignment:
+            return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+        
+        # Get latest submission per student (rubric may have multiple versions)
+        statuses = {}
+        for student_id in student_ids:
+            submission = Submission.find_one(
+                {
+                    'assignment_id': assignment_id,
+                    'student_id': student_id
+                },
+                sort=[('submitted_at', -1), ('created_at', -1)]
+            )
+            
+            if submission:
+                status = submission.get('status', 'submitted')
+                sub_id = submission.get('submission_id')
+                feedback_sent = submission.get('feedback_sent', False)
+                # AI Feedback Sent: AI reviewed and feedback already sent to student
+                if status == 'ai_reviewed' and feedback_sent:
+                    statuses[student_id] = {'status': 'ai_feedback_sent', 'label': 'AI Feedback Sent', 'class': 'info', 'submission_id': sub_id}
+                # Pending Review: waiting for teacher (submitted or ai_reviewed but not sent)
+                elif status in ['submitted', 'ai_reviewed']:
+                    statuses[student_id] = {'status': 'pending', 'label': 'Pending Review', 'class': 'warning', 'submission_id': sub_id}
+                # Returned: teacher has reviewed and returned
+                elif status in ['reviewed', 'approved']:
+                    statuses[student_id] = {'status': 'returned', 'label': 'Returned', 'class': 'success', 'submission_id': sub_id}
+                else:
+                    statuses[student_id] = {'status': status, 'label': status.title(), 'class': 'secondary', 'submission_id': sub_id}
             else:
-                statuses[student_id] = {'status': status, 'label': status.title(), 'class': 'secondary', 'submission_id': sub_id}
-        else:
-            statuses[student_id] = {'status': 'none', 'label': 'No Submission', 'class': 'light', 'submission_id': None}
-    
-    return jsonify({'success': True, 'statuses': statuses})
+                statuses[student_id] = {'status': 'none', 'label': 'No Submission', 'class': 'light', 'submission_id': None}
+        
+        return jsonify({'success': True, 'statuses': statuses})
+    except Exception as e:
+        logger.error(f"Error in get_student_statuses: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'Server error loading statuses'}), 500
 
 @app.route('/teacher/assignment/<assignment_id>/summary')
 @teacher_required

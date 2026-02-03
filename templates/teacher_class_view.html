@@ -242,11 +242,26 @@
             studentIds.forEach(id => params.append('student_ids[]', id));
             
             const response = await fetch(`/teacher/api/student-statuses?${params.toString()}`);
-            const data = await response.json();
-            
+            const text = await response.text();
+            let data = null;
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch (parseErr) {
+                console.error('Invalid JSON from student-statuses:', parseErr);
+                document.querySelectorAll('.student-status').forEach(cell => {
+                    cell.innerHTML = '<span class="badge bg-danger">Error loading</span>';
+                });
+                return;
+            }
+            if (!response.ok) {
+                const errMsg = (data && data.error) ? data.error : 'Error loading';
+                document.querySelectorAll('.student-status').forEach(cell => {
+                    cell.innerHTML = '<span class="badge bg-danger">' + (errMsg.length > 30 ? 'Error loading' : errMsg) + '</span>';
+                });
+                return;
+            }
             if (data.success && data.statuses) {
-                const assignmentId = document.getElementById('assignment-filter').value;
-                // Update each student's status and view-submission link
+                const assignmentIdCur = document.getElementById('assignment-filter').value;
                 document.querySelectorAll('[data-student-id]').forEach(row => {
                     const studentId = row.dataset.studentId;
                     const statusCell = row.querySelector('.student-status');
@@ -269,8 +284,7 @@
                         
                         statusCell.innerHTML = `<span class="badge bg-${status.class}${textClass}">${icon}${status.label}</span>`;
                         
-                        // Link to student submission when assignment selected and submission exists
-                        if (viewSubmissionBtn && assignmentId) {
+                        if (viewSubmissionBtn && assignmentIdCur) {
                             if (status.submission_id) {
                                 viewSubmissionBtn.href = '/teacher/submissions/' + status.submission_id + '/review';
                                 viewSubmissionBtn.title = 'View student submission';
@@ -284,7 +298,14 @@
                                 viewSubmissionBtn.setAttribute('aria-disabled', 'true');
                             }
                         }
+                    } else {
+                        statusCell.innerHTML = '<span class="badge bg-secondary">—</span>';
                     }
+                });
+            } else {
+                const errMsg = (data && data.error) ? data.error : 'Error loading';
+                document.querySelectorAll('.student-status').forEach(cell => {
+                    cell.innerHTML = '<span class="badge bg-danger">' + (errMsg.length > 30 ? 'Error loading' : errMsg) + '</span>';
                 });
             }
         } catch (e) {
