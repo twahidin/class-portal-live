@@ -4,6 +4,9 @@ per module tree. Enables the learning agent to ground responses in uploaded text
 """
 
 import os
+
+# Disable ChromaDB anonymized telemetry to avoid PostHog errors in logs (e.g. capture() argument mismatch)
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 import re
 import io
 import logging
@@ -16,6 +19,8 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 MAX_CHUNKS_QUERY = 5
+# Add to ChromaDB in batches to avoid OOM on large PDFs (e.g. Railway)
+INGEST_BATCH_SIZE = 50
 
 
 def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
@@ -144,13 +149,18 @@ def ingest_textbook(
                 embedding_function=emb_fn,
                 metadata={"hnsw:space": "cosine"},
             )
-        ids = [str(uuid.uuid4()) for _ in chunks]
         upload_title = (title or "Textbook").strip()[:200]
-        metadatas = [
-            {"page_chunk": i + 1, "batch_chunks": len(chunks), "upload_title": upload_title}
-            for i in range(len(chunks))
-        ]
-        collection.add(ids=ids, documents=chunks, metadatas=metadatas)
+        # Add in batches to avoid OOM on large PDFs (e.g. Railway limited memory)
+        batch_size = INGEST_BATCH_SIZE
+        for start in range(0, len(chunks), batch_size):
+            end = min(start + batch_size, len(chunks))
+            batch_chunks = chunks[start:end]
+            batch_ids = [str(uuid.uuid4()) for _ in batch_chunks]
+            batch_metadatas = [
+                {"page_chunk": start + i + 1, "batch_chunks": len(chunks), "upload_title": upload_title}
+                for i in range(len(batch_chunks))
+            ]
+            collection.add(ids=batch_ids, documents=batch_chunks, metadatas=batch_metadatas)
         total = collection.count()
         return {
             "success": True,
