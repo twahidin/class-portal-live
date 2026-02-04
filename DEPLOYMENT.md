@@ -84,6 +84,7 @@ This guide walks you through deploying the School Portal to Railway with MongoDB
 | `OPENAI_API_KEY` | (Optional) For textbook RAG embeddings | `sk-...` |
 | `PINECONE_API_KEY` | (Optional) For textbook RAG vector storage | `pcsk_...` |
 | `PINECONE_INDEX_NAME` | (Optional) Your Pinecone index name | `school-portal` |
+| `RATELIMIT_STORAGE_URI` | (Optional) Redis URI for rate limits; removes in-memory warning | `redis://default:...@host:port` |
 
 ### Textbook RAG (Pinecone) on Railway
 
@@ -113,8 +114,9 @@ The app can store a textbook PDF per module (RAG) so the AI tutor can answer fro
 - Pinecone free tier includes 1 index with 100K vectors (plenty for textbooks)
 - Data persists in Pinecone cloud (no Railway volume needed)
 - Each module's textbook is stored in a separate namespace within the index
-- **502 / Upload failed / SIGKILL (OOM):** On Railway, textbook upload uses a lot of memory. The app uses 1 worker, 8 MB max PDF, and smaller ingest batches to reduce OOM. If you still get worker SIGKILL or "Upload failed", try a smaller PDF (e.g. one chapter, &lt; 5 MB) or upgrade Railway memory.
-- **Anthropic Vision extraction (optional):** For scanned PDFs or image-heavy documents, set **`USE_ANTHROPIC_VISION_FOR_PDF`** = **`true`** and ensure **`ANTHROPIC_API_KEY`** is set. PDFs are converted to images and Claude extracts text per page (better for scans, tables, diagrams). Optional **`RAG_VISION_MAX_PAGES`** (default 40) limits pages per upload to control cost.
+- **PDF extraction uses PyPDF2 by default** - lightweight and works on Railway. Best for text-based PDFs (digital documents, typed content).
+- **502 / Upload failed / SIGKILL (OOM):** If you get worker SIGKILL, try a smaller PDF (e.g. one chapter, < 5 MB) or upgrade Railway memory.
+- **Anthropic Vision extraction (NOT recommended for Railway):** Setting `USE_ANTHROPIC_VISION_FOR_PDF=true` enables image-based extraction for scanned PDFs, BUT this uses `pdf2image` which is very memory-intensive and will likely cause OOM on Railway's limited memory. Only enable this if you have upgraded Railway resources or are running locally. Note: AI marking (reading student handwriting) is separate and works fine - it sends images directly to Claude without local conversion.
 
 ### To Link MongoDB:
 1. Click on your web service

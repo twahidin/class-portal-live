@@ -102,11 +102,13 @@ def sgt_filter(dt):
         return dt.astimezone(SGT)
     return dt
 
-# Initialize rate limiter
+# Initialize rate limiter (explicit storage avoids "no storage specified" warning)
+# Set RATELIMIT_STORAGE_URI=redis://... for production (e.g. Railway Redis)
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://"),
 )
 
 # Admin password from environment

@@ -33,18 +33,31 @@ MAX_PAGES_ANTHROPIC_VISION = int(os.getenv("RAG_VISION_MAX_PAGES", "40"))
 
 
 def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """Extract text from PDF using PyPDF2."""
+    """Extract text from PDF using PyPDF2 (lightweight, low memory).
+    
+    Works well for text-based PDFs. For scanned/image PDFs, may return empty text.
+    """
     try:
         import PyPDF2
         reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        total_pages = len(reader.pages)
+        logger.info(f"PyPDF2: Processing {total_pages} pages")
+        
         parts = []
+        pages_with_text = 0
         for i, page in enumerate(reader.pages):
             text = page.extract_text()
             if text and text.strip():
                 parts.append(f"--- Page {i + 1} ---\n{text.strip()}")
+                pages_with_text += 1
+        
+        logger.info(f"PyPDF2: Extracted text from {pages_with_text}/{total_pages} pages")
+        if pages_with_text == 0:
+            logger.warning("PyPDF2: No text extracted - PDF may be scanned/image-only")
+        
         return "\n\n".join(parts)
     except Exception as e:
-        logger.error("Error extracting text from PDF: %s", e)
+        logger.error("Error extracting text from PDF with PyPDF2: %s", e)
         return ""
 
 
@@ -259,12 +272,21 @@ def ingest_textbook(
     if not openai_client:
         return {"success": False, "error": "Embeddings not available (set OPENAI_API_KEY)."}
 
+    # PDF text extraction method selection
+    # PyPDF2 (default): Low memory, works for text-based PDFs
+    # Anthropic Vision (optional): Memory-intensive, better for scanned PDFs
+    # WARNING: Anthropic Vision uses pdf2image which can cause OOM on Railway
     use_vision = os.getenv("USE_ANTHROPIC_VISION_FOR_PDF", "").strip().lower() in ("1", "true", "yes")
+    
     if use_vision and _get_anthropic_client():
+        logger.info("PDF extraction: Using Anthropic Vision (USE_ANTHROPIC_VISION_FOR_PDF=true)")
+        logger.warning("Anthropic Vision is memory-intensive. If you get OOM errors, disable it in Railway env vars.")
         text = _extract_text_from_pdf_via_anthropic(pdf_bytes)
         if not text or len(text.strip()) < 50:
-            text = _extract_text_from_pdf(pdf_bytes)  # fallback to PyPDF2
+            logger.info("Vision extraction returned little text, falling back to PyPDF2")
+            text = _extract_text_from_pdf(pdf_bytes)
     else:
+        logger.info("PDF extraction: Using PyPDF2 (lightweight, recommended for Railway)")
         text = _extract_text_from_pdf(pdf_bytes)
     if not text or len(text.strip()) < 100:
         return {"success": False, "error": "Could not extract enough text from the PDF (may be image-only or corrupted)."}
