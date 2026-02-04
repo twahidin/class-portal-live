@@ -622,6 +622,10 @@
         const btn = document.getElementById('textbook-upload-btn');
         btn.disabled = true;
         hideTextbookMessage();
+        // Show progress: extracting text → embedding chunks → uploading to vector store
+        textbookStatus.innerHTML = '<span class="d-inline-flex align-items-center"><span class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></span><strong>Processing PDF…</strong> <span class="text-muted ms-1">Extracting text, embedding chunks, uploading. This may take a minute.</span></span>';
+        textbookUploadArea.style.opacity = '0.6';
+        textbookUploadArea.style.pointerEvents = 'none';
         fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/textbook', { method: 'POST', body: formData })
             .then(function(r) { return r.json().catch(function() { return {}; }); })
             .then(function(d) {
@@ -633,10 +637,20 @@
                     loadTextbookStatus();
                     document.getElementById('textbook-file').value = '';
                 }
-                else showTextbookMessage(d.error || 'Upload failed', true);
+                else {
+                    textbookStatus.innerHTML = '<span class="text-muted">No content yet. Upload a PDF (or add chapters one at a time) so the AI tutor can answer from it.</span>';
+                    showTextbookMessage(d.error || 'Upload failed', true);
+                }
             })
-            .catch(function() { showTextbookMessage('Network error', true); })
-            .finally(function() { btn.disabled = false; });
+            .catch(function() {
+                textbookStatus.innerHTML = '<span class="text-muted">No content yet. Upload a PDF (or add chapters one at a time) so the AI tutor can answer from it.</span>';
+                showTextbookMessage('Network error', true);
+            })
+            .finally(function() {
+                btn.disabled = false;
+                textbookUploadArea.style.opacity = '';
+                textbookUploadArea.style.pointerEvents = '';
+            });
     });
 
     document.getElementById('textbook-delete-btn') && document.getElementById('textbook-delete-btn').addEventListener('click', function() {

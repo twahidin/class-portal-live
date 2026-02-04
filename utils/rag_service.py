@@ -10,7 +10,7 @@ import re
 import io
 import logging
 import uuid
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -94,24 +94,41 @@ def _get_embeddings(texts: List[str], openai_client) -> List[List[float]]:
         return []
 
 
-def _get_pinecone_index():
-    """Return Pinecone index if configured, else None."""
+def _get_pinecone_index() -> Tuple[Optional[Any], Optional[str]]:
+    """Return (Pinecone index, None) if OK, else (None, error_code).
+    error_code: None = no credentials, 'index_not_found' = 404, 'other' = other error."""
     api_key = os.getenv("PINECONE_API_KEY", "").strip()
     index_name = os.getenv("PINECONE_INDEX_NAME", "").strip()
     
     if not api_key or not index_name:
-        return None
+        return (None, None)
     
     try:
         from pinecone import Pinecone
         pc = Pinecone(api_key=api_key)
-        return pc.Index(index_name)
+        return (pc.Index(index_name), None)
     except ImportError:
         logger.warning("pinecone not installed; run: pip install pinecone")
-        return None
+        return (None, "other")
     except Exception as e:
+        err_str = str(e).lower()
+        if "404" in err_str or "not found" in err_str or "resource" in err_str:
+            logger.warning(
+                "Pinecone index %r not found. Create it in the Pinecone console: dimension %s, metric cosine.",
+                index_name, EMBEDDING_DIMENSION
+            )
+            return (None, "index_not_found")
         logger.warning("Pinecone not available: %s", e)
-        return None
+        return (None, "other")
+
+
+def _pinecone_index_not_found_message() -> str:
+    """User-facing message when Pinecone index does not exist (404)."""
+    index_name = os.getenv("PINECONE_INDEX_NAME", "school-portal")
+    return (
+        f"Pinecone index '{index_name}' not found. Create it in the Pinecone console: "
+        f"dimension {EMBEDDING_DIMENSION}, metric cosine, then redeploy."
+    )
 
 
 def _namespace_name(module_id: str) -> str:
@@ -139,8 +156,10 @@ def ingest_textbook(
     Returns:
         Dict with success, chunk_count (this upload), total_chunk_count (total in RAG), error.
     """
-    index = _get_pinecone_index()
+    index, pinecone_err = _get_pinecone_index()
     if not index:
+        if pinecone_err == "index_not_found":
+            return {"success": False, "error": _pinecone_index_not_found_message()}
         return {"success": False, "error": "Vector store not available (set PINECONE_API_KEY and PINECONE_INDEX_NAME)."}
 
     openai_client = _get_openai_client()
@@ -213,6 +232,9 @@ def ingest_textbook(
             "title": title or "Textbook",
         }
     except Exception as e:
+        err_str = str(e).lower()
+        if "404" in err_str or "not found" in err_str:
+            return {"success": False, "error": _pinecone_index_not_found_message(), "chunk_count": 0, "total_chunk_count": 0}
         logger.exception("Error ingesting textbook for module %s: %s", module_id, e)
         return {"success": False, "error": str(e), "chunk_count": 0, "total_chunk_count": 0}
 
@@ -236,8 +258,10 @@ def query_textbook(
     if not query or not query.strip():
         return {"success": True, "chunks": []}
 
-    index = _get_pinecone_index()
+    index, pinecone_err = _get_pinecone_index()
     if not index:
+        if pinecone_err == "index_not_found":
+            return {"success": False, "chunks": [], "error": _pinecone_index_not_found_message()}
         return {"success": False, "chunks": [], "error": "Vector store not available."}
 
     openai_client = _get_openai_client()
@@ -273,13 +297,16 @@ def query_textbook(
 
         return {"success": True, "chunks": chunks}
     except Exception as e:
+        err_str = str(e).lower()
+        if "404" in err_str or "not found" in err_str:
+            return {"success": False, "chunks": [], "error": _pinecone_index_not_found_message()}
         logger.warning("Error querying textbook for module %s: %s", module_id, e)
         return {"success": False, "chunks": [], "error": str(e)}
 
 
 def textbook_has_content(module_id: str) -> bool:
     """Return True if this module has a textbook ingested in the vector store."""
-    index = _get_pinecone_index()
+    index, _ = _get_pinecone_index()
     if not index:
         return False
     
@@ -295,8 +322,10 @@ def textbook_has_content(module_id: str) -> bool:
 
 def delete_textbook(module_id: str) -> Dict[str, Any]:
     """Remove textbook content for this module."""
-    index = _get_pinecone_index()
+    index, pinecone_err = _get_pinecone_index()
     if not index:
+        if pinecone_err == "index_not_found":
+            return {"success": False, "error": _pinecone_index_not_found_message()}
         return {"success": False, "error": "Vector store not available."}
     
     namespace = _namespace_name(module_id)
@@ -304,5 +333,8 @@ def delete_textbook(module_id: str) -> Dict[str, Any]:
         index.delete(delete_all=True, namespace=namespace)
         return {"success": True}
     except Exception as e:
+        err_str = str(e).lower()
+        if "404" in err_str or "not found" in err_str:
+            return {"success": False, "error": _pinecone_index_not_found_message()}
         logger.warning("Error deleting textbook for module %s: %s", module_id, e)
         return {"success": False, "error": str(e)}
