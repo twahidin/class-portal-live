@@ -3,8 +3,12 @@ RAG (Retrieval-Augmented Generation) service for storing and querying textbook c
 per module tree. Enables the learning agent to ground responses in uploaded textbook PDFs.
 
 Uses Pinecone (hosted vector DB) to avoid memory issues on Railway/limited environments.
+
+PDF extraction: PyPDF2 (default) or Anthropic Vision when USE_ANTHROPIC_VISION_FOR_PDF=1
+and ANTHROPIC_API_KEY is set (better for scanned PDFs, images, tables).
 """
 
+import base64
 import os
 import re
 import io
@@ -24,6 +28,9 @@ INGEST_BATCH_SIZE = 50
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSION = 1536
 
+# Anthropic Vision: max pages per upload to limit cost/latency (env override optional)
+MAX_PAGES_ANTHROPIC_VISION = int(os.getenv("RAG_VISION_MAX_PAGES", "40"))
+
 
 def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Extract text from PDF using PyPDF2."""
@@ -39,6 +46,87 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
     except Exception as e:
         logger.error("Error extracting text from PDF: %s", e)
         return ""
+
+
+def _get_anthropic_client():
+    """Return Anthropic client if API key is available."""
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from anthropic import Anthropic
+        return Anthropic(api_key=api_key)
+    except Exception as e:
+        logger.warning("Anthropic client not available: %s", e)
+        return None
+
+
+def _extract_text_from_pdf_via_anthropic(pdf_bytes: bytes) -> str:
+    """Extract text from PDF using Anthropic Vision (PDF → images → Claude).
+    Better for scanned PDFs, images, tables. Requires ANTHROPIC_API_KEY and pdf2image."""
+    client = _get_anthropic_client()
+    if not client:
+        return ""
+    try:
+        from pdf2image import convert_from_bytes
+        from PIL import Image
+    except ImportError:
+        logger.warning("pdf2image or PIL not available for Anthropic Vision extraction")
+        return ""
+    try:
+        images = convert_from_bytes(
+            pdf_bytes,
+            first_page=1,
+            last_page=min(MAX_PAGES_ANTHROPIC_VISION, 100),
+            dpi=150,
+        )
+    except Exception as e:
+        logger.error("Error converting PDF to images for Vision: %s", e)
+        return ""
+    if not images:
+        return ""
+    parts = []
+    for i, img in enumerate(images):
+        # Resize if very large to stay within API limits
+        w, h = img.size
+        max_dim = 1600
+        if w > max_dim or h > max_dim:
+            ratio = min(max_dim / w, max_dim / h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        buf.seek(0)
+        b64 = base64.b64encode(buf.read()).decode("utf-8")
+        try:
+            resp = client.messages.create(
+                model="claude-sonnet-4-5-20250929",
+                max_tokens=4096,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": b64,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": "Extract all text from this page of a textbook or document. Preserve paragraphs and structure. Output plain text only, no markdown or headings. If the page is mostly images or diagrams, describe them briefly in text.",
+                        },
+                    ],
+                }],
+            )
+            text = (resp.content[0].text if resp.content else "").strip()
+            if text:
+                parts.append(f"--- Page {i + 1} ---\n{text}")
+        except Exception as e:
+            logger.warning("Anthropic Vision extraction failed for page %s: %s", i + 1, e)
+    return "\n\n".join(parts) if parts else ""
 
 
 def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
@@ -166,7 +254,13 @@ def ingest_textbook(
     if not openai_client:
         return {"success": False, "error": "Embeddings not available (set OPENAI_API_KEY)."}
 
-    text = _extract_text_from_pdf(pdf_bytes)
+    use_vision = os.getenv("USE_ANTHROPIC_VISION_FOR_PDF", "").strip().lower() in ("1", "true", "yes")
+    if use_vision and _get_anthropic_client():
+        text = _extract_text_from_pdf_via_anthropic(pdf_bytes)
+        if not text or len(text.strip()) < 50:
+            text = _extract_text_from_pdf(pdf_bytes)  # fallback to PyPDF2
+    else:
+        text = _extract_text_from_pdf(pdf_bytes)
     if not text or len(text.strip()) < 100:
         return {"success": False, "error": "Could not extract enough text from the PDF (may be image-only or corrupted)."}
 

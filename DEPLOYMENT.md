@@ -113,6 +113,8 @@ The app can store a textbook PDF per module (RAG) so the AI tutor can answer fro
 - Pinecone free tier includes 1 index with 100K vectors (plenty for textbooks)
 - Data persists in Pinecone cloud (no Railway volume needed)
 - Each module's textbook is stored in a separate namespace within the index
+- **502 on upload:** Textbook ingest can take 1–3 minutes for larger PDFs. The app uses a 5-minute request timeout; if you still get 502, try uploading a smaller file or one chapter at a time.
+- **Anthropic Vision extraction (optional):** For scanned PDFs or image-heavy documents, set **`USE_ANTHROPIC_VISION_FOR_PDF`** = **`true`** and ensure **`ANTHROPIC_API_KEY`** is set. PDFs are converted to images and Claude extracts text per page (better for scans, tables, diagrams). Optional **`RAG_VISION_MAX_PAGES`** (default 40) limits pages per upload to control cost.
 
 ### To Link MongoDB:
 1. Click on your web service
