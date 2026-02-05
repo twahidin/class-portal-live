@@ -1,13 +1,16 @@
 import os
 import logging
 from telegram import Bot
+from telegram.request import HTTPXRequest
 import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-bot = Bot(token=BOT_TOKEN) if BOT_TOKEN else None
+# Use larger pool_timeout to avoid "All connections in the connection pool are occupied"
+_request = HTTPXRequest(pool_timeout=60.0, connect_timeout=30.0) if BOT_TOKEN else None
+bot = Bot(token=BOT_TOKEN, request=_request) if BOT_TOKEN else None
 
 def send_to_teacher(telegram_id: int, student_name: str, message: str, teacher_id: str, student_class: str = None):
     """Send a message from a student to a teacher via Telegram"""
