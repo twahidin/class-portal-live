@@ -288,13 +288,13 @@
                         {% endif %}
                     </p>
                     
-                    {% if existing_submission.get('feedback_sent', False) and existing_submission.final_marks is not none %}
+                    {% if existing_submission.get('feedback_sent', False) and existing_submission.get('final_marks') is not none %}
                     <div class="score-display mt-4">
                         {% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
-                        <h2 class="text-success">{{ existing_submission.final_marks }} / {{ assignment.total_marks }}</h2>
+                        <h2 class="text-success">{{ existing_submission.get('final_marks') }} / {{ assignment.total_marks }}</h2>
                         <p class="text-muted">Your Score</p>
                         {% else %}
-                        {% set pct = (existing_submission.final_marks|float / (assignment.total_marks or 100)|float * 100) if (assignment.total_marks or 100) > 0 else 0 %}
+                        {% set pct = (existing_submission.get('final_marks', 0)|float / (assignment.total_marks or 100)|float * 100) if (assignment.total_marks or 100) > 0 else 0 %}
                         {% if pct >= 99.9 %}
                         <h2 class="text-success"><i class="bi bi-check-circle me-2"></i>Correct</h2>
                         {% elif pct <= 0.01 %}
