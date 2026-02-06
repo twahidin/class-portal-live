@@ -7881,7 +7881,12 @@ def get_students():
             ]
         
         if search:
-            query['name'] = {'$regex': search, '$options': 'i'}
+            query['$and'] = query.get('$and', []) + [{
+                '$or': [
+                    {'name': {'$regex': search, '$options': 'i'}},
+                    {'student_id': {'$regex': search, '$options': 'i'}}
+                ]
+            }]
         
         students = list(Student.find(query))
         
