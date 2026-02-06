@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file, Response
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from functools import wraps
@@ -81,6 +82,10 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'change-this-in-production-please
 app.config['MONGODB_URI'] = os.getenv('MONGODB_URI') or os.getenv('MONGO_URL')
 app.config['MONGODB_DB'] = os.getenv('MONGODB_DB', 'school_portal')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
+
+# Initialize Socket.IO for real-time collaboration
+# Using 'threading' mode for compatibility with anthropic/trio dependencies
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', logger=False, engineio_logger=False)
 
 # Initialize database
 db.init_app(app)
@@ -2446,6 +2451,144 @@ def api_collab_space_save_nodes(space_id):
         upd['collab_settings'] = data['settings']
     db.db.collab_spaces.update_one({'space_id': space_id}, {'$set': upd})
     return jsonify({'success': True})
+
+
+# ============================================================================
+# COLLAB SPACE – SOCKET.IO REAL-TIME EVENTS
+# ============================================================================
+
+@socketio.on('join_space')
+def handle_join_space(data):
+    """Client joins a space room for real-time updates."""
+    space_id = data.get('space_id')
+    user_id = data.get('user_id')
+    user_name = data.get('user_name')
+    user_role = data.get('user_role')
+    color = data.get('color')
+    if not space_id:
+        return
+    room = f'collab_{space_id}'
+    join_room(room)
+    # Broadcast that a new participant joined (for presence)
+    emit('user_joined', {
+        'user_id': user_id, 'user_name': user_name,
+        'user_role': user_role, 'color': color,
+    }, to=room, include_self=False)
+    logger.info(f'[SocketIO] {user_name} ({user_id}) joined room {room}')
+
+
+@socketio.on('leave_space')
+def handle_leave_space(data):
+    space_id = data.get('space_id')
+    user_id = data.get('user_id')
+    user_name = data.get('user_name', '')
+    if not space_id:
+        return
+    room = f'collab_{space_id}'
+    leave_room(room)
+    emit('user_left', {'user_id': user_id, 'user_name': user_name}, to=room, include_self=False)
+
+
+@socketio.on('node_added')
+def handle_node_added(data):
+    """A user created a new node. Broadcast to others and persist atomically."""
+    space_id = data.get('space_id')
+    node = data.get('node')
+    layer_key = data.get('layer_key')  # e.g. 'layer1', 'layer2', 'layer3'
+    if not space_id or not node or not layer_key:
+        return
+    room = f'collab_{space_id}'
+    # Atomic push into the correct layer array in MongoDB
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id},
+        {'$push': {f'nodes_data.{layer_key}': node}, '$set': {'updated_at': datetime.utcnow()}}
+    )
+    emit('node_added', {'node': node, 'layer_key': layer_key, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('node_deleted')
+def handle_node_deleted(data):
+    """A user deleted a node (and its descendants). Broadcast & persist."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    deleted_ids = data.get('deleted_ids', [])  # includes the node itself + all descendants
+    if not space_id or not node_id:
+        return
+    room = f'collab_{space_id}'
+    # Remove from all layer arrays atomically
+    for lk in ('layer1', 'layer2', 'layer3'):
+        db.db.collab_spaces.update_one(
+            {'space_id': space_id},
+            {'$pull': {f'nodes_data.{lk}': {'id': {'$in': deleted_ids}}}},
+        )
+    db.db.collab_spaces.update_one({'space_id': space_id}, {'$set': {'updated_at': datetime.utcnow()}})
+    emit('node_deleted', {'node_id': node_id, 'deleted_ids': deleted_ids, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('node_voted')
+def handle_node_voted(data):
+    """A user voted on a node."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    layer_key = data.get('layer_key')
+    if not space_id or not node_id or not layer_key:
+        return
+    room = f'collab_{space_id}'
+    # Increment vote atomically
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id, f'nodes_data.{layer_key}.id': node_id},
+        {'$inc': {f'nodes_data.{layer_key}.$.votes': 1}, '$set': {'updated_at': datetime.utcnow()}}
+    )
+    emit('node_voted', {'node_id': node_id, 'layer_key': layer_key, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('comment_added')
+def handle_comment_added(data):
+    """A user added a comment to a node."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    layer_key = data.get('layer_key')
+    comment = data.get('comment')
+    if not space_id or not node_id or not layer_key or not comment:
+        return
+    room = f'collab_{space_id}'
+    # Push comment atomically
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id, f'nodes_data.{layer_key}.id': node_id},
+        {'$push': {f'nodes_data.{layer_key}.$.comments': comment}, '$set': {'updated_at': datetime.utcnow()}}
+    )
+    emit('comment_added', {'node_id': node_id, 'layer_key': layer_key, 'comment': comment, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('cursor_move')
+def handle_cursor_move(data):
+    """Broadcast cursor/pointer position for live presence (like Figma cursors)."""
+    space_id = data.get('space_id')
+    if not space_id:
+        return
+    room = f'collab_{space_id}'
+    emit('cursor_move', {
+        'user_id': data.get('user_id'),
+        'user_name': data.get('user_name'),
+        'color': data.get('color'),
+        'x': data.get('x'),
+        'y': data.get('y'),
+    }, to=room, include_self=False)
+
+
+@socketio.on('settings_changed')
+def handle_settings_changed(data):
+    """Teacher changed space settings – broadcast to all."""
+    space_id = data.get('space_id')
+    settings = data.get('settings')
+    if not space_id or not settings:
+        return
+    room = f'collab_{space_id}'
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id},
+        {'$set': {'collab_settings': settings, 'updated_at': datetime.utcnow()}}
+    )
+    emit('settings_changed', {'settings': settings, 'by': data.get('user_id')}, to=room, include_self=False)
 
 
 @app.route('/api/collab-space/<space_id>/generate-infographic', methods=['POST'])
@@ -9392,4 +9535,4 @@ def rate_limit(e):
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    socketio.run(app, host='0.0.0.0', port=port, debug=debug)

@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet" />
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -20,6 +21,9 @@
   .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
   .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
   .save-indicator { transition: opacity 0.3s; }
+  @keyframes cursorPulse { 0%,100% { opacity: 0.9; } 50% { opacity: 0.5; } }
+  .remote-cursor { pointer-events: none; transition: transform 0.15s ease-out; }
+  .presence-dot { animation: cursorPulse 2s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -45,6 +49,9 @@ const { useState, useEffect, useRef, useCallback } = React;
 const FD = window.FLASK_DATA;
 const SPACE_ID = FD.space.space_id;
 
+/* ── Socket.IO connection ── */
+const socket = io({ transports: ['websocket', 'polling'] });
+
 /* ── SVG Icon Components ── */
 const Icon = ({ children, size = 20, className = '', style = {}, onClick }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
@@ -62,6 +69,7 @@ const SendIcon = (p) => <Icon {...p}><line x1="22" y1="2" x2="11" y2="13"/><poly
 const DownloadIcon = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Icon>;
 const TrashIcon = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></Icon>;
 const ArrowLeftIcon = (p) => <Icon {...p}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></Icon>;
+const UsersIcon = (p) => <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Icon>;
 
 /* ── Color Palette ── */
 const COLOR_PALETTE = [
@@ -127,15 +135,27 @@ const MindMapNode = ({node,isSelected,onSelect,onAddChild,userView}) => {
       {node.layer===0 ? lines.map((line,i)=>(<text key={i} x={node.x} y={node.y+(i-(lines.length-1)/2)*16} textAnchor="middle" dominantBaseline="middle" style={{fontSize:`${fs}px`,fontWeight:700,fill:textFill,pointerEvents:'none'}}>{line}</text>))
         : (<text x={node.x} y={node.y+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:`${fs}px`,fontWeight:600,fill:textFill,pointerEvents:'none'}}>{truncated}</text>)}
       {node.hasImage&&(<g><rect x={node.x-8} y={node.y+r*0.4} width="16" height="12" rx="2" fill="#F59E0B" stroke="#fff" strokeWidth="1"/><text x={node.x} y={node.y+r*0.4+7} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'6px',fill:'#fff',fontWeight:700}}>IMG</text></g>)}
-      {/* Add child button: teachers and students both see it on central (layer 0), layer 1, and layer 2 so students can add subtopics and text nodes */}
+      {/* Add child button: teachers and students both see it on central (layer 0), layer 1, and layer 2 */}
       {node.layer<3 && (<g className="add-btn" onClick={e=>{e.stopPropagation();onAddChild(node);}} style={{cursor:'pointer'}}><circle cx={node.x+r+12} cy={node.y} r="11" fill="#10B981" stroke="#fff" strokeWidth="1.5"/><text x={node.x+r+12} y={node.y+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'14px',fill:'#fff',fontWeight:700,pointerEvents:'none'}}>+</text></g>)}
       {node.studentColor&&node.layer>0&&(<circle cx={node.x} cy={node.y+r+8} r="4" fill={node.studentColor.primary} stroke="#fff" strokeWidth="1"/>)}
     </g>
   );
 };
 
-/* ── API helpers ── */
+/* ── API helpers (used only for infographic/PDF, not node save) ── */
 const api = (path, opts={}) => fetch(`/api/collab-space/${SPACE_ID}${path}`, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, ...opts});
+
+/* ── Remote Cursor Component ── */
+const RemoteCursor = ({user}) => {
+  if (!user.x && user.x !== 0) return null;
+  return (
+    <g className="remote-cursor" style={{transform:`translate(${user.x}px, ${user.y}px)`}}>
+      <polygon points="0,0 0,18 5,14 10,20 13,18 8,12 14,10" fill={user.color || '#94a3b8'} stroke="#fff" strokeWidth="1" opacity="0.85"/>
+      <rect x="14" y="12" rx="4" ry="4" width={Math.max(40, user.name.length * 6 + 12)} height="16" fill={user.color || '#94a3b8'} opacity="0.85"/>
+      <text x="20" y="23" style={{fontSize:'9px',fill:'#fff',fontWeight:600,pointerEvents:'none'}}>{user.name}</text>
+    </g>
+  );
+};
 
 /* ── Main App ── */
 function App() {
@@ -166,19 +186,123 @@ function App() {
   const [viewBox, setViewBox] = useState({x:100,y:0,w:900,h:700});
   const [dragging, setDragging] = useState(false);
   const [dragStart, setDragStart] = useState({x:0,y:0});
+  // Live collaboration state
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [remoteCursors, setRemoteCursors] = useState({});  // { user_id: {x, y, name, color} }
+  const [connected, setConnected] = useState(false);
+  const cursorThrottle = useRef(0);
 
-  // Auto-save debounce
+  // ─── Socket.IO setup ───
+  useEffect(() => {
+    socket.on('connect', () => {
+      setConnected(true);
+      socket.emit('join_space', {
+        space_id: SPACE_ID,
+        user_id: FD.user_id,
+        user_name: FD.user_name,
+        user_role: FD.user_role,
+        color: currentStudent.color.primary,
+      });
+    });
+    socket.on('disconnect', () => setConnected(false));
+
+    // Presence
+    socket.on('user_joined', (data) => {
+      setOnlineUsers(prev => {
+        if (prev.find(u => u.user_id === data.user_id)) return prev;
+        return [...prev, data];
+      });
+    });
+    socket.on('user_left', (data) => {
+      setOnlineUsers(prev => prev.filter(u => u.user_id !== data.user_id));
+      setRemoteCursors(prev => { const n = {...prev}; delete n[data.user_id]; return n; });
+    });
+
+    // Remote cursor movement
+    socket.on('cursor_move', (data) => {
+      setRemoteCursors(prev => ({...prev, [data.user_id]: {
+        x: data.x, y: data.y, name: data.user_name, color: data.color,
+      }}));
+    });
+
+    // Remote node added
+    socket.on('node_added', (data) => {
+      setNodes(prev => {
+        const lk = data.layer_key;
+        if (!prev[lk]) return prev;
+        // Avoid duplicate (if somehow same id)
+        if (prev[lk].find(n => n.id === data.node.id)) return prev;
+        const upd = {...prev, [lk]: [...prev[lk], data.node]};
+        return layoutNodes(upd, 500, 350);
+      });
+    });
+
+    // Remote node deleted
+    socket.on('node_deleted', (data) => {
+      const ids = new Set(data.deleted_ids || [data.node_id]);
+      setNodes(prev => {
+        const upd = {
+          ...prev,
+          layer1: prev.layer1.filter(n => !ids.has(n.id)),
+          layer2: prev.layer2.filter(n => !ids.has(n.id)),
+          layer3: prev.layer3.filter(n => !ids.has(n.id)),
+        };
+        return layoutNodes(upd, 500, 350);
+      });
+      setSelectedNode(prev => prev && ids.has(prev.id) ? null : prev);
+    });
+
+    // Remote vote
+    socket.on('node_voted', (data) => {
+      setNodes(prev => {
+        const lk = data.layer_key;
+        if (!prev[lk]) return prev;
+        const upd = {...prev, [lk]: prev[lk].map(n => n.id === data.node_id ? {...n, votes: (n.votes||0)+1} : n)};
+        return upd;
+      });
+      setSelectedNode(prev => prev && prev.id === data.node_id ? {...prev, votes: (prev.votes||0)+1} : prev);
+    });
+
+    // Remote comment
+    socket.on('comment_added', (data) => {
+      setNodes(prev => {
+        const lk = data.layer_key;
+        if (!prev[lk]) return prev;
+        const upd = {...prev, [lk]: prev[lk].map(n => n.id === data.node_id ? {...n, comments: [...(n.comments||[]), data.comment]} : n)};
+        return upd;
+      });
+      setSelectedNode(prev => prev && prev.id === data.node_id ? {...prev, comments: [...(prev.comments||[]), data.comment]} : prev);
+    });
+
+    // Remote settings change
+    socket.on('settings_changed', (data) => {
+      if (data.settings) {
+        setSettings(prev => ({...prev, ...data.settings}));
+      }
+    });
+
+    return () => {
+      socket.emit('leave_space', {space_id: SPACE_ID, user_id: FD.user_id, user_name: FD.user_name});
+      socket.off('connect'); socket.off('disconnect');
+      socket.off('user_joined'); socket.off('user_left');
+      socket.off('cursor_move'); socket.off('node_added');
+      socket.off('node_deleted'); socket.off('node_voted');
+      socket.off('comment_added'); socket.off('settings_changed');
+    };
+  }, []);
+
+  // ─── Fallback auto-save (full state, periodic backup) ───
   function triggerSave(nodesData) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSaveStatus('Unsaved');
+    setSaveStatus('Synced');
     saveTimer.current = setTimeout(async () => {
-      setSaveStatus('Saving...');
+      setSaveStatus('Saving backup...');
       try {
         await api('/save-nodes', {body: JSON.stringify({nodes_data: nodesData, settings: {maxLayer1:settings.maxLayer1,maxTextNodes:settings.maxTextNodes,charLimit:settings.charLimit}})});
         setSaveStatus('Saved');
         setTimeout(() => setSaveStatus(''), 2000);
       } catch(e) { setSaveStatus('Save failed'); }
-    }, 1500);
+    }, 5000);  // Backup save every 5s after last change
   }
 
   const handleWheel = useCallback(e => {
@@ -187,7 +311,27 @@ function App() {
     setViewBox(v => {const cx=v.x+v.w/2,cy=v.y+v.h/2,nw=v.w*scale,nh=v.h*scale;return{x:cx-nw/2,y:cy-nh/2,w:nw,h:nh};});
   },[]);
   const handleMouseDown = e => { if(e.target.tagName==='circle'||e.target.tagName==='text')return; setDragging(true);setDragStart({x:e.clientX,y:e.clientY}); };
-  const handleMouseMove = e => { if(!dragging)return; const dx=(e.clientX-dragStart.x)*(viewBox.w/window.innerWidth),dy=(e.clientY-dragStart.y)*(viewBox.h/window.innerHeight); setViewBox(v=>({...v,x:v.x-dx,y:v.y-dy})); setDragStart({x:e.clientX,y:e.clientY}); };
+  const handleMouseMove = e => {
+    // Send cursor position to others (throttled to ~15fps)
+    const now = Date.now();
+    if (now - cursorThrottle.current > 66) {
+      cursorThrottle.current = now;
+      const svg = svgRef.current;
+      if (svg) {
+        const rect = svg.getBoundingClientRect();
+        const svgX = viewBox.x + ((e.clientX - rect.left) / rect.width) * viewBox.w;
+        const svgY = viewBox.y + ((e.clientY - rect.top) / rect.height) * viewBox.h;
+        socket.emit('cursor_move', {
+          space_id: SPACE_ID, user_id: FD.user_id,
+          user_name: FD.user_name, color: currentStudent.color.primary,
+          x: Math.round(svgX), y: Math.round(svgY),
+        });
+      }
+    }
+    if(!dragging)return;
+    const dx=(e.clientX-dragStart.x)*(viewBox.w/window.innerWidth),dy=(e.clientY-dragStart.y)*(viewBox.h/window.innerHeight);
+    setViewBox(v=>({...v,x:v.x-dx,y:v.y-dy})); setDragStart({x:e.clientX,y:e.clientY});
+  };
   const handleMouseUp = () => setDragging(false);
   useEffect(() => { const el=svgRef.current; if(el)el.addEventListener('wheel',handleWheel,{passive:false}); return()=>{if(el)el.removeEventListener('wheel',handleWheel);}; },[handleWheel]);
 
@@ -195,10 +339,18 @@ function App() {
   const handleCreate = () => {
     if(!contentText.trim()||!addTarget) return;
     const layerKey = `layer${addTarget.layer+1}`;
-    const newNode = { id:`n-${Date.now()}`, parentId:addTarget.id, type:layerKey, label:contentText.substring(0,25), content:contentText,
+    const newNode = { id:`n-${Date.now()}-${Math.random().toString(36).substr(2,5)}`, parentId:addTarget.id, type:layerKey, label:contentText.substring(0,25), content:contentText,
       studentColor:currentStudent.color, layer:addTarget.layer+1, studentId:currentStudent.id, studentName:currentStudent.name,
       votes:0, comments:[], textContent:addTarget.layer+1===3?contentText:'', hasImage:contentImage, x:0, y:0 };
-    setNodes(prev => { const upd={...prev,[layerKey]:[...prev[layerKey],newNode]}; const laid=layoutNodes(upd,500,350); triggerSave(laid); return laid; });
+    // Apply locally
+    setNodes(prev => {
+      const upd={...prev,[layerKey]:[...prev[layerKey],newNode]};
+      const laid=layoutNodes(upd,500,350);
+      triggerSave(laid);
+      return laid;
+    });
+    // Broadcast to others via Socket.IO
+    socket.emit('node_added', {space_id: SPACE_ID, node: newNode, layer_key: layerKey, user_id: FD.user_id});
     setShowAddModal(false); setContentText(''); setContentImage(false); setAddTarget(null);
   };
   const handleVote = () => {
@@ -206,6 +358,8 @@ function App() {
     const lk=selectedNode.type;
     setNodes(prev => { const upd={...prev}; upd[lk]=upd[lk].map(n=>n.id===selectedNode.id?{...n,votes:(n.votes||0)+1}:n); triggerSave(upd); return upd; });
     setSelectedNode(prev=>({...prev,votes:(prev.votes||0)+1}));
+    // Broadcast vote
+    socket.emit('node_voted', {space_id: SPACE_ID, node_id: selectedNode.id, layer_key: lk, user_id: FD.user_id});
   };
   const handleComment = () => {
     if(!commentText.trim()||!selectedNode) return;
@@ -214,6 +368,8 @@ function App() {
     setNodes(prev => { const upd={...prev}; upd[lk]=upd[lk].map(n=>n.id===selectedNode.id?{...n,comments:[...(n.comments||[]),nc]}:n); triggerSave(upd); return upd; });
     setSelectedNode(prev=>({...prev,comments:[...(prev.comments||[]),nc]}));
     setCommentText('');
+    // Broadcast comment
+    socket.emit('comment_added', {space_id: SPACE_ID, node_id: selectedNode.id, layer_key: lk, comment: nc, user_id: FD.user_id});
   };
   const handleDeleteNode = nodeId => {
     if(!selectedNode||selectedNode.layer===0) return;
@@ -224,12 +380,23 @@ function App() {
       ? `Delete "${selectedNode.label}" and its ${childCount} child node${childCount>1?'s':''}? This cannot be undone.`
       : `Delete "${selectedNode.label}"? This cannot be undone.`;
     if (!window.confirm(msg)) return;
+    // Collect all IDs to delete (node + descendants)
+    const deletedIds = [nodeId];
+    if (selectedNode.layer === 1) {
+      const l2children = nodes.layer2.filter(n => n.parentId === nodeId);
+      l2children.forEach(n => { deletedIds.push(n.id); });
+      nodes.layer3.filter(n => l2children.some(l2 => l2.id === n.parentId)).forEach(n => deletedIds.push(n.id));
+    } else if (selectedNode.layer === 2) {
+      nodes.layer3.filter(n => n.parentId === nodeId).forEach(n => deletedIds.push(n.id));
+    }
     const lk=selectedNode.type;
     setNodes(prev => { const upd={...prev}; upd[lk]=upd[lk].filter(n=>n.id!==nodeId);
       if(selectedNode.layer===1){const l2c=upd.layer2.filter(n=>n.parentId===nodeId);const l2ids=l2c.map(n=>n.id);upd.layer2=upd.layer2.filter(n=>n.parentId!==nodeId);upd.layer3=upd.layer3.filter(n=>!l2ids.includes(n.parentId));}
       else if(selectedNode.layer===2){upd.layer3=upd.layer3.filter(n=>n.parentId!==nodeId);}
       const laid=layoutNodes(upd,500,350); triggerSave(laid); return laid; });
     setSelectedNode(null);
+    // Broadcast delete
+    socket.emit('node_deleted', {space_id: SPACE_ID, node_id: nodeId, deleted_ids: deletedIds, user_id: FD.user_id});
   };
 
   // Generate infographic via API
@@ -246,7 +413,6 @@ function App() {
   };
   // Generate PDF via API
   const handleGeneratePDF = async () => {
-    // Ensure latest data is saved first
     setSaveStatus('Saving before PDF...');
     try { await api('/save-nodes', {body: JSON.stringify({nodes_data: nodes})}); } catch(e) {}
     window.open(`/api/collab-space/${SPACE_ID}/generate-pdf`, '_blank');
@@ -281,12 +447,19 @@ function App() {
               <input type="number" min="1" max="10" value={settings.maxTextNodes} onChange={e=>setSettings({...settings,maxTextNodes:parseInt(e.target.value)})} style={{width:'100%',padding:'8px 12px',border:'1px solid #d1d5db',borderRadius:8,fontSize:13}}/></div>
             <div><label style={{display:'block',fontSize:13,fontWeight:600,color:'#475569',marginBottom:6}}>Character Limit per Text Node</label>
               <input type="number" min="50" max="1000" step="50" value={settings.charLimit} onChange={e=>setSettings({...settings,charLimit:parseInt(e.target.value)})} style={{width:'100%',padding:'8px 12px',border:'1px solid #d1d5db',borderRadius:8,fontSize:13}}/></div>
+            <button onClick={() => {
+              const s = {maxLayer1:settings.maxLayer1, maxTextNodes:settings.maxTextNodes, charLimit:settings.charLimit};
+              socket.emit('settings_changed', {space_id: SPACE_ID, settings: s, user_id: FD.user_id});
+            }} style={{padding:'8px 16px',background:'#3b82f6',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer'}}>
+              Broadcast Settings
+            </button>
             <div style={{paddingTop:16,borderTop:'1px solid #e2e8f0'}}>
               <h3 style={{fontSize:14,fontWeight:700,color:'#1e293b',marginBottom:12}}>Session Stats</h3>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                 <div style={{background:'#f0f9ff',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:'#3b82f6'}}>{allFlat.length}</div><div style={{fontSize:10,color:'#64748b'}}>Total Nodes</div></div>
                 <div style={{background:'#f0fdf4',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:'#10b981'}}>{totalVotes}</div><div style={{fontSize:10,color:'#64748b'}}>Total Votes</div></div>
                 <div style={{background:'#fdf4ff',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:'#a855f7'}}>{totalComments}</div><div style={{fontSize:10,color:'#64748b'}}>Comments</div></div>
+                <div style={{background:connected?'#f0fdf4':'#fef2f2',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:connected?'#10b981':'#ef4444'}}>{onlineUsers.length + 1}</div><div style={{fontSize:10,color:'#64748b'}}>Online</div></div>
               </div>
             </div>
             <div style={{paddingTop:16,borderTop:'1px solid #e2e8f0'}}>
@@ -319,7 +492,24 @@ function App() {
             </div>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:20}}>
-            {saveStatus && <span className="save-indicator" style={{fontSize:11,color:saveStatus==='Saved'?'#10b981':'#fbbf24'}}>{saveStatus}</span>}
+            {/* Connection indicator */}
+            <div style={{display:'flex',alignItems:'center',gap:6}} title={connected ? 'Live sync active' : 'Reconnecting...'}>
+              <span className="presence-dot" style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:connected?'#10b981':'#ef4444'}}/>
+              <span style={{fontSize:11,color:'#94a3b8'}}>{connected ? 'Live' : 'Offline'}</span>
+            </div>
+            {/* Online users avatars */}
+            <div style={{display:'flex',alignItems:'center',gap:-4}}>
+              <UsersIcon size={16} style={{color:'#94a3b8',marginRight:4}}/>
+              <span style={{fontSize:11,color:'#94a3b8',marginRight:6}}>{onlineUsers.length + 1}</span>
+              {onlineUsers.slice(0, 5).map(u => (
+                <div key={u.user_id} title={u.user_name} style={{width:22,height:22,borderRadius:'50%',background:u.color||'#64748b',border:'2px solid #1e293b',
+                  display:'flex',alignItems:'center',justifyContent:'center',marginLeft:-4,fontSize:9,fontWeight:700,color:'#fff'}}>
+                  {(u.user_name||'?').charAt(0).toUpperCase()}
+                </div>
+              ))}
+              {onlineUsers.length > 5 && <span style={{fontSize:10,color:'#94a3b8',marginLeft:4}}>+{onlineUsers.length-5}</span>}
+            </div>
+            {saveStatus && <span className="save-indicator" style={{fontSize:11,color:saveStatus==='Saved'||saveStatus==='Synced'?'#10b981':'#fbbf24'}}>{saveStatus}</span>}
             <div style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}} onClick={()=>setShowColorPicker(!showColorPicker)}>
               <span style={{fontSize:12,color:'#94a3b8'}}>Your color:</span>
               <div style={{width:22,height:22,borderRadius:'50%',background:currentStudent.color.primary,border:'2px solid #fff'}}/>
@@ -368,6 +558,10 @@ function App() {
             {nodes.layer1.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onSelect={setSelectedNode} onAddChild={handleAddChild} userView={userView}/>)}
             {nodes.layer2.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onSelect={setSelectedNode} onAddChild={handleAddChild} userView={userView}/>)}
             {nodes.layer3.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onSelect={setSelectedNode} onAddChild={handleAddChild} userView={userView}/>)}
+            {/* Remote cursors (Figma-style) */}
+            {Object.entries(remoteCursors).map(([uid, cur]) => (
+              <RemoteCursor key={uid} user={cur}/>
+            ))}
             <g transform={`translate(${viewBox.x+16},${viewBox.y+viewBox.h-100})`}>
               <rect x="0" y="0" width="160" height="90" rx="8" fill="white" stroke="#e2e8f0" strokeWidth="1" opacity="0.9"/>
               <text x="10" y="18" style={{fontSize:'10px',fontWeight:700,fill:'#475569'}}>Legend</text>
