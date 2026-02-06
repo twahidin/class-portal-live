@@ -2457,6 +2457,11 @@ def api_collab_space_save_nodes(space_id):
 # COLLAB SPACE – SOCKET.IO REAL-TIME EVENTS
 # ============================================================================
 
+# Server-side room presence tracking (color uniqueness + user list)
+_collab_rooms = {}   # { room: { sid: {user_id, user_name, color, user_role} } }
+_sid_to_room = {}    # { sid: room }
+
+
 @socketio.on('join_space')
 def handle_join_space(data):
     """Client joins a space room for real-time updates."""
@@ -2468,8 +2473,19 @@ def handle_join_space(data):
     if not space_id:
         return
     room = f'collab_{space_id}'
+    sid = request.sid
     join_room(room)
-    # Broadcast that a new participant joined (for presence)
+    # Track this user in the room
+    if room not in _collab_rooms:
+        _collab_rooms[room] = {}
+    _collab_rooms[room][sid] = {
+        'user_id': user_id, 'user_name': user_name,
+        'user_role': user_role, 'color': color,
+    }
+    _sid_to_room[sid] = room
+    # Send full list of current room members to the joining user
+    emit('room_users', {'users': list(_collab_rooms[room].values())})
+    # Notify others that someone joined
     emit('user_joined', {
         'user_id': user_id, 'user_name': user_name,
         'user_role': user_role, 'color': color,
@@ -2485,8 +2501,45 @@ def handle_leave_space(data):
     if not space_id:
         return
     room = f'collab_{space_id}'
+    sid = request.sid
     leave_room(room)
+    if room in _collab_rooms:
+        _collab_rooms[room].pop(sid, None)
+        if not _collab_rooms[room]:
+            del _collab_rooms[room]
+    _sid_to_room.pop(sid, None)
     emit('user_left', {'user_id': user_id, 'user_name': user_name}, to=room, include_self=False)
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Clean up room presence on unexpected disconnect."""
+    sid = request.sid
+    room = _sid_to_room.pop(sid, None)
+    if room and room in _collab_rooms:
+        user_info = _collab_rooms[room].pop(sid, None)
+        if not _collab_rooms[room]:
+            del _collab_rooms[room]
+        if user_info:
+            emit('user_left', {
+                'user_id': user_info.get('user_id'),
+                'user_name': user_info.get('user_name', ''),
+            }, to=room)
+
+
+@socketio.on('color_changed')
+def handle_color_changed(data):
+    """User changed their color – update tracking and broadcast."""
+    space_id = data.get('space_id')
+    user_id = data.get('user_id')
+    color = data.get('color')
+    if not space_id:
+        return
+    room = f'collab_{space_id}'
+    sid = request.sid
+    if room in _collab_rooms and sid in _collab_rooms[room]:
+        _collab_rooms[room][sid]['color'] = color
+    emit('color_changed', {'user_id': user_id, 'color': color}, to=room, include_self=False)
 
 
 @socketio.on('node_added')
@@ -2558,6 +2611,57 @@ def handle_comment_added(data):
         {'$push': {f'nodes_data.{layer_key}.$.comments': comment}, '$set': {'updated_at': datetime.utcnow()}}
     )
     emit('comment_added', {'node_id': node_id, 'layer_key': layer_key, 'comment': comment, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('node_moved')
+def handle_node_moved(data):
+    """A user dragged a node to a new position."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    layer_key = data.get('layer_key')  # 'central', 'layer1', 'layer2', 'layer3'
+    x = data.get('x')
+    y = data.get('y')
+    if not space_id or not node_id:
+        return
+    room = f'collab_{space_id}'
+    # Persist position atomically
+    if layer_key == 'central':
+        db.db.collab_spaces.update_one(
+            {'space_id': space_id},
+            {'$set': {'nodes_data.central.x': x, 'nodes_data.central.y': y, 'updated_at': datetime.utcnow()}}
+        )
+    else:
+        db.db.collab_spaces.update_one(
+            {'space_id': space_id, f'nodes_data.{layer_key}.id': node_id},
+            {'$set': {f'nodes_data.{layer_key}.$.x': x, f'nodes_data.{layer_key}.$.y': y, 'updated_at': datetime.utcnow()}}
+        )
+    emit('node_moved', {'node_id': node_id, 'x': x, 'y': y, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('node_edited')
+def handle_node_edited(data):
+    """A user edited the text of their node."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    layer_key = data.get('layer_key')
+    label = data.get('label')
+    content = data.get('content')
+    if not space_id or not node_id or not layer_key:
+        return
+    room = f'collab_{space_id}'
+    update_fields = {'updated_at': datetime.utcnow()}
+    if label is not None:
+        update_fields[f'nodes_data.{layer_key}.$.label'] = label
+    if content is not None:
+        update_fields[f'nodes_data.{layer_key}.$.content'] = content
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id, f'nodes_data.{layer_key}.id': node_id},
+        {'$set': update_fields}
+    )
+    emit('node_edited', {
+        'node_id': node_id, 'layer_key': layer_key,
+        'label': label, 'content': content, 'by': data.get('user_id'),
+    }, to=room, include_self=False)
 
 
 @socketio.on('cursor_move')

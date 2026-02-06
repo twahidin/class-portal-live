@@ -22,14 +22,14 @@
   .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
   .save-indicator { transition: opacity 0.3s; }
   @keyframes cursorPulse { 0%,100% { opacity: 0.9; } 50% { opacity: 0.5; } }
-  .remote-cursor { pointer-events: none; transition: transform 0.15s ease-out; }
+  .remote-cursor { pointer-events: none; }
   .presence-dot { animation: cursorPulse 2s ease-in-out infinite; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 
-<!-- Flask data injection (regular JS, uses Jinja) -->
+<!-- Flask data injection -->
 <script>
 window.FLASK_DATA = {
     space: {{ space_json|safe }},
@@ -48,8 +48,6 @@ window.FLASK_DATA = {
 const { useState, useEffect, useRef, useCallback } = React;
 const FD = window.FLASK_DATA;
 const SPACE_ID = FD.space.space_id;
-
-/* ── Socket.IO connection ── */
 const socket = io({ transports: ['websocket', 'polling'] });
 
 /* ── SVG Icon Components ── */
@@ -70,6 +68,7 @@ const DownloadIcon = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0
 const TrashIcon = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></Icon>;
 const ArrowLeftIcon = (p) => <Icon {...p}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></Icon>;
 const UsersIcon = (p) => <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Icon>;
+const EditIcon = (p) => <Icon {...p}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></Icon>;
 
 /* ── Color Palette ── */
 const COLOR_PALETTE = [
@@ -83,30 +82,64 @@ const COLOR_PALETTE = [
   { name:'Teal',primary:'#14B8A6',light:'#CCFBF1',dark:'#134E4A' },
 ];
 
-/* ── Layout Calculation ── */
+/* ── Node dimension helpers (pill-shaped, expandable) ── */
+const LAYER_FONT = {0:14,1:11,2:10,3:9};
+function getNodeSize(node) {
+  if (node.layer === 0) return { w: 130, h: 60 };
+  const fs = LAYER_FONT[node.layer] || 9;
+  const charW = fs * 0.62;
+  const label = node.label || '';
+  const pad = 28;
+  const isText = node.isTextNode;
+  const minW = isText ? 110 : (node.layer === 1 ? 100 : 80);
+  const maxW = isText ? 240 : 180;
+  const textW = label.length * charW + pad;
+  const w = Math.max(minW, Math.min(maxW, textW));
+  const h = isText ? 38 : (node.layer === 1 ? 42 : (node.layer === 2 ? 36 : 30));
+  return { w, h };
+}
+
+/* ── Initial Layout Calculation (run once) ── */
 function layoutNodes(data, cx, cy) {
   const out = JSON.parse(JSON.stringify(data));
-  out.central.x = cx; out.central.y = cy;
-  const l1 = out.layer1, l1R = 200;
-  l1.forEach((n,i) => { const a=(i/l1.length)*Math.PI*2-Math.PI/2; n.x=cx+l1R*Math.cos(a); n.y=cy+l1R*Math.sin(a); });
-  const l2R = 130;
+  // Only position nodes that don't already have valid x,y from DB (dragged positions)
+  const needsPos = (n) => (n.x === 0 && n.y === 0) || n.x === undefined;
+  if (needsPos(out.central)) { out.central.x = cx; out.central.y = cy; }
+  const l1 = out.layer1, l1R = 220;
+  l1.forEach((n,i) => { if (needsPos(n)) { const a=(i/l1.length)*Math.PI*2-Math.PI/2; n.x=out.central.x+l1R*Math.cos(a); n.y=out.central.y+l1R*Math.sin(a); }});
+  const l2R = 150;
   out.layer2.forEach(n => {
+    if (!needsPos(n)) return;
     const p = l1.find(x => x.id===n.parentId); if(!p) return;
     const sibs = out.layer2.filter(s => s.parentId===p.id), idx = sibs.indexOf(n);
-    const pa = Math.atan2(p.y-cy,p.x-cx), spread=0.7;
+    const pa = Math.atan2(p.y-out.central.y,p.x-out.central.x), spread=0.7;
     const a = pa+(idx-(sibs.length-1)/2)*spread;
     n.x=p.x+l2R*Math.cos(a); n.y=p.y+l2R*Math.sin(a);
   });
-  const l3R = 90;
+  const l3R = 110;
   out.layer3.forEach(n => {
+    if (!needsPos(n)) return;
     const p = out.layer2.find(x => x.id===n.parentId); if(!p) return;
     const pp = l1.find(x => x.id===p.parentId);
     const sibs = out.layer3.filter(s => s.parentId===p.id), idx = sibs.indexOf(n);
-    const pa = Math.atan2(p.y-(pp?.y||cy),p.x-(pp?.x||cx)), spread=0.6;
+    const pa = Math.atan2(p.y-(pp?.y||out.central.y),p.x-(pp?.x||out.central.x)), spread=0.6;
     const a = pa+(idx-(sibs.length-1)/2)*spread;
     n.x=p.x+l3R*Math.cos(a); n.y=p.y+l3R*Math.sin(a);
   });
   return out;
+}
+
+/* ── Place a new node near its parent ── */
+function placeNearParent(parent, siblings, dist) {
+  if (siblings.length === 0) return { x: parent.x + dist, y: parent.y };
+  const angles = siblings.map(s => Math.atan2(s.y - parent.y, s.x - parent.x)).sort((a,b) => a - b);
+  let maxGap = 0, bestAngle = angles[0] + Math.PI;
+  for (let i = 0; i < angles.length; i++) {
+    const next = i < angles.length - 1 ? angles[i+1] : angles[0] + Math.PI * 2;
+    const gap = next - angles[i];
+    if (gap > maxGap) { maxGap = gap; bestAngle = angles[i] + gap / 2; }
+  }
+  return { x: parent.x + dist * Math.cos(bestAngle), y: parent.y + dist * Math.sin(bestAngle) };
 }
 
 const CurvedLine = ({x1,y1,x2,y2,color='#94a3b8'}) => {
@@ -114,45 +147,69 @@ const CurvedLine = ({x1,y1,x2,y2,color='#94a3b8'}) => {
   return <path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`} stroke={color} strokeWidth="2" fill="none" opacity="0.5"/>;
 };
 
-const LAYER_RADIUS = {0:60,1:45,2:35,3:28};
-const LAYER_FONT = {0:13,1:11,2:10,3:9};
-
-/* ── Single Node ── */
-const MindMapNode = ({node,isSelected,onSelect,onAddChild,userView}) => {
-  const r = LAYER_RADIUS[node.layer]||28, fs = LAYER_FONT[node.layer]||9;
-  const bg = node.layer===0?'#0F172A':(node.studentColor?(node.type.includes('layer')?node.studentColor.dark:node.studentColor.light):'#e2e8f0');
-  const stroke = isSelected?'#FBBF24':(node.studentColor?node.studentColor.primary:'#334155');
-  const textFill = node.layer===0||(node.studentColor&&node.type.includes('layer'))?'#FFFFFF':'#1E293B';
-  const truncated = node.label.length>16?node.label.substring(0,14)+'...':node.label;
-  const words = node.label.split(' '); let lines=[];
-  if(node.layer===0){let line='';words.forEach(w=>{if((line+' '+w).trim().length>18){lines.push(line.trim());line=w;}else{line=(line+' '+w).trim();}});if(line)lines.push(line);}
+/* ── Single Node (pill-shaped, expandable) ── */
+const MindMapNode = ({node, isSelected, onMouseDown, onAddChild, userView}) => {
+  const { w, h } = getNodeSize(node);
+  const fs = LAYER_FONT[node.layer] || 9;
+  const isText = node.isTextNode;
+  // Colors
+  const bg = node.layer === 0 ? '#0F172A'
+    : isText ? (node.studentColor?.light || '#f8fafc')
+    : (node.studentColor ? node.studentColor.dark : '#e2e8f0');
+  const stroke = isSelected ? '#FBBF24' : (node.studentColor ? node.studentColor.primary : '#334155');
+  const textFill = node.layer === 0 ? '#FFFFFF'
+    : isText ? (node.studentColor?.dark || '#1E293B')
+    : (node.studentColor ? '#FFFFFF' : '#1E293B');
+  // Truncate for display
+  const maxChars = Math.floor((w - 20) / (fs * 0.6));
+  const display = node.label.length > maxChars ? node.label.substring(0, maxChars - 1) + '\u2026' : node.label;
+  // Central node word wrap
+  let centralLines = [];
+  if (node.layer === 0) {
+    const words = node.label.split(' '); let line = '';
+    words.forEach(wd => { if ((line + ' ' + wd).trim().length > 16) { centralLines.push(line.trim()); line = wd; } else { line = (line + ' ' + wd).trim(); } });
+    if (line) centralLines.push(line);
+  }
+  // Show + button: not on text nodes, not on layer 3
+  const showAdd = !isText && node.layer < 3;
   return (
-    <g style={{cursor:'pointer'}} onClick={()=>onSelect(node)}>
-      {isSelected && <circle cx={node.x} cy={node.y} r={r+6} fill="none" stroke="#FBBF24" strokeWidth="3" opacity="0.5"/>}
-      <circle cx={node.x} cy={node.y} r={r} fill={bg} stroke={stroke} strokeWidth={isSelected?3:1.5} className="node-hover" style={{transition:'all 0.2s'}}/>
-      {node.votes>0&&node.layer>0&&(<g><circle cx={node.x+r*0.7} cy={node.y-r*0.7} r="10" fill="#FBBF24" stroke="#fff" strokeWidth="1.5"/><text x={node.x+r*0.7} y={node.y-r*0.7+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'8px',fontWeight:700,fill:'#1E293B'}}>{node.votes}</text></g>)}
-      {node.comments&&node.comments.length>0&&(<g><circle cx={node.x-r*0.7} cy={node.y-r*0.7} r="10" fill="#3B82F6" stroke="#fff" strokeWidth="1.5"/><text x={node.x-r*0.7} y={node.y-r*0.7+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'8px',fontWeight:700,fill:'#FFFFFF'}}>{node.comments.length}</text></g>)}
-      {node.layer===0 ? lines.map((line,i)=>(<text key={i} x={node.x} y={node.y+(i-(lines.length-1)/2)*16} textAnchor="middle" dominantBaseline="middle" style={{fontSize:`${fs}px`,fontWeight:700,fill:textFill,pointerEvents:'none'}}>{line}</text>))
-        : (<text x={node.x} y={node.y+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:`${fs}px`,fontWeight:600,fill:textFill,pointerEvents:'none'}}>{truncated}</text>)}
-      {node.hasImage&&(<g><rect x={node.x-8} y={node.y+r*0.4} width="16" height="12" rx="2" fill="#F59E0B" stroke="#fff" strokeWidth="1"/><text x={node.x} y={node.y+r*0.4+7} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'6px',fill:'#fff',fontWeight:700}}>IMG</text></g>)}
-      {/* Add child button: teachers and students both see it on central (layer 0), layer 1, and layer 2 */}
-      {node.layer<3 && (<g className="add-btn" onClick={e=>{e.stopPropagation();onAddChild(node);}} style={{cursor:'pointer'}}><circle cx={node.x+r+12} cy={node.y} r="11" fill="#10B981" stroke="#fff" strokeWidth="1.5"/><text x={node.x+r+12} y={node.y+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'14px',fill:'#fff',fontWeight:700,pointerEvents:'none'}}>+</text></g>)}
-      {node.studentColor&&node.layer>0&&(<circle cx={node.x} cy={node.y+r+8} r="4" fill={node.studentColor.primary} stroke="#fff" strokeWidth="1"/>)}
+    <g style={{cursor:'pointer'}} onMouseDown={e => onMouseDown(e, node)}>
+      {isSelected && <rect x={node.x-w/2-4} y={node.y-h/2-4} width={w+8} height={h+8} rx={(h+8)/2} fill="none" stroke="#FBBF24" strokeWidth="3" opacity="0.5"/>}
+      <rect x={node.x-w/2} y={node.y-h/2} width={w} height={h} rx={h/2} fill={bg} stroke={stroke} strokeWidth={isSelected?3:1.5} className="node-hover" style={{transition:'all 0.15s'}}/>
+      {/* Text node icon */}
+      {isText && <g opacity="0.4"><rect x={node.x-w/2+8} y={node.y-5} width="10" height="10" rx="1.5" fill="none" stroke={node.studentColor?.dark||'#475569'} strokeWidth="1"/><line x1={node.x-w/2+10} y1={node.y-2} x2={node.x-w/2+16} y2={node.y-2} stroke={node.studentColor?.dark||'#475569'} strokeWidth="0.8"/><line x1={node.x-w/2+10} y1={node.y+1} x2={node.x-w/2+15} y2={node.y+1} stroke={node.studentColor?.dark||'#475569'} strokeWidth="0.8"/></g>}
+      {/* Vote badge */}
+      {node.votes>0&&node.layer>0&&(<g><circle cx={node.x+w/2-4} cy={node.y-h/2-4} r="10" fill="#FBBF24" stroke="#fff" strokeWidth="1.5"/><text x={node.x+w/2-4} y={node.y-h/2-3} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'8px',fontWeight:700,fill:'#1E293B'}}>{node.votes}</text></g>)}
+      {/* Comment badge */}
+      {node.comments&&node.comments.length>0&&(<g><circle cx={node.x-w/2+4} cy={node.y-h/2-4} r="10" fill="#3B82F6" stroke="#fff" strokeWidth="1.5"/><text x={node.x-w/2+4} y={node.y-h/2-3} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'8px',fontWeight:700,fill:'#FFFFFF'}}>{node.comments.length}</text></g>)}
+      {/* Label text */}
+      {node.layer === 0 ? centralLines.map((line,i) => (
+        <text key={i} x={node.x} y={node.y+(i-(centralLines.length-1)/2)*16} textAnchor="middle" dominantBaseline="middle"
+          style={{fontSize:`${fs}px`,fontWeight:700,fill:textFill,pointerEvents:'none'}}>{line}</text>
+      )) : (
+        <text x={node.x + (isText ? 8 : 0)} y={node.y+1} textAnchor="middle" dominantBaseline="middle"
+          style={{fontSize:`${fs}px`,fontWeight:600,fill:textFill,pointerEvents:'none'}}>{display}</text>
+      )}
+      {/* Add child button */}
+      {showAdd && (<g className="add-btn" onMouseDown={e=>{e.stopPropagation();onAddChild(node);}} style={{cursor:'pointer'}}><circle cx={node.x+w/2+12} cy={node.y} r="11" fill="#10B981" stroke="#fff" strokeWidth="1.5"/><text x={node.x+w/2+12} y={node.y+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'14px',fill:'#fff',fontWeight:700,pointerEvents:'none'}}>+</text></g>)}
+      {/* Student color dot */}
+      {node.studentColor&&node.layer>0&&(<circle cx={node.x} cy={node.y+h/2+8} r="4" fill={node.studentColor.primary} stroke="#fff" strokeWidth="1"/>)}
     </g>
   );
 };
 
-/* ── API helpers (used only for infographic/PDF, not node save) ── */
+/* ── API helpers (infographic/PDF only) ── */
 const api = (path, opts={}) => fetch(`/api/collab-space/${SPACE_ID}${path}`, {method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, ...opts});
 
 /* ── Remote Cursor Component ── */
 const RemoteCursor = ({user}) => {
   if (!user.x && user.x !== 0) return null;
   return (
-    <g className="remote-cursor" style={{transform:`translate(${user.x}px, ${user.y}px)`}}>
-      <polygon points="0,0 0,18 5,14 10,20 13,18 8,12 14,10" fill={user.color || '#94a3b8'} stroke="#fff" strokeWidth="1" opacity="0.85"/>
-      <rect x="14" y="12" rx="4" ry="4" width={Math.max(40, user.name.length * 6 + 12)} height="16" fill={user.color || '#94a3b8'} opacity="0.85"/>
-      <text x="20" y="23" style={{fontSize:'9px',fill:'#fff',fontWeight:600,pointerEvents:'none'}}>{user.name}</text>
+    <g className="remote-cursor" style={{transition:'transform 0.12s ease-out'}}>
+      <polygon points={`${user.x},${user.y} ${user.x},${user.y+18} ${user.x+5},${user.y+14} ${user.x+10},${user.y+20} ${user.x+13},${user.y+18} ${user.x+8},${user.y+12} ${user.x+14},${user.y+10}`}
+        fill={user.color||'#94a3b8'} stroke="#fff" strokeWidth="1" opacity="0.85"/>
+      <rect x={user.x+14} y={user.y+12} rx="4" ry="4" width={Math.max(40,user.name.length*6+12)} height="16" fill={user.color||'#94a3b8'} opacity="0.85"/>
+      <text x={user.x+20} y={user.y+23} style={{fontSize:'9px',fill:'#fff',fontWeight:600,pointerEvents:'none'}}>{user.name}</text>
     </g>
   );
 };
@@ -161,7 +218,6 @@ const RemoteCursor = ({user}) => {
 function App() {
   const svgRef = useRef(null);
   const saveTimer = useRef(null);
-  // Students are always locked to student view; teachers default to teacher view
   const [userView, setUserView] = useState(FD.user_role === 'student' ? 'student' : 'teacher');
   const [nodes, setNodes] = useState(() => layoutNodes(FD.nodes_data, 500, 350));
   const [selectedNode, setSelectedNode] = useState(null);
@@ -171,7 +227,7 @@ function App() {
   const [contentText, setContentText] = useState('');
   const [contentImage, setContentImage] = useState(false);
   const [addTarget, setAddTarget] = useState(null);
-  const [showPreview, setShowPreview] = useState(null);
+  const [addAsTextNode, setAddAsTextNode] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [infographicsUsed, setInfographicsUsed] = useState(FD.space.infographic_count || 0);
   const maxInfographics = FD.space.max_infographic || 5;
@@ -183,196 +239,280 @@ function App() {
     maxLayer1: (FD.space.settings||{}).maxLayer1||6, maxTextNodes: (FD.space.settings||{}).maxTextNodes||5,
     charLimit: (FD.space.settings||{}).charLimit||200, sessionOpen: FD.space.is_active!==false,
   });
-  const [viewBox, setViewBox] = useState({x:100,y:0,w:900,h:700});
-  const [dragging, setDragging] = useState(false);
+  const [viewBox, setViewBox] = useState({x:50,y:-20,w:950,h:740});
+  const [dragging, setDragging] = useState(false);  // canvas pan
   const [dragStart, setDragStart] = useState({x:0,y:0});
-  // Live collaboration state
+  // Live collab state
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const [remoteCursors, setRemoteCursors] = useState({});  // { user_id: {x, y, name, color} }
+  const [remoteCursors, setRemoteCursors] = useState({});
   const [connected, setConnected] = useState(false);
   const cursorThrottle = useRef(0);
+  // Node dragging
+  const [dragNode, setDragNode] = useState(null);
+  const [dragNodeStart, setDragNodeStart] = useState(null);  // {nodeX, nodeY, mouseX, mouseY}
+  const [didDrag, setDidDrag] = useState(false);
+  const DRAG_THRESHOLD = 5;
+  // Editing
+  const [editing, setEditing] = useState(false);
+  const [editLabel, setEditLabel] = useState('');
+  const [editContent, setEditContent] = useState('');
+
+  // Derived: taken colors (by other online users)
+  const takenColors = onlineUsers.filter(u => u.user_id !== FD.user_id).map(u => u.color).filter(Boolean);
 
   // ─── Socket.IO setup ───
   useEffect(() => {
     socket.on('connect', () => {
       setConnected(true);
       socket.emit('join_space', {
-        space_id: SPACE_ID,
-        user_id: FD.user_id,
-        user_name: FD.user_name,
-        user_role: FD.user_role,
+        space_id: SPACE_ID, user_id: FD.user_id,
+        user_name: FD.user_name, user_role: FD.user_role,
         color: currentStudent.color.primary,
       });
     });
     socket.on('disconnect', () => setConnected(false));
-
-    // Presence
+    // Full room user list on join
+    socket.on('room_users', (data) => {
+      setOnlineUsers(data.users || []);
+    });
     socket.on('user_joined', (data) => {
-      setOnlineUsers(prev => {
-        if (prev.find(u => u.user_id === data.user_id)) return prev;
-        return [...prev, data];
-      });
+      setOnlineUsers(prev => prev.find(u => u.user_id === data.user_id) ? prev : [...prev, data]);
     });
     socket.on('user_left', (data) => {
       setOnlineUsers(prev => prev.filter(u => u.user_id !== data.user_id));
-      setRemoteCursors(prev => { const n = {...prev}; delete n[data.user_id]; return n; });
+      setRemoteCursors(prev => { const n={...prev}; delete n[data.user_id]; return n; });
     });
-
-    // Remote cursor movement
+    socket.on('color_changed', (data) => {
+      setOnlineUsers(prev => prev.map(u => u.user_id === data.user_id ? {...u, color: data.color} : u));
+    });
     socket.on('cursor_move', (data) => {
-      setRemoteCursors(prev => ({...prev, [data.user_id]: {
-        x: data.x, y: data.y, name: data.user_name, color: data.color,
-      }}));
+      setRemoteCursors(prev => ({...prev, [data.user_id]: {x:data.x,y:data.y,name:data.user_name,color:data.color}}));
     });
-
-    // Remote node added
     socket.on('node_added', (data) => {
       setNodes(prev => {
         const lk = data.layer_key;
-        if (!prev[lk]) return prev;
-        // Avoid duplicate (if somehow same id)
-        if (prev[lk].find(n => n.id === data.node.id)) return prev;
-        const upd = {...prev, [lk]: [...prev[lk], data.node]};
-        return layoutNodes(upd, 500, 350);
+        if (!prev[lk] || prev[lk].find(n => n.id === data.node.id)) return prev;
+        return {...prev, [lk]: [...prev[lk], data.node]};
       });
     });
-
-    // Remote node deleted
     socket.on('node_deleted', (data) => {
       const ids = new Set(data.deleted_ids || [data.node_id]);
-      setNodes(prev => {
-        const upd = {
-          ...prev,
-          layer1: prev.layer1.filter(n => !ids.has(n.id)),
-          layer2: prev.layer2.filter(n => !ids.has(n.id)),
-          layer3: prev.layer3.filter(n => !ids.has(n.id)),
-        };
-        return layoutNodes(upd, 500, 350);
-      });
+      setNodes(prev => ({...prev,
+        layer1: prev.layer1.filter(n => !ids.has(n.id)),
+        layer2: prev.layer2.filter(n => !ids.has(n.id)),
+        layer3: prev.layer3.filter(n => !ids.has(n.id)),
+      }));
       setSelectedNode(prev => prev && ids.has(prev.id) ? null : prev);
     });
-
-    // Remote vote
     socket.on('node_voted', (data) => {
-      setNodes(prev => {
-        const lk = data.layer_key;
-        if (!prev[lk]) return prev;
-        const upd = {...prev, [lk]: prev[lk].map(n => n.id === data.node_id ? {...n, votes: (n.votes||0)+1} : n)};
-        return upd;
-      });
-      setSelectedNode(prev => prev && prev.id === data.node_id ? {...prev, votes: (prev.votes||0)+1} : prev);
+      const lk = data.layer_key;
+      setNodes(prev => prev[lk] ? {...prev, [lk]: prev[lk].map(n => n.id===data.node_id ? {...n,votes:(n.votes||0)+1} : n)} : prev);
+      setSelectedNode(prev => prev && prev.id===data.node_id ? {...prev,votes:(prev.votes||0)+1} : prev);
     });
-
-    // Remote comment
     socket.on('comment_added', (data) => {
+      const lk = data.layer_key;
+      setNodes(prev => prev[lk] ? {...prev, [lk]: prev[lk].map(n => n.id===data.node_id ? {...n,comments:[...(n.comments||[]),data.comment]} : n)} : prev);
+      setSelectedNode(prev => prev && prev.id===data.node_id ? {...prev,comments:[...(prev.comments||[]),data.comment]} : prev);
+    });
+    socket.on('node_moved', (data) => {
       setNodes(prev => {
-        const lk = data.layer_key;
-        if (!prev[lk]) return prev;
-        const upd = {...prev, [lk]: prev[lk].map(n => n.id === data.node_id ? {...n, comments: [...(n.comments||[]), data.comment]} : n)};
+        const update = (arr) => arr.map(n => n.id === data.node_id ? {...n, x: data.x, y: data.y} : n);
+        const upd = {...prev, layer1: update(prev.layer1), layer2: update(prev.layer2), layer3: update(prev.layer3)};
+        if (prev.central.id === data.node_id) upd.central = {...prev.central, x: data.x, y: data.y};
         return upd;
       });
-      setSelectedNode(prev => prev && prev.id === data.node_id ? {...prev, comments: [...(prev.comments||[]), data.comment]} : prev);
     });
-
-    // Remote settings change
+    socket.on('node_edited', (data) => {
+      const lk = data.layer_key;
+      setNodes(prev => {
+        if (!prev[lk]) return prev;
+        return {...prev, [lk]: prev[lk].map(n => {
+          if (n.id !== data.node_id) return n;
+          const upd = {...n};
+          if (data.label !== undefined && data.label !== null) upd.label = data.label;
+          if (data.content !== undefined && data.content !== null) upd.content = data.content;
+          return upd;
+        })};
+      });
+      setSelectedNode(prev => {
+        if (!prev || prev.id !== data.node_id) return prev;
+        const upd = {...prev};
+        if (data.label !== undefined && data.label !== null) upd.label = data.label;
+        if (data.content !== undefined && data.content !== null) upd.content = data.content;
+        return upd;
+      });
+    });
     socket.on('settings_changed', (data) => {
-      if (data.settings) {
-        setSettings(prev => ({...prev, ...data.settings}));
-      }
+      if (data.settings) setSettings(prev => ({...prev, ...data.settings}));
     });
-
     return () => {
       socket.emit('leave_space', {space_id: SPACE_ID, user_id: FD.user_id, user_name: FD.user_name});
-      socket.off('connect'); socket.off('disconnect');
-      socket.off('user_joined'); socket.off('user_left');
-      socket.off('cursor_move'); socket.off('node_added');
-      socket.off('node_deleted'); socket.off('node_voted');
-      socket.off('comment_added'); socket.off('settings_changed');
+      ['connect','disconnect','room_users','user_joined','user_left','color_changed','cursor_move',
+       'node_added','node_deleted','node_voted','comment_added','node_moved','node_edited','settings_changed'
+      ].forEach(ev => socket.off(ev));
     };
   }, []);
 
-  // ─── Fallback auto-save (full state, periodic backup) ───
+  // ─── Backup full-state save ───
   function triggerSave(nodesData) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveStatus('Synced');
     saveTimer.current = setTimeout(async () => {
-      setSaveStatus('Saving backup...');
+      setSaveStatus('Saving...');
       try {
         await api('/save-nodes', {body: JSON.stringify({nodes_data: nodesData, settings: {maxLayer1:settings.maxLayer1,maxTextNodes:settings.maxTextNodes,charLimit:settings.charLimit}})});
-        setSaveStatus('Saved');
-        setTimeout(() => setSaveStatus(''), 2000);
+        setSaveStatus('Saved'); setTimeout(() => setSaveStatus(''), 2000);
       } catch(e) { setSaveStatus('Save failed'); }
-    }, 5000);  // Backup save every 5s after last change
+    }, 5000);
   }
 
+  // ─── Canvas interactions ───
   const handleWheel = useCallback(e => {
     e.preventDefault();
-    const scale = e.deltaY>0?1.1:0.9;
-    setViewBox(v => {const cx=v.x+v.w/2,cy=v.y+v.h/2,nw=v.w*scale,nh=v.h*scale;return{x:cx-nw/2,y:cy-nh/2,w:nw,h:nh};});
-  },[]);
-  const handleMouseDown = e => { if(e.target.tagName==='circle'||e.target.tagName==='text')return; setDragging(true);setDragStart({x:e.clientX,y:e.clientY}); };
+    const scale = e.deltaY > 0 ? 1.1 : 0.9;
+    setViewBox(v => { const cx=v.x+v.w/2, cy=v.y+v.h/2, nw=v.w*scale, nh=v.h*scale; return {x:cx-nw/2,y:cy-nh/2,w:nw,h:nh}; });
+  }, []);
+
+  const svgCoords = (e) => {
+    const svg = svgRef.current; if (!svg) return {x:0,y:0};
+    const rect = svg.getBoundingClientRect();
+    return { x: viewBox.x + ((e.clientX - rect.left) / rect.width) * viewBox.w,
+             y: viewBox.y + ((e.clientY - rect.top) / rect.height) * viewBox.h };
+  };
+
+  const handleCanvasMouseDown = e => {
+    if (dragNode) return;
+    setDragging(true); setDragStart({x:e.clientX, y:e.clientY});
+  };
+
   const handleMouseMove = e => {
-    // Send cursor position to others (throttled to ~15fps)
+    // Remote cursor broadcast (~15fps)
     const now = Date.now();
     if (now - cursorThrottle.current > 66) {
       cursorThrottle.current = now;
-      const svg = svgRef.current;
-      if (svg) {
-        const rect = svg.getBoundingClientRect();
-        const svgX = viewBox.x + ((e.clientX - rect.left) / rect.width) * viewBox.w;
-        const svgY = viewBox.y + ((e.clientY - rect.top) / rect.height) * viewBox.h;
-        socket.emit('cursor_move', {
-          space_id: SPACE_ID, user_id: FD.user_id,
-          user_name: FD.user_name, color: currentStudent.color.primary,
-          x: Math.round(svgX), y: Math.round(svgY),
+      const c = svgCoords(e);
+      socket.emit('cursor_move', {space_id:SPACE_ID, user_id:FD.user_id, user_name:FD.user_name, color:currentStudent.color.primary, x:Math.round(c.x), y:Math.round(c.y)});
+    }
+    // Node dragging
+    if (dragNode && dragNodeStart) {
+      const c = svgCoords(e);
+      const dx = c.x - dragNodeStart.mouseX, dy = c.y - dragNodeStart.mouseY;
+      if (!didDrag && Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD) setDidDrag(true);
+      if (didDrag || Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD) {
+        const nx = dragNodeStart.nodeX + dx, ny = dragNodeStart.nodeY + dy;
+        setNodes(prev => {
+          if (dragNode.id === 'central') return {...prev, central: {...prev.central, x: nx, y: ny}};
+          const lk = dragNode.type;
+          return {...prev, [lk]: prev[lk].map(n => n.id === dragNode.id ? {...n, x: nx, y: ny} : n)};
         });
       }
+      return;
     }
-    if(!dragging)return;
-    const dx=(e.clientX-dragStart.x)*(viewBox.w/window.innerWidth),dy=(e.clientY-dragStart.y)*(viewBox.h/window.innerHeight);
-    setViewBox(v=>({...v,x:v.x-dx,y:v.y-dy})); setDragStart({x:e.clientX,y:e.clientY});
+    // Canvas pan
+    if (dragging) {
+      const dx = (e.clientX - dragStart.x) * (viewBox.w / window.innerWidth);
+      const dy = (e.clientY - dragStart.y) * (viewBox.h / window.innerHeight);
+      setViewBox(v => ({...v, x: v.x - dx, y: v.y - dy}));
+      setDragStart({x: e.clientX, y: e.clientY});
+    }
   };
-  const handleMouseUp = () => setDragging(false);
+
+  const handleMouseUp = () => {
+    // Finish node drag
+    if (dragNode && didDrag) {
+      // Get the final position from state
+      setNodes(prev => {
+        let finalNode;
+        if (dragNode.id === 'central') finalNode = prev.central;
+        else { const lk = dragNode.type; finalNode = prev[lk]?.find(n => n.id === dragNode.id); }
+        if (finalNode) {
+          const lk = dragNode.id === 'central' ? 'central' : dragNode.type;
+          socket.emit('node_moved', {space_id: SPACE_ID, node_id: dragNode.id, layer_key: lk, x: finalNode.x, y: finalNode.y, user_id: FD.user_id});
+        }
+        triggerSave(prev);
+        return prev;
+      });
+    }
+    // If it was a click (not a drag), select the node
+    if (dragNode && !didDrag) {
+      // Find fresh node data from state for the selected node
+      setNodes(prev => {
+        let fresh;
+        if (dragNode.id === 'central') fresh = prev.central;
+        else { const lk = dragNode.type; fresh = prev[lk]?.find(n => n.id === dragNode.id); }
+        if (fresh) { setSelectedNode(fresh); setEditing(false); }
+        return prev;
+      });
+    }
+    setDragNode(null); setDragNodeStart(null); setDidDrag(false);
+    setDragging(false);
+  };
+
   useEffect(() => { const el=svgRef.current; if(el)el.addEventListener('wheel',handleWheel,{passive:false}); return()=>{if(el)el.removeEventListener('wheel',handleWheel);}; },[handleWheel]);
 
-  const handleAddChild = parent => { setAddTarget(parent); setShowAddModal(true); };
+  // ─── Node mousedown (start potential drag) ───
+  const handleNodeMouseDown = (e, node) => {
+    e.stopPropagation();
+    const c = svgCoords(e);
+    setDragNode(node);
+    setDragNodeStart({ nodeX: node.x, nodeY: node.y, mouseX: c.x, mouseY: c.y });
+    setDidDrag(false);
+  };
+
+  // ─── Add child ───
+  const handleAddChild = parent => { setAddTarget(parent); setAddAsTextNode(parent.layer >= 1); setShowAddModal(true); };
+
   const handleCreate = () => {
-    if(!contentText.trim()||!addTarget) return;
-    const layerKey = `layer${addTarget.layer+1}`;
-    const newNode = { id:`n-${Date.now()}-${Math.random().toString(36).substr(2,5)}`, parentId:addTarget.id, type:layerKey, label:contentText.substring(0,25), content:contentText,
-      studentColor:currentStudent.color, layer:addTarget.layer+1, studentId:currentStudent.id, studentName:currentStudent.name,
-      votes:0, comments:[], textContent:addTarget.layer+1===3?contentText:'', hasImage:contentImage, x:0, y:0 };
-    // Apply locally
+    if (!contentText.trim() || !addTarget) return;
+    const layerKey = `layer${addTarget.layer + 1}`;
+    const parent = addTarget.id === 'central' ? nodes.central : nodes[addTarget.type]?.find(n => n.id === addTarget.id);
+    if (!parent) return;
+    const siblings = nodes[layerKey]?.filter(n => n.parentId === addTarget.id) || [];
+    const dist = addTarget.layer === 0 ? 220 : (addTarget.layer === 1 ? 150 : 110);
+    const pos = placeNearParent(parent, siblings, dist);
+    const newNode = {
+      id: `n-${Date.now()}-${Math.random().toString(36).substr(2,5)}`,
+      parentId: addTarget.id, type: layerKey,
+      label: contentText.substring(0, 30), content: contentText,
+      studentColor: currentStudent.color, layer: addTarget.layer + 1,
+      studentId: currentStudent.id, studentName: currentStudent.name,
+      isTextNode: addAsTextNode,
+      votes: 0, comments: [],
+      textContent: (addAsTextNode || addTarget.layer + 1 === 3) ? contentText : '',
+      hasImage: contentImage, x: pos.x, y: pos.y,
+    };
     setNodes(prev => {
-      const upd={...prev,[layerKey]:[...prev[layerKey],newNode]};
-      const laid=layoutNodes(upd,500,350);
-      triggerSave(laid);
-      return laid;
+      const upd = {...prev, [layerKey]: [...prev[layerKey], newNode]};
+      triggerSave(upd);
+      return upd;
     });
-    // Broadcast to others via Socket.IO
     socket.emit('node_added', {space_id: SPACE_ID, node: newNode, layer_key: layerKey, user_id: FD.user_id});
-    setShowAddModal(false); setContentText(''); setContentImage(false); setAddTarget(null);
+    setShowAddModal(false); setContentText(''); setContentImage(false); setAddTarget(null); setAddAsTextNode(false);
   };
+
+  // ─── Vote ───
   const handleVote = () => {
-    if(!selectedNode||selectedNode.layer===0) return;
-    const lk=selectedNode.type;
-    setNodes(prev => { const upd={...prev}; upd[lk]=upd[lk].map(n=>n.id===selectedNode.id?{...n,votes:(n.votes||0)+1}:n); triggerSave(upd); return upd; });
-    setSelectedNode(prev=>({...prev,votes:(prev.votes||0)+1}));
-    // Broadcast vote
-    socket.emit('node_voted', {space_id: SPACE_ID, node_id: selectedNode.id, layer_key: lk, user_id: FD.user_id});
+    if (!selectedNode || selectedNode.layer === 0) return;
+    const lk = selectedNode.type;
+    setNodes(prev => ({...prev, [lk]: prev[lk].map(n => n.id===selectedNode.id ? {...n,votes:(n.votes||0)+1} : n)}));
+    setSelectedNode(prev => ({...prev, votes:(prev.votes||0)+1}));
+    socket.emit('node_voted', {space_id:SPACE_ID, node_id:selectedNode.id, layer_key:lk, user_id:FD.user_id});
   };
+
+  // ─── Comment ───
   const handleComment = () => {
-    if(!commentText.trim()||!selectedNode) return;
+    if (!commentText.trim() || !selectedNode) return;
     const nc = {id:`cm-${Date.now()}`,studentId:currentStudent.id,name:currentStudent.name,studentColor:currentStudent.color,text:commentText};
-    const lk=selectedNode.type;
-    setNodes(prev => { const upd={...prev}; upd[lk]=upd[lk].map(n=>n.id===selectedNode.id?{...n,comments:[...(n.comments||[]),nc]}:n); triggerSave(upd); return upd; });
-    setSelectedNode(prev=>({...prev,comments:[...(prev.comments||[]),nc]}));
+    const lk = selectedNode.type;
+    setNodes(prev => ({...prev, [lk]: prev[lk].map(n => n.id===selectedNode.id ? {...n,comments:[...(n.comments||[]),nc]} : n)}));
+    setSelectedNode(prev => ({...prev, comments:[...(prev.comments||[]),nc]}));
     setCommentText('');
-    // Broadcast comment
-    socket.emit('comment_added', {space_id: SPACE_ID, node_id: selectedNode.id, layer_key: lk, comment: nc, user_id: FD.user_id});
+    socket.emit('comment_added', {space_id:SPACE_ID, node_id:selectedNode.id, layer_key:lk, comment:nc, user_id:FD.user_id});
   };
+
+  // ─── Delete ───
   const handleDeleteNode = nodeId => {
-    if(!selectedNode||selectedNode.layer===0) return;
+    if (!selectedNode || selectedNode.layer === 0) return;
     const childCount = selectedNode.layer===1
       ? nodes.layer2.filter(n=>n.parentId===nodeId).length + nodes.layer3.filter(n=>nodes.layer2.some(l2=>l2.parentId===nodeId&&n.parentId===l2.id)).length
       : selectedNode.layer===2 ? nodes.layer3.filter(n=>n.parentId===nodeId).length : 0;
@@ -380,26 +520,43 @@ function App() {
       ? `Delete "${selectedNode.label}" and its ${childCount} child node${childCount>1?'s':''}? This cannot be undone.`
       : `Delete "${selectedNode.label}"? This cannot be undone.`;
     if (!window.confirm(msg)) return;
-    // Collect all IDs to delete (node + descendants)
     const deletedIds = [nodeId];
-    if (selectedNode.layer === 1) {
-      const l2children = nodes.layer2.filter(n => n.parentId === nodeId);
-      l2children.forEach(n => { deletedIds.push(n.id); });
-      nodes.layer3.filter(n => l2children.some(l2 => l2.id === n.parentId)).forEach(n => deletedIds.push(n.id));
-    } else if (selectedNode.layer === 2) {
-      nodes.layer3.filter(n => n.parentId === nodeId).forEach(n => deletedIds.push(n.id));
-    }
-    const lk=selectedNode.type;
-    setNodes(prev => { const upd={...prev}; upd[lk]=upd[lk].filter(n=>n.id!==nodeId);
-      if(selectedNode.layer===1){const l2c=upd.layer2.filter(n=>n.parentId===nodeId);const l2ids=l2c.map(n=>n.id);upd.layer2=upd.layer2.filter(n=>n.parentId!==nodeId);upd.layer3=upd.layer3.filter(n=>!l2ids.includes(n.parentId));}
-      else if(selectedNode.layer===2){upd.layer3=upd.layer3.filter(n=>n.parentId!==nodeId);}
-      const laid=layoutNodes(upd,500,350); triggerSave(laid); return laid; });
+    if (selectedNode.layer===1) { nodes.layer2.filter(n=>n.parentId===nodeId).forEach(n=>{deletedIds.push(n.id);}); nodes.layer3.filter(n=>nodes.layer2.some(l2=>l2.parentId===nodeId&&l2.id===n.parentId)).forEach(n=>deletedIds.push(n.id)); }
+    else if (selectedNode.layer===2) { nodes.layer3.filter(n=>n.parentId===nodeId).forEach(n=>deletedIds.push(n.id)); }
+    const idSet = new Set(deletedIds);
+    setNodes(prev => {
+      const upd = {...prev, layer1:prev.layer1.filter(n=>!idSet.has(n.id)), layer2:prev.layer2.filter(n=>!idSet.has(n.id)), layer3:prev.layer3.filter(n=>!idSet.has(n.id))};
+      triggerSave(upd); return upd;
+    });
     setSelectedNode(null);
-    // Broadcast delete
-    socket.emit('node_deleted', {space_id: SPACE_ID, node_id: nodeId, deleted_ids: deletedIds, user_id: FD.user_id});
+    socket.emit('node_deleted', {space_id:SPACE_ID, node_id:nodeId, deleted_ids:deletedIds, user_id:FD.user_id});
   };
 
-  // Generate infographic via API
+  // ─── Edit own node ───
+  const startEditing = () => {
+    if (!selectedNode || selectedNode.layer === 0) return;
+    setEditing(true); setEditLabel(selectedNode.label); setEditContent(selectedNode.content || '');
+  };
+  const saveEdit = () => {
+    if (!selectedNode) return;
+    const lk = selectedNode.type;
+    const newLabel = editLabel.trim() || selectedNode.label;
+    const newContent = editContent;
+    setNodes(prev => ({...prev, [lk]: prev[lk].map(n => n.id === selectedNode.id ? {...n, label: newLabel, content: newContent} : n)}));
+    setSelectedNode(prev => ({...prev, label: newLabel, content: newContent}));
+    setEditing(false);
+    socket.emit('node_edited', {space_id: SPACE_ID, node_id: selectedNode.id, layer_key: lk, label: newLabel, content: newContent, user_id: FD.user_id});
+    setNodes(prev => { triggerSave(prev); return prev; });
+  };
+
+  // ─── Color change ───
+  const pickColor = (c) => {
+    setCurrentStudent(prev => ({...prev, color: c}));
+    setShowColorPicker(false);
+    socket.emit('color_changed', {space_id: SPACE_ID, user_id: FD.user_id, color: c.primary});
+  };
+
+  // ─── Generate infographic / PDF ───
   const handleGenerateInfographic = async () => {
     setGenStatus('Generating... this may take a minute');
     try {
@@ -407,18 +564,17 @@ function App() {
       const ct = r.headers.get('Content-Type')||'';
       if (!ct.includes('json')) { setGenStatus('Error: unexpected response'); return; }
       const data = await r.json();
-      if(data.success) { setInfographicsUsed(data.infographic_count||infographicsUsed+1); setGenStatus('Done! Image generated.'); setShowPreview('infographic_result'); }
+      if (data.success) { setInfographicsUsed(data.infographic_count||infographicsUsed+1); setGenStatus('Done!'); }
       else { setGenStatus(data.error||'Failed'); }
     } catch(e) { setGenStatus('Error: '+e.message); }
   };
-  // Generate PDF via API
   const handleGeneratePDF = async () => {
     setSaveStatus('Saving before PDF...');
     try { await api('/save-nodes', {body: JSON.stringify({nodes_data: nodes})}); } catch(e) {}
-    window.open(`/api/collab-space/${SPACE_ID}/generate-pdf`, '_blank');
-    setSaveStatus('');
+    window.open(`/api/collab-space/${SPACE_ID}/generate-pdf`, '_blank'); setSaveStatus('');
   };
 
+  // ─── Derived data ───
   const allFlat = [nodes.central,...nodes.layer1,...nodes.layer2,...nodes.layer3];
   const totalVotes = allFlat.reduce((s,n)=>s+(n.votes||0),0);
   const totalComments = allFlat.reduce((s,n)=>s+(n.comments?.length||0),0);
@@ -447,28 +603,15 @@ function App() {
               <input type="number" min="1" max="10" value={settings.maxTextNodes} onChange={e=>setSettings({...settings,maxTextNodes:parseInt(e.target.value)})} style={{width:'100%',padding:'8px 12px',border:'1px solid #d1d5db',borderRadius:8,fontSize:13}}/></div>
             <div><label style={{display:'block',fontSize:13,fontWeight:600,color:'#475569',marginBottom:6}}>Character Limit per Text Node</label>
               <input type="number" min="50" max="1000" step="50" value={settings.charLimit} onChange={e=>setSettings({...settings,charLimit:parseInt(e.target.value)})} style={{width:'100%',padding:'8px 12px',border:'1px solid #d1d5db',borderRadius:8,fontSize:13}}/></div>
-            <button onClick={() => {
-              const s = {maxLayer1:settings.maxLayer1, maxTextNodes:settings.maxTextNodes, charLimit:settings.charLimit};
-              socket.emit('settings_changed', {space_id: SPACE_ID, settings: s, user_id: FD.user_id});
-            }} style={{padding:'8px 16px',background:'#3b82f6',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer'}}>
-              Broadcast Settings
-            </button>
+            <button onClick={() => { const s={maxLayer1:settings.maxLayer1,maxTextNodes:settings.maxTextNodes,charLimit:settings.charLimit}; socket.emit('settings_changed',{space_id:SPACE_ID,settings:s,user_id:FD.user_id}); }}
+              style={{padding:'8px 16px',background:'#3b82f6',color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer'}}>Broadcast Settings</button>
             <div style={{paddingTop:16,borderTop:'1px solid #e2e8f0'}}>
               <h3 style={{fontSize:14,fontWeight:700,color:'#1e293b',marginBottom:12}}>Session Stats</h3>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
                 <div style={{background:'#f0f9ff',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:'#3b82f6'}}>{allFlat.length}</div><div style={{fontSize:10,color:'#64748b'}}>Total Nodes</div></div>
                 <div style={{background:'#f0fdf4',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:'#10b981'}}>{totalVotes}</div><div style={{fontSize:10,color:'#64748b'}}>Total Votes</div></div>
                 <div style={{background:'#fdf4ff',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:'#a855f7'}}>{totalComments}</div><div style={{fontSize:10,color:'#64748b'}}>Comments</div></div>
-                <div style={{background:connected?'#f0fdf4':'#fef2f2',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:connected?'#10b981':'#ef4444'}}>{onlineUsers.length + 1}</div><div style={{fontSize:10,color:'#64748b'}}>Online</div></div>
-              </div>
-            </div>
-            <div style={{paddingTop:16,borderTop:'1px solid #e2e8f0'}}>
-              <h3 style={{fontSize:14,fontWeight:700,color:'#1e293b',marginBottom:8}}>Layer Rules</h3>
-              <div style={{fontSize:12,color:'#64748b',lineHeight:1.8}}>
-                <div>Layer 1: Up to <strong>{settings.maxLayer1}</strong> sub-topics</div>
-                <div>Layer 2: Fixed at <strong>3</strong> per parent</div>
-                <div>Layer 3: Fixed at <strong>3</strong> per parent</div>
-                <div>Layer 3: <strong>Text/Image only</strong></div>
+                <div style={{background:connected?'#f0fdf4':'#fef2f2',padding:12,borderRadius:8,textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:connected?'#10b981':'#ef4444'}}>{onlineUsers.length}</div><div style={{fontSize:10,color:'#64748b'}}>Online</div></div>
               </div>
             </div>
           </div>
@@ -491,41 +634,41 @@ function App() {
               </div>
             </div>
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:20}}>
+          <div style={{display:'flex',alignItems:'center',gap:16}}>
             {/* Connection indicator */}
-            <div style={{display:'flex',alignItems:'center',gap:6}} title={connected ? 'Live sync active' : 'Reconnecting...'}>
+            <div style={{display:'flex',alignItems:'center',gap:5}} title={connected?'Live sync active':'Reconnecting...'}>
               <span className="presence-dot" style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:connected?'#10b981':'#ef4444'}}/>
-              <span style={{fontSize:11,color:'#94a3b8'}}>{connected ? 'Live' : 'Offline'}</span>
+              <span style={{fontSize:11,color:'#94a3b8'}}>{connected?'Live':'Offline'}</span>
             </div>
-            {/* Online users avatars */}
-            <div style={{display:'flex',alignItems:'center',gap:-4}}>
-              <UsersIcon size={16} style={{color:'#94a3b8',marginRight:4}}/>
-              <span style={{fontSize:11,color:'#94a3b8',marginRight:6}}>{onlineUsers.length + 1}</span>
-              {onlineUsers.slice(0, 5).map(u => (
+            {/* Online users */}
+            <div style={{display:'flex',alignItems:'center'}}>
+              <UsersIcon size={15} style={{color:'#94a3b8',marginRight:4}}/>
+              <span style={{fontSize:11,color:'#94a3b8',marginRight:6}}>{onlineUsers.length}</span>
+              {onlineUsers.filter(u=>u.user_id!==FD.user_id).slice(0,5).map(u => (
                 <div key={u.user_id} title={u.user_name} style={{width:22,height:22,borderRadius:'50%',background:u.color||'#64748b',border:'2px solid #1e293b',
                   display:'flex',alignItems:'center',justifyContent:'center',marginLeft:-4,fontSize:9,fontWeight:700,color:'#fff'}}>
                   {(u.user_name||'?').charAt(0).toUpperCase()}
                 </div>
               ))}
-              {onlineUsers.length > 5 && <span style={{fontSize:10,color:'#94a3b8',marginLeft:4}}>+{onlineUsers.length-5}</span>}
             </div>
             {saveStatus && <span className="save-indicator" style={{fontSize:11,color:saveStatus==='Saved'||saveStatus==='Synced'?'#10b981':'#fbbf24'}}>{saveStatus}</span>}
+            {/* Color picker trigger */}
             <div style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer'}} onClick={()=>setShowColorPicker(!showColorPicker)}>
-              <span style={{fontSize:12,color:'#94a3b8'}}>Your color:</span>
+              <span style={{fontSize:12,color:'#94a3b8'}}>Color:</span>
               <div style={{width:22,height:22,borderRadius:'50%',background:currentStudent.color.primary,border:'2px solid #fff'}}/>
             </div>
-            {/* Teacher: space switcher dropdown */}
+            {/* Teacher space switcher */}
             {FD.user_role==='teacher' && FD.all_spaces.length>1 && (
-              <div style={{borderLeft:'1px solid #334155',paddingLeft:16}}>
+              <div style={{borderLeft:'1px solid #334155',paddingLeft:12}}>
                 <select value={SPACE_ID} onChange={e=>{if(e.target.value!==SPACE_ID)window.location.href='/teacher/collab-space/'+e.target.value;}}
                   style={{background:'#1e293b',color:'#e2e8f0',border:'1px solid #475569',borderRadius:6,padding:'4px 8px',fontSize:12,cursor:'pointer'}}>
-                  {FD.all_spaces.map(s => <option key={s.space_id} value={s.space_id}>{s.name || s.space_id}{s.assigned_group_name ? ` (${s.assigned_group_name})` : ''}</option>)}
+                  {FD.all_spaces.map(s => <option key={s.space_id} value={s.space_id}>{s.name||s.space_id}{s.assigned_group_name?` (${s.assigned_group_name})`:''}</option>)}
                 </select>
               </div>
             )}
-            {/* View toggle: only for teachers */}
+            {/* View toggle (teacher only) */}
             {FD.user_role==='teacher' && (
-            <div style={{display:'flex',gap:4,borderLeft:'1px solid #334155',paddingLeft:16}}>
+            <div style={{display:'flex',gap:4,borderLeft:'1px solid #334155',paddingLeft:12}}>
               {['student','teacher'].map(v => (
                 <button key={v} onClick={()=>setUserView(v)} style={{padding:'5px 14px',borderRadius:6,fontSize:12,fontWeight:600,border:'none',cursor:'pointer',
                   background:userView===v?'#3b82f6':'transparent',color:userView===v?'#fff':'#94a3b8'}}>{v.charAt(0).toUpperCase()+v.slice(1)} View</button>
@@ -535,40 +678,51 @@ function App() {
           </div>
         </div>
 
+        {/* Color Picker Dropdown */}
         {showColorPicker && (
-          <div style={{position:'absolute',right:180,top:52,background:'#fff',borderRadius:12,padding:12,boxShadow:'0 8px 32px rgba(0,0,0,0.15)',zIndex:40,display:'flex',gap:8,flexWrap:'wrap',width:200}}>
-            {COLOR_PALETTE.map((c,i) => (
-              <div key={i} onClick={()=>{setCurrentStudent({...currentStudent,color:c});setShowColorPicker(false);}}
-                style={{width:36,height:36,borderRadius:'50%',background:c.primary,border:currentStudent.color.name===c.name?'3px solid #1e293b':'2px solid #e2e8f0',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                {currentStudent.color.name===c.name && <span style={{color:'#fff',fontSize:14,fontWeight:700}}>✓</span>}
-              </div>
-            ))}
+          <div style={{position:'absolute',right:200,top:52,background:'#fff',borderRadius:12,padding:16,boxShadow:'0 8px 32px rgba(0,0,0,0.15)',zIndex:40,width:220}}>
+            <div style={{fontSize:12,fontWeight:600,color:'#475569',marginBottom:10}}>Pick your color <span style={{fontWeight:400,color:'#94a3b8'}}>(taken colors are locked)</span></div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              {COLOR_PALETTE.map((c,i) => {
+                const mine = currentStudent.color.name === c.name;
+                const taken = !mine && takenColors.includes(c.primary);
+                return (
+                  <div key={i} onClick={()=>{ if(!taken) pickColor(c); }}
+                    style={{width:36,height:36,borderRadius:'50%',background:c.primary,
+                      border: mine ? '3px solid #1e293b' : taken ? '3px solid #ef4444' : '2px solid #e2e8f0',
+                      cursor: taken ? 'not-allowed' : 'pointer', opacity: taken ? 0.3 : 1,
+                      display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}}>
+                    {mine && <span style={{color:'#fff',fontSize:14,fontWeight:700}}>✓</span>}
+                    {taken && <XIcon size={12} style={{color:'#fff'}}/>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
         {/* Mind Map + Detail Panel */}
         <div style={{flex:1,display:'flex',overflow:'hidden'}}>
-          <svg ref={svgRef} style={{flex:1,background:'#f8fafc',cursor:dragging?'grabbing':'grab'}}
+          <svg ref={svgRef} style={{flex:1,background:'#f8fafc',cursor: dragNode ? 'grabbing' : (dragging ? 'grabbing' : 'grab')}}
             viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
-            onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+            onMouseDown={handleCanvasMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
             <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e2e8f0" strokeWidth="0.5"/></pattern></defs>
             <rect x={viewBox.x-500} y={viewBox.y-500} width={viewBox.w+1000} height={viewBox.h+1000} fill="url(#grid)"/>
             {edges.map((e,i) => <CurvedLine key={i} x1={e.from.x} y1={e.from.y} x2={e.to.x} y2={e.to.y} color={e.color}/>)}
-            <MindMapNode node={nodes.central} isSelected={selectedNode?.id==='central'} onSelect={setSelectedNode} onAddChild={handleAddChild} userView={userView}/>
-            {nodes.layer1.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onSelect={setSelectedNode} onAddChild={handleAddChild} userView={userView}/>)}
-            {nodes.layer2.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onSelect={setSelectedNode} onAddChild={handleAddChild} userView={userView}/>)}
-            {nodes.layer3.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onSelect={setSelectedNode} onAddChild={handleAddChild} userView={userView}/>)}
-            {/* Remote cursors (Figma-style) */}
-            {Object.entries(remoteCursors).map(([uid, cur]) => (
-              <RemoteCursor key={uid} user={cur}/>
-            ))}
-            <g transform={`translate(${viewBox.x+16},${viewBox.y+viewBox.h-100})`}>
-              <rect x="0" y="0" width="160" height="90" rx="8" fill="white" stroke="#e2e8f0" strokeWidth="1" opacity="0.9"/>
-              <text x="10" y="18" style={{fontSize:'10px',fontWeight:700,fill:'#475569'}}>Legend</text>
-              <circle cx="18" cy="34" r="6" fill="#0F172A"/><text x="30" y="37" style={{fontSize:'9px',fill:'#64748b'}}>Central Topic</text>
-              <circle cx="18" cy="50" r="6" fill="#1E40AF"/><text x="30" y="53" style={{fontSize:'9px',fill:'#64748b'}}>Sub-topic (darker)</text>
-              <circle cx="18" cy="66" r="6" fill="#DBEAFE" stroke="#3B82F6" strokeWidth="1"/><text x="30" y="69" style={{fontSize:'9px',fill:'#64748b'}}>Text node (lighter)</text>
-              <circle cx="18" cy="82" r="6" fill="#FBBF24"/><text x="30" y="85" style={{fontSize:'9px',fill:'#64748b'}}>Vote count</text>
+            <MindMapNode node={nodes.central} isSelected={selectedNode?.id==='central'} onMouseDown={handleNodeMouseDown} onAddChild={handleAddChild} userView={userView}/>
+            {nodes.layer1.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onMouseDown={handleNodeMouseDown} onAddChild={handleAddChild} userView={userView}/>)}
+            {nodes.layer2.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onMouseDown={handleNodeMouseDown} onAddChild={handleAddChild} userView={userView}/>)}
+            {nodes.layer3.map(n => <MindMapNode key={n.id} node={n} isSelected={selectedNode?.id===n.id} onMouseDown={handleNodeMouseDown} onAddChild={handleAddChild} userView={userView}/>)}
+            {/* Remote cursors */}
+            {Object.entries(remoteCursors).map(([uid,cur]) => <RemoteCursor key={uid} user={cur}/>)}
+            {/* Legend */}
+            <g transform={`translate(${viewBox.x+16},${viewBox.y+viewBox.h-110})`}>
+              <rect x="0" y="0" width="170" height="100" rx="8" fill="white" stroke="#e2e8f0" strokeWidth="1" opacity="0.9"/>
+              <text x="10" y="16" style={{fontSize:'10px',fontWeight:700,fill:'#475569'}}>Legend</text>
+              <rect x="10" y="24" width="20" height="12" rx="6" fill="#0F172A"/><text x="36" y="33" style={{fontSize:'9px',fill:'#64748b'}}>Central Topic</text>
+              <rect x="10" y="42" width="20" height="12" rx="6" fill="#1E40AF"/><text x="36" y="51" style={{fontSize:'9px',fill:'#64748b'}}>Sub-topic</text>
+              <rect x="10" y="60" width="20" height="12" rx="6" fill="#DBEAFE" stroke="#3B82F6" strokeWidth="0.5"/><text x="36" y="69" style={{fontSize:'9px',fill:'#64748b'}}>Text node (leaf)</text>
+              <circle cx="20" cy="86" r="5" fill="#FBBF24"/><text x="36" y="89" style={{fontSize:'9px',fill:'#64748b'}}>Vote count</text>
             </g>
           </svg>
 
@@ -579,21 +733,48 @@ function App() {
                 <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
                   {selectedNode.studentColor && <div style={{width:14,height:14,borderRadius:'50%',background:selectedNode.studentColor.primary,border:'2px solid #e2e8f0'}}/>}
                   <h3 style={{fontSize:16,fontWeight:700,color:'#1e293b',flex:1}}>{selectedNode.label}</h3>
+                  {selectedNode.isTextNode && <span className="badge" style={{background:'#fef3c7',color:'#92400e',fontSize:10}}>Text Node</span>}
                 </div>
                 <div style={{display:'flex',gap:8,marginBottom:16}}>
                   <span className="badge" style={{background:'#f1f5f9',color:'#475569'}}>Layer {selectedNode.layer}</span>
                   {selectedNode.studentName && <span className="badge" style={{background:selectedNode.studentColor?.light||'#f1f5f9',color:selectedNode.studentColor?.dark||'#475569'}}>by {selectedNode.studentName}</span>}
                 </div>
-                {selectedNode.content && <div style={{background:'#f0f9ff',padding:14,borderRadius:10,border:'1px solid #bfdbfe',marginBottom:16}}><p style={{fontSize:13,color:'#334155',lineHeight:1.6}}>{selectedNode.content}</p></div>}
-                {selectedNode.textContent && <div style={{background:'#f0fdf4',padding:14,borderRadius:10,border:'1px solid #bbf7d0',marginBottom:16}}><div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}><FileTextIcon size={14} style={{color:'#16a34a'}}/><span style={{fontSize:11,fontWeight:600,color:'#15803d'}}>Text Content</span></div><p style={{fontSize:13,color:'#334155',lineHeight:1.6}}>{selectedNode.textContent}</p></div>}
-                <div style={{display:'flex',gap:12,paddingTop:16,borderTop:'1px solid #e2e8f0',marginBottom:16}}>
-                  <button onClick={handleVote} disabled={selectedNode.layer===0} style={{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,cursor:selectedNode.layer===0?'not-allowed':'pointer',color:'#2563eb',fontSize:13,fontWeight:600}}><ThumbsUpIcon size={15}/> {selectedNode.votes||0}</button>
-                  <div style={{display:'flex',alignItems:'center',gap:6,padding:'8px 16px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,color:'#64748b',fontSize:13}}><MessageIcon size={15}/> {selectedNode.comments?.length||0}</div>
-                  {/* Delete: students can only delete own nodes; teachers can delete any non-central node */}
+
+                {/* Editing mode */}
+                {editing ? (
+                  <div style={{marginBottom:16}}>
+                    <label style={{display:'block',fontSize:12,fontWeight:600,color:'#475569',marginBottom:4}}>Label</label>
+                    <input value={editLabel} onChange={e=>setEditLabel(e.target.value.substring(0,30))}
+                      style={{width:'100%',padding:'8px 12px',border:'1px solid #d1d5db',borderRadius:8,fontSize:13,outline:'none',marginBottom:10}}/>
+                    <label style={{display:'block',fontSize:12,fontWeight:600,color:'#475569',marginBottom:4}}>Content</label>
+                    <textarea value={editContent} onChange={e=>setEditContent(e.target.value.substring(0,settings.charLimit))} rows="4"
+                      style={{width:'100%',padding:'8px 12px',border:'1px solid #d1d5db',borderRadius:8,fontSize:13,resize:'none',outline:'none',marginBottom:8}}/>
+                    <div style={{display:'flex',gap:8}}>
+                      <button onClick={saveEdit} style={{flex:1,padding:'8px 12px',background:'#3b82f6',color:'#fff',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
+                      <button onClick={()=>setEditing(false)} style={{flex:1,padding:'8px 12px',background:'#f1f5f9',color:'#475569',border:'1px solid #d1d5db',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer'}}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {selectedNode.content && <div style={{background:'#f0f9ff',padding:14,borderRadius:10,border:'1px solid #bfdbfe',marginBottom:16}}><p style={{fontSize:13,color:'#334155',lineHeight:1.6}}>{selectedNode.content}</p></div>}
+                    {selectedNode.textContent && selectedNode.textContent !== selectedNode.content && <div style={{background:'#f0fdf4',padding:14,borderRadius:10,border:'1px solid #bbf7d0',marginBottom:16}}><div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}><FileTextIcon size={14} style={{color:'#16a34a'}}/><span style={{fontSize:11,fontWeight:600,color:'#15803d'}}>Text Content</span></div><p style={{fontSize:13,color:'#334155',lineHeight:1.6}}>{selectedNode.textContent}</p></div>}
+                  </>
+                )}
+
+                <div style={{display:'flex',gap:8,paddingTop:16,borderTop:'1px solid #e2e8f0',marginBottom:16,flexWrap:'wrap'}}>
+                  <button onClick={handleVote} disabled={selectedNode.layer===0} style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:8,cursor:selectedNode.layer===0?'not-allowed':'pointer',color:'#2563eb',fontSize:12,fontWeight:600}}><ThumbsUpIcon size={14}/> {selectedNode.votes||0}</button>
+                  <div style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,color:'#64748b',fontSize:12}}><MessageIcon size={14}/> {selectedNode.comments?.length||0}</div>
+                  {/* Edit button: own nodes only */}
+                  {!editing && selectedNode.layer > 0 && (FD.user_role==='teacher' || selectedNode.studentId === currentStudent.id) && (
+                    <button onClick={startEditing} style={{display:'flex',alignItems:'center',gap:5,padding:'8px 12px',background:'#f0f9ff',border:'1px solid #bfdbfe',borderRadius:8,cursor:'pointer',color:'#2563eb',fontSize:12,fontWeight:600}}><EditIcon size={13}/> Edit</button>
+                  )}
+                  {/* Delete */}
                   {selectedNode.layer>0 && (FD.user_role==='teacher' || selectedNode.studentId===currentStudent.id) && (
-                    <button onClick={()=>handleDeleteNode(selectedNode.id)} style={{display:'flex',alignItems:'center',gap:6,padding:'8px 12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,cursor:'pointer',color:'#dc2626',fontSize:12,marginLeft:'auto'}}><TrashIcon size={14}/> Delete</button>
+                    <button onClick={()=>handleDeleteNode(selectedNode.id)} style={{display:'flex',alignItems:'center',gap:5,padding:'8px 10px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,cursor:'pointer',color:'#dc2626',fontSize:12,marginLeft:'auto'}}><TrashIcon size={13}/> Delete</button>
                   )}
                 </div>
+
+                {/* Comments section */}
                 <div style={{borderTop:'1px solid #e2e8f0',paddingTop:16}}>
                   <h4 style={{fontSize:14,fontWeight:700,color:'#1e293b',marginBottom:12}}>Comments</h4>
                   {selectedNode.comments&&selectedNode.comments.length>0 ? (
@@ -614,6 +795,7 @@ function App() {
                 <MessageIcon size={48} style={{marginBottom:16,opacity:0.3}}/>
                 <p style={{fontSize:14,fontWeight:500}}>Click a node to view details</p>
                 <p style={{fontSize:12,marginTop:8}}>Select any node on the mind map to see its content, vote, or add comments.</p>
+                <p style={{fontSize:11,marginTop:12,color:'#cbd5e1'}}>Drag nodes to reposition them</p>
               </div>
             )}
           </div>
@@ -624,7 +806,7 @@ function App() {
           <div style={{display:'flex',alignItems:'center',gap:20}}>
             <span style={{fontSize:12,color:'#64748b'}}>Nodes: <strong style={{color:'#1e293b'}}>{allFlat.length}</strong></span>
             <span style={{fontSize:12,color:'#64748b'}}>Votes: <strong style={{color:'#1e293b'}}>{totalVotes}</strong></span>
-            <span style={{fontSize:12,color:'#64748b'}}>Infographics remaining: <strong style={{color:infographicsUsed>=maxInfographics?'#ef4444':'#1e293b'}}>{maxInfographics-infographicsUsed}/{maxInfographics}</strong></span>
+            <span style={{fontSize:12,color:'#64748b'}}>Infographics: <strong style={{color:infographicsUsed>=maxInfographics?'#ef4444':'#1e293b'}}>{maxInfographics-infographicsUsed}/{maxInfographics}</strong></span>
             {genStatus && <span style={{fontSize:11,color:'#64748b'}}>{genStatus}</span>}
           </div>
           <div style={{display:'flex',gap:10}}>
@@ -645,7 +827,29 @@ function App() {
         <div className="modal-overlay" style={{position:'fixed',inset:0,display:'flex',alignItems:'center',justifyContent:'center',zIndex:60}}>
           <div className="modal-content" style={{background:'#fff',borderRadius:16,padding:28,maxWidth:440,width:'90%',boxShadow:'0 16px 48px rgba(0,0,0,0.2)'}}>
             <h3 style={{fontSize:18,fontWeight:700,color:'#1e293b',marginBottom:4}}>Add Content</h3>
-            <p style={{fontSize:12,color:'#64748b',marginBottom:20}}>Adding to: <strong>{addTarget?.label}</strong> (Layer {(addTarget?.layer||0)+1})</p>
+            <p style={{fontSize:12,color:'#64748b',marginBottom:16}}>Adding to: <strong>{addTarget?.label}</strong> (Layer {(addTarget?.layer||0)+1})</p>
+            {/* Text Node toggle (available from layer 1 onwards) */}
+            {addTarget && addTarget.layer >= 1 && (
+              <div style={{display:'flex',gap:8,marginBottom:16}}>
+                <button onClick={()=>setAddAsTextNode(false)}
+                  style={{flex:1,padding:'10px',borderRadius:10,fontSize:13,fontWeight:600,cursor:'pointer',
+                    background:!addAsTextNode?'#3b82f6':'#f1f5f9',color:!addAsTextNode?'#fff':'#64748b',
+                    border:!addAsTextNode?'none':'1px solid #e2e8f0'}}>
+                  Sub-topic
+                </button>
+                <button onClick={()=>setAddAsTextNode(true)}
+                  style={{flex:1,padding:'10px',borderRadius:10,fontSize:13,fontWeight:600,cursor:'pointer',
+                    background:addAsTextNode?'#f59e0b':'#f1f5f9',color:addAsTextNode?'#fff':'#64748b',
+                    border:addAsTextNode?'none':'1px solid #e2e8f0'}}>
+                  Text Node (leaf)
+                </button>
+              </div>
+            )}
+            {addAsTextNode && (
+              <div style={{background:'#fef3c7',padding:10,borderRadius:8,marginBottom:12,fontSize:11,color:'#92400e',lineHeight:1.5}}>
+                Text nodes are leaf nodes — no further branches can be added to them.
+              </div>
+            )}
             <div style={{marginBottom:16}}>
               <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}><label style={{fontSize:12,fontWeight:600,color:'#475569'}}>Content</label><span style={{fontSize:11,color:contentText.length>=settings.charLimit?'#ef4444':'#94a3b8'}}>{contentText.length}/{settings.charLimit}</span></div>
               <textarea value={contentText} onChange={e=>setContentText(e.target.value.substring(0,settings.charLimit))} placeholder="Enter your content..." rows="4" style={{width:'100%',padding:'10px 14px',border:'1px solid #d1d5db',borderRadius:10,fontSize:13,resize:'none',outline:'none',lineHeight:1.6}}/>
@@ -655,7 +859,7 @@ function App() {
               <input type="checkbox" checked={contentImage} onChange={e=>setContentImage(e.target.checked)}/><ImageIcon size={16} style={{color:'#ca8a04'}}/><span style={{fontSize:13,color:'#475569'}}>Include image</span>
             </label>
             <div style={{display:'flex',gap:10}}>
-              <button onClick={()=>{setShowAddModal(false);setContentText('');setContentImage(false);}} style={{flex:1,padding:'10px 16px',border:'1px solid #d1d5db',borderRadius:10,background:'#fff',cursor:'pointer',fontSize:13,fontWeight:600,color:'#475569'}}>Cancel</button>
+              <button onClick={()=>{setShowAddModal(false);setContentText('');setContentImage(false);setAddAsTextNode(false);}} style={{flex:1,padding:'10px 16px',border:'1px solid #d1d5db',borderRadius:10,background:'#fff',cursor:'pointer',fontSize:13,fontWeight:600,color:'#475569'}}>Cancel</button>
               <button onClick={handleCreate} disabled={!contentText.trim()} style={{flex:1,padding:'10px 16px',border:'none',borderRadius:10,background:contentText.trim()?'#3b82f6':'#d1d5db',color:'#fff',cursor:contentText.trim()?'pointer':'not-allowed',fontSize:13,fontWeight:600}}>Create Node</button>
             </div>
           </div>
