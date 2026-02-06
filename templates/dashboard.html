@@ -28,7 +28,7 @@
                         <i class="bi bi-check2-square me-1"></i>Submissions
                     </a>
                 </li>
-                {% if student_has_module_access or student_has_python_lab_access %}
+                {% if student_has_module_access or student_has_python_lab_access or student_has_collab_space_access %}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="navbarLearningTools" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="bi bi-tools me-1"></i>Learning Tools
@@ -39,6 +39,9 @@
                         {% endif %}
                         {% if student_has_python_lab_access %}
                         <li><a class="dropdown-item" href="{{ url_for('student_python_lab') }}"><i class="bi bi-code-slash me-1"></i>Python Lab</a></li>
+                        {% endif %}
+                        {% if student_has_collab_space_access %}
+                        <li><a class="dropdown-item" href="{{ url_for('student_collab_space') }}"><i class="bi bi-people me-1"></i>Collab Space</a></li>
                         {% endif %}
                     </ul>
                 </li>
@@ -146,7 +149,7 @@
     </div>
 
     <!-- Learning Tools (shortcuts if access given) -->
-    {% if student_has_module_access or student_has_python_lab_access %}
+    {% if student_has_module_access or student_has_python_lab_access or student_has_collab_space_access %}
     <h2 class="section-title mb-3">
         <i class="bi bi-tools me-2"></i>Learning Tools
     </h2>
@@ -174,6 +177,20 @@
                 <div class="stat-info">
                     <h3>Python Lab</h3>
                     <p>Write and run Python code</p>
+                </div>
+                <i class="bi bi-chevron-right ms-auto text-muted"></i>
+            </a>
+        </div>
+        {% endif %}
+        {% if student_has_collab_space_access %}
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('student_collab_space') }}" class="stat-card stat-info text-decoration-none d-flex align-items-center">
+                <div class="stat-icon">
+                    <i class="bi bi-people"></i>
+                </div>
+                <div class="stat-info">
+                    <h3>Collab Space</h3>
+                    <p>Join collaboration and discussions</p>
                 </div>
                 <i class="bi bi-chevron-right ms-auto text-muted"></i>
             </a>

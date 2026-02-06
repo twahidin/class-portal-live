@@ -68,6 +68,15 @@ class Database:
         self.db.module_textbooks.create_index('module_id', unique=True)
         # Python Lab access (admin: which classes/teaching groups can use Python Lab)
         self.db.python_lab_access.create_index('config_id', unique=True)
+        # Collab Space access (admin: which teachers/classes/teaching groups can use Collab Space)
+        self.db.collab_space_access.create_index('config_id', unique=True)
+        # Teacher Collab Space settings (Nanobanana Pro API key, max infographic per space)
+        self.db.teacher_collab_settings.create_index('teacher_id', unique=True)
+        # Collab Space sessions
+        self.db.collab_spaces.create_index('space_id', unique=True)
+        self.db.collab_spaces.create_index('teacher_id')
+        self.db.collab_spaces.create_index('join_code', unique=True)
+        self.db.collab_space_infographics.create_index([('space_id', 1), ('created_at', -1)])
 
 db = Database()
 

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Collab Space - School Portal{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}"><i class="bi bi-mortarboard-fill me-2"></i>School Portal</a>
+        <div class="collapse navbar-collapse">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}"><i class="bi bi-house me-1"></i>Dashboard</a></li>
+                <li class="nav-item"><a class="nav-link active" href="{{ url_for('student_collab_space') }}"><i class="bi bi-people me-1"></i>Collab Space</a></li>
+            </ul>
+            <span class="navbar-text">{{ session.student_name }}</span>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <h1><i class="bi bi-people me-2"></i>Collab Space</h1>
+    <p class="text-muted">Join a collaboration space with your teacher's join code to add to the discussion and view generated infographics.</p>
+
+    <div class="card mb-4">
+        <div class="card-header">Join a space</div>
+        <div class="card-body">
+            <div class="row align-items-end">
+                <div class="col-md-6 mb-2">
+                    <label class="form-label">Join code</label>
+                    <input type="text" class="form-control text-uppercase" id="join-code" placeholder="e.g. XK7M2P" maxlength="6">
+                </div>
+                <div class="col-md-4 mb-2">
+                    <button type="button" class="btn btn-primary w-100" id="join-btn">
+                        <i class="bi bi-box-arrow-in-right me-1"></i>Join
+                    </button>
+                </div>
+            </div>
+            <p id="join-status" class="small text-muted mb-0 mt-2"></p>
+        </div>
+    </div>
+
+    {% if session.get('collab_space_id') %}
+    <div class="alert alert-info">
+        You are in a space. <a href="{{ url_for('student_collab_space_session', space_id=session.collab_space_id) }}">Open it</a>.
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.getElementById('join-btn').addEventListener('click', async () => {
+    const code = document.getElementById('join-code').value.trim().toUpperCase();
+    const status = document.getElementById('join-status');
+    if (!code) {
+        status.textContent = 'Enter a join code.';
+        status.className = 'small text-warning mt-2 mb-0';
+        return;
+    }
+    const btn = document.getElementById('join-btn');
+    btn.disabled = true;
+    status.textContent = 'Joining...';
+    status.className = 'small text-muted mt-2 mb-0';
+    try {
+        const r = await fetch('{{ url_for("student_collab_space_join") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ join_code: code })
+        });
+        const data = await r.json();
+        if (data.success) {
+            status.textContent = 'Joined! Redirecting...';
+            status.className = 'small text-success mt-2 mb-0';
+            window.location.href = '{{ url_for("student_collab_space_session", space_id="") }}' + data.space_id;
+        } else {
+            status.textContent = data.error || 'Could not join';
+            status.className = 'small text-danger mt-2 mb-0';
+        }
+    } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+        status.className = 'small text-danger mt-2 mb-0';
+    }
+    btn.disabled = false;
+});
+</script>
+{% endblock %}

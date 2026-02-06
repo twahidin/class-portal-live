@@ -619,6 +619,7 @@
                         <select class="form-select form-select-sm" id="tool-access-select" style="min-width: 180px;">
                             <option value="python_lab">Python Lab</option>
                             <option value="modules">Learning Modules</option>
+                            <option value="collab_space">Collab Space</option>
                         </select>
                     </div>
                 </div>
@@ -665,6 +666,53 @@
                                         <input class="form-check-input python-lab-access-group" type="checkbox" value="{{ g.group_id }}" id="pla-g-{{ g.group_id }}"
                                             {% if g.group_id in python_lab_teaching_group_ids %}checked{% endif %}>
                                         <label class="form-check-label" for="pla-g-{{ g.group_id }}">{{ g.name or g.group_id }} — {{ g.student_count or 0 }} students</label>
+                                    </div>
+                                    {% else %}
+                                    <p class="text-muted small mb-0">No teaching groups yet</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Collab Space panels (shown when Collab Space selected) -->
+                    <div id="tool-access-collabspace" class="tool-access-panel" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <h6 class="mb-2">Teachers allowed to use Collab Space</h6>
+                                <div class="border rounded p-3 mb-3" style="max-height: 280px; overflow-y: auto;">
+                                    {% for t in teachers %}
+                                    <div class="form-check">
+                                        <input class="form-check-input collab-space-access-teacher" type="checkbox" value="{{ t.teacher_id }}" id="csa-t-{{ t.teacher_id }}"
+                                            {% if t.teacher_id in collab_space_teacher_ids %}checked{% endif %}>
+                                        <label class="form-check-label" for="csa-t-{{ t.teacher_id }}">{{ t.name }} ({{ t.teacher_id }})</label>
+                                    </div>
+                                    {% else %}
+                                    <p class="text-muted small mb-0">No teachers yet</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <h6 class="mb-2">Classes allowed to use Collab Space</h6>
+                                <div class="border rounded p-3 mb-3" style="max-height: 280px; overflow-y: auto;">
+                                    {% for c in classes %}
+                                    <div class="form-check">
+                                        <input class="form-check-input collab-space-access-class" type="checkbox" value="{{ c.class_id }}" id="csa-c-{{ c.class_id }}"
+                                            {% if c.class_id in collab_space_class_ids %}checked{% endif %}>
+                                        <label class="form-check-label" for="csa-c-{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %} — {{ c.student_count or 0 }} students</label>
+                                    </div>
+                                    {% else %}
+                                    <p class="text-muted small mb-0">No classes yet</p>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <h6 class="mb-2">Teaching groups allowed to use Collab Space</h6>
+                                <div class="border rounded p-3 mb-3" style="max-height: 280px; overflow-y: auto;">
+                                    {% for g in teaching_groups %}
+                                    <div class="form-check">
+                                        <input class="form-check-input collab-space-access-group" type="checkbox" value="{{ g.group_id }}" id="csa-g-{{ g.group_id }}"
+                                            {% if g.group_id in collab_space_teaching_group_ids %}checked{% endif %}>
+                                        <label class="form-check-label" for="csa-g-{{ g.group_id }}">{{ g.name or g.group_id }} — {{ g.student_count or 0 }} students</label>
                                     </div>
                                     {% else %}
                                     <p class="text-muted small mb-0">No teaching groups yet</p>
@@ -2814,6 +2862,8 @@
     const saveToolAccessBtn = document.getElementById('save-tool-access-btn');
     const toolAccessStatus = document.getElementById('tool-access-status');
 
+    const toolAccessCollabSpace = document.getElementById('tool-access-collabspace');
+
     const TOOL_ACCESS_CONFIG = {
         python_lab: {
             description: 'Choose which <strong>teachers</strong>, <strong>classes</strong>, and <strong>teaching groups</strong> can use Python Lab. Selected teachers will see "Python Lab" in the teacher portal. Students in at least one selected class or teaching group will see "Python Lab" in the student portal.',
@@ -2822,6 +2872,10 @@
         modules: {
             description: 'Choose which <strong>teachers</strong> can create and manage learning modules, and which <strong>classes</strong> can see and use "My Learning". All other teachers and students will not see the Modules / My Learning features.',
             saveLabel: 'Save Learning Modules access'
+        },
+        collab_space: {
+            description: 'Choose which <strong>teachers</strong>, <strong>classes</strong>, and <strong>teaching groups</strong> can use Collab Space. Teachers can create collaboration sessions and use Nanobanana Pro to generate infographics from discussion content (up to 5 per space by default).',
+            saveLabel: 'Save Collab Space access'
         }
     };
 
@@ -2832,6 +2886,7 @@
         if (saveToolAccessBtnText) saveToolAccessBtnText.textContent = config.saveLabel;
         if (toolAccessPythonLab) toolAccessPythonLab.style.display = tool === 'python_lab' ? '' : 'none';
         if (toolAccessModules) toolAccessModules.style.display = tool === 'modules' ? '' : 'none';
+        if (toolAccessCollabSpace) toolAccessCollabSpace.style.display = tool === 'collab_space' ? '' : 'none';
     }
 
     if (toolAccessSelect) {
@@ -2852,6 +2907,12 @@
                     const classIds = [...document.querySelectorAll('.module-access-class:checked')].map(cb => cb.value);
                     url = '{{ url_for("admin_save_module_access") }}';
                     body = JSON.stringify({ teacher_ids: teacherIds, class_ids: classIds });
+                } else if (tool === 'collab_space') {
+                    const teacherIds = [...document.querySelectorAll('.collab-space-access-teacher:checked')].map(cb => cb.value);
+                    const classIds = [...document.querySelectorAll('.collab-space-access-class:checked')].map(cb => cb.value);
+                    const teachingGroupIds = [...document.querySelectorAll('.collab-space-access-group:checked')].map(cb => cb.value);
+                    url = '{{ url_for("admin_save_collab_space_access") }}';
+                    body = JSON.stringify({ teacher_ids: teacherIds, class_ids: classIds, teaching_group_ids: teachingGroupIds });
                 } else {
                     const teacherIds = [...document.querySelectorAll('.python-lab-access-teacher:checked')].map(cb => cb.value);
                     const classIds = [...document.querySelectorAll('.python-lab-access-class:checked')].map(cb => cb.value);

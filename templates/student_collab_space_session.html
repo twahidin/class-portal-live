@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}{{ space.name or space.space_id }} - Collab Space{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}"><i class="bi bi-mortarboard-fill me-2"></i>School Portal</a>
+        <div class="collapse navbar-collapse">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}"><i class="bi bi-house me-1"></i>Dashboard</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('student_collab_space') }}"><i class="bi bi-people me-1"></i>Collab Space</a></li>
+                <li class="nav-item"><a class="nav-link active" href="#">{{ space.name or space.space_id }}</a></li>
+            </ul>
+            <span class="navbar-text">{{ session.student_name }}</span>
+        </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="mb-4">
+        <a href="{{ url_for('student_collab_space') }}" class="text-muted text-decoration-none small"><i class="bi bi-arrow-left me-1"></i>Back</a>
+        <h1 class="mt-1">{{ space.name or space.space_id }}</h1>
+        <p class="text-muted mb-0">Topic: {{ space.central_topic or 'Discussion' }}</p>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">Discussion (read-only for students)</div>
+        <div class="card-body">
+            <div class="font-monospace bg-light p-3 rounded" style="white-space: pre-wrap; min-height: 120px;">{{ space.discussion_text or 'No content yet.' }}</div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">Add your contribution</div>
+        <div class="card-body">
+            <textarea class="form-control mb-2" id="contribution-text" rows="3" placeholder="Type your contribution to the discussion..."></textarea>
+            <button type="button" class="btn btn-primary" id="add-contribution-btn">
+                <i class="bi bi-send me-1"></i>Add to discussion
+            </button>
+            <p id="contribution-status" class="small text-muted mb-0 mt-2"></p>
+        </div>
+    </div>
+
+    {% if space.infographics %}
+    <div class="card">
+        <div class="card-header">Generated infographics</div>
+        <div class="card-body">
+            {% for ig in (space.infographics or [])[::-1] %}
+            <div class="mb-3">
+                <img src="{{ ig.url }}" alt="Infographic" class="img-fluid rounded border" style="max-height: 400px;">
+                <p class="small text-muted mb-0 mt-1"><a href="{{ ig.url }}" target="_blank" rel="noopener">Open in new tab</a></p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+const spaceId = '{{ space.space_id }}';
+
+document.getElementById('add-contribution-btn').addEventListener('click', async () => {
+    const text = document.getElementById('contribution-text').value.trim();
+    const status = document.getElementById('contribution-status');
+    if (!text) {
+        status.textContent = 'Type something first.';
+        status.className = 'small text-warning mt-2 mb-0';
+        return;
+    }
+    const btn = document.getElementById('add-contribution-btn');
+    btn.disabled = true;
+    status.textContent = 'Adding...';
+    status.className = 'small text-muted mt-2 mb-0';
+    try {
+        const r = await fetch('/student/collab-space/' + spaceId + '/content', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: text })
+        });
+        const data = await r.json();
+        if (data.success) {
+            status.textContent = 'Added! Refreshing...';
+            status.className = 'small text-success mt-2 mb-0';
+            setTimeout(() => window.location.reload(), 800);
+        } else {
+            status.textContent = data.error || 'Failed';
+            status.className = 'small text-danger mt-2 mb-0';
+        }
+    } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+        status.className = 'small text-danger mt-2 mb-0';
+    }
+    btn.disabled = false;
+});
+</script>
+{% endblock %}

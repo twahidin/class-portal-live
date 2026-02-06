@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}{{ space.name or space.space_id }} - Collab Space{% endblock %}
+
+{% block navbar %}
+{% set active_nav = 'learning_tools' %}
+{% include 'partials/teacher_navbar.html' %}
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <a href="{{ url_for('teacher_collab_space') }}" class="text-muted text-decoration-none small"><i class="bi bi-arrow-left me-1"></i>Back to spaces</a>
+            <h1 class="mt-1">{{ space.name or space.space_id }}</h1>
+            <p class="text-muted mb-0">Topic: {{ space.central_topic or 'Discussion' }}</p>
+            <p class="mb-0"><span class="badge bg-secondary">Join code: <strong>{{ space.join_code }}</strong></span></p>
+        </div>
+        <div>
+            <span class="text-muted me-2">Infographics: {{ space.infographic_count or 0 }} / {{ space.max_infographic or 5 }}</span>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#collab-settings-modal">
+                <i class="bi bi-gear"></i> Settings
+            </button>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Discussion content (used for infographic prompt)</h5>
+                    <button type="button" class="btn btn-primary btn-sm" id="save-content-btn">
+                        <i class="bi bi-check2 me-1"></i>Save
+                    </button>
+                </div>
+                <div class="card-body">
+                    <textarea class="form-control font-monospace" id="discussion-text" rows="12" placeholder="Paste or type discussion summary and key points here. This text will be sent to Nanobanana Pro to generate an infographic.">{{ space.discussion_text or '' }}</textarea>
+                    <p class="small text-muted mt-2 mb-0" id="content-status"></p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Generate infographic</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">Uses the discussion content and central topic to create an AI infographic (Nanobanana Pro). Maximum {{ space.max_infographic or 5 }} per space.</p>
+                    <button type="button" class="btn btn-primary" id="generate-infographic-btn" {% if not settings.has_api_key %}disabled title="Set API key in Settings"{% elif (space.infographic_count or 0) >= (space.max_infographic or 5) %}disabled title="Maximum infographics reached"{% endif %}>
+                        <i class="bi bi-image me-1"></i>Generate infographic
+                    </button>
+                    <span id="generate-status" class="ms-3 small"></span>
+                    {% if not settings.has_api_key %}
+                    <p class="text-warning small mt-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Set your Nanobanana Pro API key in Settings first.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if space.infographics %}
+            <div class="card mt-4">
+                <div class="card-header">Generated infographics</div>
+                <div class="card-body">
+                    {% for ig in (space.infographics or [])[::-1] %}
+                    <div class="mb-3">
+                        <img src="{{ ig.url }}" alt="Infographic" class="img-fluid rounded border" style="max-height: 400px;">
+                        <p class="small text-muted mb-0 mt-1">
+                            <a href="{{ ig.url }}" target="_blank" rel="noopener">Open in new tab</a>
+                        </p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Settings modal (same as list page) -->
+<div class="modal fade" id="collab-settings-modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Collab Space Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Nanobanana Pro API key</label>
+                    <input type="password" class="form-control" id="settings-api-key" placeholder="Leave blank to keep existing">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Max infographics per space</label>
+                    <input type="number" class="form-control" id="settings-max-infographic" min="1" max="20" value="{{ settings.max_infographic_per_space or 5 }}">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="settings-save-btn">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const spaceId = '{{ space.space_id }}';
+
+document.getElementById('save-content-btn').addEventListener('click', async () => {
+    const text = document.getElementById('discussion-text').value;
+    const status = document.getElementById('content-status');
+    status.textContent = 'Saving...';
+    try {
+        const r = await fetch('/teacher/collab-space/' + spaceId + '/content', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ discussion_text: text })
+        });
+        const data = await r.json();
+        if (data.success) {
+            status.textContent = 'Saved.';
+            status.className = 'small text-success mt-2 mb-0';
+        } else {
+            status.textContent = data.error || 'Failed';
+            status.className = 'small text-danger mt-2 mb-0';
+        }
+    } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+        status.className = 'small text-danger mt-2 mb-0';
+    }
+});
+
+document.getElementById('generate-infographic-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('generate-infographic-btn');
+    const status = document.getElementById('generate-status');
+    btn.disabled = true;
+    status.textContent = 'Generating... (this may take a minute)';
+    status.className = 'ms-3 small text-muted';
+    try {
+        const r = await fetch('/teacher/collab-space/' + spaceId + '/generate-infographic', { method: 'POST' });
+        const data = await r.json();
+        if (data.success) {
+            status.textContent = 'Done!';
+            status.className = 'ms-3 small text-success';
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            status.textContent = data.error || 'Failed';
+            status.className = 'ms-3 small text-danger';
+        }
+    } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+        status.className = 'ms-3 small text-danger';
+    }
+    btn.disabled = false;
+});
+
+document.getElementById('settings-save-btn').addEventListener('click', async () => {
+    const apiKey = document.getElementById('settings-api-key').value.trim() || null;
+    const maxVal = parseInt(document.getElementById('settings-max-infographic').value, 10) || 5;
+    const btn = document.getElementById('settings-save-btn');
+    btn.disabled = true;
+    try {
+        const r = await fetch('{{ url_for("teacher_collab_space_settings") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nanobanana_api_key: apiKey || undefined, max_infographic_per_space: maxVal })
+        });
+        const data = await r.json();
+        if (data.success) {
+            document.getElementById('settings-api-key').value = '';
+            bootstrap.Modal.getInstance(document.getElementById('collab-settings-modal')).hide();
+            window.location.reload();
+        } else {
+            alert(data.error || 'Failed to save');
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+    btn.disabled = false;
+});
+</script>
+{% endblock %}
