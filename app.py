@@ -2286,10 +2286,11 @@ def teacher_collab_space_create():
         'join_code': join_code,
         'is_active': True,
         'max_infographic': max_infographic,
+        'max_generation': DEFAULT_MAX_GENERATION_PER_SPACE,
+        'generation_count': 0,
         'assigned_group_id': assigned_group_id,
         'assigned_group_name': assigned_group_name,
         'discussion_text': '',
-        'infographic_count': 0,
         'infographics': [],
         'created_at': datetime.utcnow(),
         'updated_at': datetime.utcnow(),
@@ -2346,8 +2347,8 @@ def _collab_space_render(space, user_role):
         'central_topic': space.get('central_topic', 'Discussion'),
         'join_code': space.get('join_code', ''),
         'is_active': space.get('is_active', True),
-        'max_infographic': space.get('max_infographic', DEFAULT_MAX_INFOGraphic_PER_SPACE),
-        'infographic_count': space.get('infographic_count', 0),
+        'max_generation': space.get('max_generation', DEFAULT_MAX_GENERATION_PER_SPACE),
+        'generation_count': space.get('generation_count', 0),
         'infographics': space.get('infographics', []),
         'settings': space.get('collab_settings', {'maxLayer1': 6, 'maxTextNodes': 5, 'charLimit': 200}),
     }, default=str)
@@ -2709,24 +2710,50 @@ def handle_settings_changed(data):
     emit('settings_changed', {'settings': settings, 'by': data.get('user_id')}, to=room, include_self=False)
 
 
+DEFAULT_MAX_GENERATION_PER_SPACE = 5  # combined limit for students (PDF + infographic)
+
+
+def _check_generation_limit(space, space_id):
+    """Check if the combined generation limit has been reached.
+    Teachers have unlimited; students share a pool of DEFAULT_MAX_GENERATION_PER_SPACE.
+    Returns (ok: bool, error_response_or_None)."""
+    is_teacher = bool(session.get('teacher_id') and session['teacher_id'] == space.get('teacher_id'))
+    if is_teacher:
+        return True, None   # teachers are unlimited
+    max_gen = space.get('max_generation', DEFAULT_MAX_GENERATION_PER_SPACE)
+    used = (space.get('generation_count') or 0)
+    if used >= max_gen:
+        return False, (jsonify({'error': f'Your group has used all {max_gen} generations for this space. Only the teacher can generate more.'}), 400)
+    return True, None
+
+
+def _increment_generation_count(space_id):
+    """Atomically increment the generation counter."""
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id},
+        {'$inc': {'generation_count': 1}, '$set': {'updated_at': datetime.utcnow()}}
+    )
+
+
 @app.route('/api/collab-space/<space_id>/generate-infographic', methods=['POST'])
 @student_or_teacher_required
 def api_collab_space_generate_infographic(space_id):
-    """Generate infographic from the mind-map node tree using Nanobanana Pro. Available to teacher and students."""
+    """Generate infographic from the mind-map node tree using Nanobanana Pro."""
     space, err = _get_collab_space_for_api(space_id)
     if err:
         return err
+    # Check generation limit (students limited, teachers unlimited)
+    ok, limit_err = _check_generation_limit(space, space_id)
+    if not ok:
+        return limit_err
     teacher_id = space.get('teacher_id')
     settings = _get_teacher_collab_settings(teacher_id)
     api_key = settings.get('nanobanana_api_key')
     if not api_key:
         return jsonify({'error': 'The teacher has not set a Nanobanana Pro API key yet.'}), 400
-    max_infographic = space.get('max_infographic', DEFAULT_MAX_INFOGraphic_PER_SPACE)
-    if (space.get('infographic_count') or 0) >= max_infographic:
-        return jsonify({'error': f'Maximum infographics ({max_infographic}) reached for this space.'}), 400
     central_topic = space.get('central_topic') or 'Discussion'
     nodes_data = space.get('nodes_data')
-    tree_summary = _build_tree_summary(nodes_data) if nodes_data else (space.get('discussion_text') or '')
+    tree_summary = _build_tree_summary(nodes_data) if nodes_data else ''
     prompt = f"""Create a professional educational infographic about:
 Topic: {central_topic}
 
@@ -2752,13 +2779,11 @@ Layout: Vertical infographic format suitable for printing."""
         infographics.append({'url': image_url, 'created_at': datetime.utcnow().isoformat()})
         db.db.collab_spaces.update_one(
             {'space_id': space_id},
-            {'$set': {
-                'infographic_count': (space.get('infographic_count') or 0) + 1,
-                'infographics': infographics,
-                'updated_at': datetime.utcnow(),
-            }},
+            {'$set': {'infographics': infographics, 'updated_at': datetime.utcnow()}},
         )
-        return jsonify({'success': True, 'image_url': image_url, 'infographic_count': (space.get('infographic_count') or 0) + 1})
+        _increment_generation_count(space_id)
+        new_count = (space.get('generation_count') or 0) + 1
+        return jsonify({'success': True, 'image_url': image_url, 'generation_count': new_count})
     except Exception as e:
         logger.exception("Collab Space infographic generation error: %s", e)
         return jsonify({'error': str(e)}), 500
@@ -2767,54 +2792,138 @@ Layout: Vertical infographic format suitable for printing."""
 @app.route('/api/collab-space/<space_id>/generate-pdf', methods=['POST'])
 @student_or_teacher_required
 def api_collab_space_generate_pdf(space_id):
-    """Generate a PDF report from the mind-map tree."""
+    """Generate AI-based study notes PDF from the mind-map tree.
+    Uses the teacher's AI service to transform student contributions into
+    well-structured, educational study notes, then renders as PDF."""
     space, err = _get_collab_space_for_api(space_id)
     if err:
         return err
+    # Check generation limit
+    ok, limit_err = _check_generation_limit(space, space_id)
+    if not ok:
+        return limit_err
     from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
+    from reportlab.lib import colors
+
     nodes_data = space.get('nodes_data') or {}
-    central = nodes_data.get('central', {})
+    central_topic = space.get('central_topic') or 'Discussion'
+    tree_summary = _build_tree_summary(nodes_data) if nodes_data else ''
+
+    # ── AI: generate polished study notes from the raw student content ──
+    ai_notes = None
+    teacher_id = space.get('teacher_id')
+    teacher = Teacher.find_one({'teacher_id': teacher_id})
+    client, model_name, provider = get_teacher_ai_service(teacher, 'anthropic')
+    if not client:
+        client, model_name, provider = get_teacher_ai_service(teacher, 'openai')
+    if client and tree_summary.strip():
+        ai_prompt = f"""You are creating study notes for students. Based on the following mind-map discussion contributions by students, produce **well-structured, educational study notes** that students can use to revise.
+
+Topic: {central_topic}
+
+Student contributions from the mind-map:
+{tree_summary}
+
+Requirements:
+- Keep the students' ideas and content as closely as possible, but reorganise them logically
+- Use clear headings and sub-headings
+- Add brief explanatory context where the student notes are too terse
+- Include key definitions, bullet points, and important takeaways
+- At the end, add a short "Key Takeaways" summary section
+- Format using Markdown (headings with #, bullet points with -, bold with **)
+- Do NOT add information that the students did not discuss — stay faithful to their work"""
+        try:
+            if provider == 'anthropic':
+                resp = client.messages.create(model=model_name, max_tokens=3000,
+                    messages=[{'role': 'user', 'content': ai_prompt}])
+                ai_notes = resp.content[0].text
+            elif provider in ('openai', 'deepseek'):
+                resp = client.chat.completions.create(model=model_name, max_tokens=3000,
+                    messages=[{'role': 'user', 'content': ai_prompt}])
+                ai_notes = resp.choices[0].message.content
+        except Exception as e:
+            logger.warning("AI study notes generation failed, falling back to raw: %s", e)
+
+    # ── Build PDF ──
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('CTitle', parent=styles['Title'], fontSize=20, spaceAfter=14)
-    h1 = ParagraphStyle('CH1', parent=styles['Heading1'], fontSize=16, spaceAfter=8)
-    h2 = ParagraphStyle('CH2', parent=styles['Heading2'], fontSize=13, spaceAfter=6, leftIndent=1 * cm)
-    h3 = ParagraphStyle('CH3', parent=styles['Heading3'], fontSize=11, spaceAfter=4, leftIndent=2 * cm)
-    body = ParagraphStyle('CBody', parent=styles['Normal'], fontSize=10, leftIndent=2.5 * cm, spaceAfter=4)
+    title_style = ParagraphStyle('CTitle', parent=styles['Title'], fontSize=22, spaceAfter=8, textColor=colors.HexColor('#0f172a'))
+    subtitle_style = ParagraphStyle('CSub', parent=styles['Normal'], fontSize=11, textColor=colors.HexColor('#64748b'), spaceAfter=16)
+    h1 = ParagraphStyle('CH1', parent=styles['Heading1'], fontSize=16, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
+    h2 = ParagraphStyle('CH2', parent=styles['Heading2'], fontSize=13, spaceAfter=6, leftIndent=0.5 * cm, textColor=colors.HexColor('#0f766e'))
+    h3 = ParagraphStyle('CH3', parent=styles['Heading3'], fontSize=11, spaceAfter=4, leftIndent=1 * cm)
+    body = ParagraphStyle('CBody', parent=styles['Normal'], fontSize=10, spaceAfter=4, leading=14)
+    body_indent = ParagraphStyle('CBodyI', parent=body, leftIndent=0.5 * cm)
+    bullet = ParagraphStyle('CBullet', parent=body, leftIndent=1 * cm, bulletIndent=0.5 * cm, spaceAfter=3)
+    key_style = ParagraphStyle('CKey', parent=styles['Normal'], fontSize=10, spaceAfter=4, leading=14,
+                               backColor=colors.HexColor('#f0f9ff'), borderPadding=8, leftIndent=0.3 * cm, rightIndent=0.3 * cm)
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm)
     story = []
-    story.append(Paragraph(space.get('name', 'Collab Space'), title_style))
-    if central.get('label'):
-        story.append(Paragraph(f"Central Topic: {central['label']}", styles['Heading2']))
-    if central.get('content'):
-        story.append(Paragraph(central['content'], styles['Normal']))
-    story.append(Spacer(1, 0.5 * cm))
-    for n1 in nodes_data.get('layer1', []):
-        story.append(Paragraph(n1.get('label', ''), h1))
-        if n1.get('content'):
-            story.append(Paragraph(n1['content'], styles['Normal']))
-        for n2 in nodes_data.get('layer2', []):
-            if n2.get('parentId') == n1.get('id'):
-                story.append(Paragraph(n2.get('label', ''), h2))
-                if n2.get('content'):
-                    story.append(Paragraph(n2['content'], body))
-                for n3 in nodes_data.get('layer3', []):
-                    if n3.get('parentId') == n2.get('id'):
-                        story.append(Paragraph(n3.get('label', ''), h3))
-                        if n3.get('textContent'):
-                            story.append(Paragraph(n3['textContent'], body))
+    story.append(Paragraph(f"Study Notes: {central_topic}", title_style))
+    story.append(Paragraph(f"Generated from Collab Space: {space.get('name', '')}", subtitle_style))
+    story.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=12))
+
+    if ai_notes:
+        # Parse the AI-generated markdown into ReportLab paragraphs
+        for line in ai_notes.split('\n'):
+            stripped = line.strip()
+            if not stripped:
+                story.append(Spacer(1, 0.2 * cm))
+                continue
+            # Convert markdown bold **text** to <b>text</b>
+            import re
+            stripped = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', stripped)
+            stripped = re.sub(r'\*(.+?)\*', r'<i>\1</i>', stripped)
+            if stripped.startswith('### '):
+                story.append(Paragraph(stripped[4:], h3))
+            elif stripped.startswith('## '):
+                story.append(Paragraph(stripped[3:], h2))
+            elif stripped.startswith('# '):
+                story.append(Paragraph(stripped[2:], h1))
+            elif stripped.startswith('- ') or stripped.startswith('* '):
+                story.append(Paragraph(f"• {stripped[2:]}", bullet))
+            elif stripped.startswith('> '):
+                story.append(Paragraph(stripped[2:], key_style))
+            else:
+                story.append(Paragraph(stripped, body))
+    else:
+        # Fallback: structured dump of student content (no AI)
+        story.append(Paragraph("<i>AI study notes unavailable — showing raw contributions.</i>", body))
         story.append(Spacer(1, 0.3 * cm))
+        central = nodes_data.get('central', {})
+        if central.get('label'):
+            story.append(Paragraph(f"Central Topic: {central['label']}", h1))
+        if central.get('content'):
+            story.append(Paragraph(central['content'], body))
+        story.append(Spacer(1, 0.3 * cm))
+        for n1 in nodes_data.get('layer1', []):
+            story.append(Paragraph(n1.get('label', ''), h1))
+            if n1.get('content'):
+                story.append(Paragraph(n1['content'], body_indent))
+            for n2 in nodes_data.get('layer2', []):
+                if n2.get('parentId') == n1.get('id'):
+                    story.append(Paragraph(n2.get('label', ''), h2))
+                    if n2.get('content'):
+                        story.append(Paragraph(n2['content'], body_indent))
+                    for n3 in nodes_data.get('layer3', []):
+                        if n3.get('parentId') == n2.get('id'):
+                            lbl = n3.get('label', '')
+                            txt = n3.get('textContent') or n3.get('content') or ''
+                            story.append(Paragraph(f"• {lbl}: {txt}" if txt else f"• {lbl}", bullet))
+            story.append(Spacer(1, 0.2 * cm))
+
     try:
         doc.build(story)
     except Exception as e:
         logger.exception("PDF build error: %s", e)
         return jsonify({'error': 'Failed to generate PDF'}), 500
     buf.seek(0)
+    _increment_generation_count(space_id)
     return send_file(buf, mimetype='application/pdf', as_attachment=True,
-                     download_name=f"{space.get('name', 'report')}.pdf")
+                     download_name=f"{space.get('name', 'study-notes')}.pdf")
 
 
 @app.route('/student/collab-space')

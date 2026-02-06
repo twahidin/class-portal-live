@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Collab Space</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -229,8 +229,11 @@ function App() {
   const [addTarget, setAddTarget] = useState(null);
   const [addAsTextNode, setAddAsTextNode] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
-  const [infographicsUsed, setInfographicsUsed] = useState(FD.space.infographic_count || 0);
-  const maxInfographics = FD.space.max_infographic || 5;
+  const [generationsUsed, setGenerationsUsed] = useState(FD.space.generation_count || 0);
+  const maxGenerations = FD.space.max_generation || 5;
+  const isTeacher = FD.user_role === 'teacher';
+  // Teachers have unlimited generations; students share a pool
+  const canGenerate = isTeacher || generationsUsed < maxGenerations;
   const [currentStudent, setCurrentStudent] = useState({id:FD.user_id, name:FD.user_name, color:COLOR_PALETTE[0]});
   const [saveStatus, setSaveStatus] = useState('');
   const [genStatus, setGenStatus] = useState('');
@@ -674,20 +677,34 @@ function App() {
 
   // ─── Generate infographic / PDF ───
   const handleGenerateInfographic = async () => {
-    setGenStatus('Generating... this may take a minute');
+    setGenStatus('Generating infographic... this may take a minute');
     try {
       const r = await api('/generate-infographic');
       const ct = r.headers.get('Content-Type')||'';
       if (!ct.includes('json')) { setGenStatus('Error: unexpected response'); return; }
       const data = await r.json();
-      if (data.success) { setInfographicsUsed(data.infographic_count||infographicsUsed+1); setGenStatus('Done!'); }
+      if (data.success) { setGenerationsUsed(data.generation_count || generationsUsed+1); setGenStatus('Infographic generated!'); }
       else { setGenStatus(data.error||'Failed'); }
     } catch(e) { setGenStatus('Error: '+e.message); }
   };
   const handleGeneratePDF = async () => {
-    setSaveStatus('Saving before PDF...');
+    setGenStatus('Generating study notes PDF...');
+    // Save latest nodes first
     try { await api('/save-nodes', {body: JSON.stringify({nodes_data: nodes})}); } catch(e) {}
-    window.open(`/api/collab-space/${SPACE_ID}/generate-pdf`, '_blank'); setSaveStatus('');
+    try {
+      const r = await api('/generate-pdf');
+      if (r.ok && r.headers.get('Content-Type')?.includes('pdf')) {
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = (FD.space.name || 'study-notes') + '.pdf';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+        setGenerationsUsed(prev => prev + 1);
+        setGenStatus('PDF downloaded!');
+      } else {
+        const data = await r.json().catch(() => ({}));
+        setGenStatus(data.error || 'Failed to generate PDF');
+      }
+    } catch(e) { setGenStatus('Error: ' + e.message); }
   };
 
   // ─── Derived data ───
@@ -918,22 +935,24 @@ function App() {
           </div>
         </div>
 
-        {/* Bottom Export Toolbar */}
-        <div style={{background:'#f1f5f9',borderTop:'1px solid #e2e8f0',padding:'12px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-          <div style={{display:'flex',alignItems:'center',gap:20}}>
-            <span style={{fontSize:12,color:'#64748b'}}>Nodes: <strong style={{color:'#1e293b'}}>{allFlat.length}</strong></span>
-            <span style={{fontSize:12,color:'#64748b'}}>Votes: <strong style={{color:'#1e293b'}}>{totalVotes}</strong></span>
-            <span style={{fontSize:12,color:'#64748b'}}>Infographics: <strong style={{color:infographicsUsed>=maxInfographics?'#ef4444':'#1e293b'}}>{maxInfographics-infographicsUsed}/{maxInfographics}</strong></span>
-            {genStatus && <span style={{fontSize:11,color:'#64748b'}}>{genStatus}</span>}
+        {/* Bottom Export Toolbar — fixed at bottom for iPad visibility */}
+        <div style={{background:'#f1f5f9',borderTop:'1px solid #e2e8f0',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,minHeight:56,
+          paddingBottom:'max(10px, env(safe-area-inset-bottom))'}}>
+          <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+            <span style={{fontSize:11,color:'#64748b'}}>Nodes: <strong style={{color:'#1e293b'}}>{allFlat.length}</strong></span>
+            <span style={{fontSize:11,color:'#64748b'}}>Votes: <strong style={{color:'#1e293b'}}>{totalVotes}</strong></span>
+            {!isTeacher && <span style={{fontSize:11,color:'#64748b'}}>Generations left: <strong style={{color:canGenerate?'#1e293b':'#ef4444'}}>{maxGenerations - generationsUsed}/{maxGenerations}</strong></span>}
+            {isTeacher && <span style={{fontSize:11,color:'#10b981',fontWeight:600}}>Unlimited (Teacher)</span>}
+            {genStatus && <span style={{fontSize:11,color:'#7c3aed',fontWeight:500}}>{genStatus}</span>}
           </div>
-          <div style={{display:'flex',gap:10}}>
-            <button onClick={handleGenerateInfographic} disabled={infographicsUsed>=maxInfographics||!FD.has_api_key}
-              style={{display:'flex',alignItems:'center',gap:6,padding:'8px 18px',background:(infographicsUsed>=maxInfographics||!FD.has_api_key)?'#94a3b8':'#7c3aed',color:'#fff',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:(infographicsUsed>=maxInfographics||!FD.has_api_key)?'not-allowed':'pointer'}}>
-              <BarChartIcon size={15}/> Generate Infographic
+          <div style={{display:'flex',gap:8,flexShrink:0}}>
+            <button onClick={handleGenerateInfographic} disabled={(!canGenerate && !isTeacher)||!FD.has_api_key}
+              style={{display:'flex',alignItems:'center',gap:5,padding:'8px 14px',background:((!canGenerate&&!isTeacher)||!FD.has_api_key)?'#94a3b8':'#7c3aed',color:'#fff',border:'none',borderRadius:8,fontSize:11,fontWeight:600,cursor:((!canGenerate&&!isTeacher)||!FD.has_api_key)?'not-allowed':'pointer'}}>
+              <BarChartIcon size={14}/> Infographic
             </button>
-            <button onClick={handleGeneratePDF}
-              style={{display:'flex',alignItems:'center',gap:6,padding:'8px 18px',background:'#dc2626',color:'#fff',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer'}}>
-              <DownloadIcon size={15}/> Generate PDF Report
+            <button onClick={handleGeneratePDF} disabled={!canGenerate && !isTeacher}
+              style={{display:'flex',alignItems:'center',gap:5,padding:'8px 14px',background:(!canGenerate&&!isTeacher)?'#94a3b8':'#dc2626',color:'#fff',border:'none',borderRadius:8,fontSize:11,fontWeight:600,cursor:(!canGenerate&&!isTeacher)?'not-allowed':'pointer'}}>
+              <DownloadIcon size={14}/> Study Notes PDF
             </button>
           </div>
         </div>
