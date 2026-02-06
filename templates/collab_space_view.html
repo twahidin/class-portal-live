@@ -173,7 +173,7 @@ const MindMapNode = ({node, isSelected, onMouseDown, onAddChild, userView}) => {
   // Show + button: not on text nodes, not on layer 3
   const showAdd = !isText && node.layer < 3;
   return (
-    <g style={{cursor:'pointer'}} onMouseDown={e => onMouseDown(e, node)}>
+    <g style={{cursor:'pointer'}} onMouseDown={e => onMouseDown(e, node)} onTouchStart={e => onMouseDown(e, node)}>
       {isSelected && <rect x={node.x-w/2-4} y={node.y-h/2-4} width={w+8} height={h+8} rx={(h+8)/2} fill="none" stroke="#FBBF24" strokeWidth="3" opacity="0.5"/>}
       <rect x={node.x-w/2} y={node.y-h/2} width={w} height={h} rx={h/2} fill={bg} stroke={stroke} strokeWidth={isSelected?3:1.5} className="node-hover" style={{transition:'all 0.15s'}}/>
       {/* Text node icon */}
@@ -191,7 +191,7 @@ const MindMapNode = ({node, isSelected, onMouseDown, onAddChild, userView}) => {
           style={{fontSize:`${fs}px`,fontWeight:600,fill:textFill,pointerEvents:'none'}}>{display}</text>
       )}
       {/* Add child button */}
-      {showAdd && (<g className="add-btn" onMouseDown={e=>{e.stopPropagation();onAddChild(node);}} style={{cursor:'pointer'}}><circle cx={node.x+w/2+12} cy={node.y} r="11" fill="#10B981" stroke="#fff" strokeWidth="1.5"/><text x={node.x+w/2+12} y={node.y+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'14px',fill:'#fff',fontWeight:700,pointerEvents:'none'}}>+</text></g>)}
+      {showAdd && (<g className="add-btn" onMouseDown={e=>{e.stopPropagation();onAddChild(node);}} onTouchStart={e=>{e.stopPropagation();e.preventDefault();onAddChild(node);}} style={{cursor:'pointer'}}><circle cx={node.x+w/2+12} cy={node.y} r="11" fill="#10B981" stroke="#fff" strokeWidth="1.5"/><text x={node.x+w/2+12} y={node.y+1} textAnchor="middle" dominantBaseline="middle" style={{fontSize:'14px',fill:'#fff',fontWeight:700,pointerEvents:'none'}}>+</text></g>)}
       {/* Student color dot */}
       {node.studentColor&&node.layer>0&&(<circle cx={node.x} cy={node.y+h/2+8} r="4" fill={node.studentColor.primary} stroke="#fff" strokeWidth="1"/>)}
     </g>
@@ -366,6 +366,22 @@ function App() {
     }, 5000);
   }
 
+  // ─── Unified pointer helpers (mouse + touch) ───
+  const getPointer = (e) => {
+    if (e.touches && e.touches.length > 0) return { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches.length > 0) return { clientX: e.changedTouches[0].clientX, clientY: e.changedTouches[0].clientY };
+    return { clientX: e.clientX, clientY: e.clientY };
+  };
+  const svgCoords = (e) => {
+    const svg = svgRef.current; if (!svg) return {x:0,y:0};
+    const rect = svg.getBoundingClientRect();
+    const p = getPointer(e);
+    return { x: viewBox.x + ((p.clientX - rect.left) / rect.width) * viewBox.w,
+             y: viewBox.y + ((p.clientY - rect.top) / rect.height) * viewBox.h };
+  };
+  // Pinch-to-zoom tracking
+  const pinchRef = useRef(null);
+
   // ─── Canvas interactions ───
   const handleWheel = useCallback(e => {
     e.preventDefault();
@@ -373,19 +389,34 @@ function App() {
     setViewBox(v => { const cx=v.x+v.w/2, cy=v.y+v.h/2, nw=v.w*scale, nh=v.h*scale; return {x:cx-nw/2,y:cy-nh/2,w:nw,h:nh}; });
   }, []);
 
-  const svgCoords = (e) => {
-    const svg = svgRef.current; if (!svg) return {x:0,y:0};
-    const rect = svg.getBoundingClientRect();
-    return { x: viewBox.x + ((e.clientX - rect.left) / rect.width) * viewBox.w,
-             y: viewBox.y + ((e.clientY - rect.top) / rect.height) * viewBox.h };
-  };
-
-  const handleCanvasMouseDown = e => {
+  // — Pointer down (canvas pan start) —
+  const handlePointerDown = e => {
+    // Touch: handle pinch-to-zoom (2 fingers)
+    if (e.touches && e.touches.length === 2) {
+      const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      pinchRef.current = { dist: d, vb: {...viewBox} };
+      return;
+    }
     if (dragNode) return;
-    setDragging(true); setDragStart({x:e.clientX, y:e.clientY});
+    const p = getPointer(e);
+    setDragging(true); setDragStart({x: p.clientX, y: p.clientY});
   };
 
-  const handleMouseMove = e => {
+  // — Pointer move (pan, node drag, cursor broadcast) —
+  const handlePointerMove = e => {
+    // Prevent default on touch to stop iOS scroll/bounce
+    if (e.touches) e.preventDefault();
+    // Pinch-to-zoom
+    if (e.touches && e.touches.length === 2 && pinchRef.current) {
+      const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      const scale = pinchRef.current.dist / d;
+      const vb = pinchRef.current.vb;
+      const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2;
+      const nw = vb.w * scale, nh = vb.h * scale;
+      setViewBox({x: cx - nw/2, y: cy - nh/2, w: nw, h: nh});
+      return;
+    }
+    const p = getPointer(e);
     // Remote cursor broadcast (~15fps)
     const now = Date.now();
     if (now - cursorThrottle.current > 66) {
@@ -410,17 +441,18 @@ function App() {
     }
     // Canvas pan
     if (dragging) {
-      const dx = (e.clientX - dragStart.x) * (viewBox.w / window.innerWidth);
-      const dy = (e.clientY - dragStart.y) * (viewBox.h / window.innerHeight);
+      const dx = (p.clientX - dragStart.x) * (viewBox.w / window.innerWidth);
+      const dy = (p.clientY - dragStart.y) * (viewBox.h / window.innerHeight);
       setViewBox(v => ({...v, x: v.x - dx, y: v.y - dy}));
-      setDragStart({x: e.clientX, y: e.clientY});
+      setDragStart({x: p.clientX, y: p.clientY});
     }
   };
 
-  const handleMouseUp = () => {
+  // — Pointer up (finish drag/click) —
+  const handlePointerUp = (e) => {
+    pinchRef.current = null;
     // Finish node drag
     if (dragNode && didDrag) {
-      // Get the final position from state
       setNodes(prev => {
         let finalNode;
         if (dragNode.id === 'central') finalNode = prev.central;
@@ -435,7 +467,6 @@ function App() {
     }
     // If it was a click (not a drag), select the node
     if (dragNode && !didDrag) {
-      // Find fresh node data from state for the selected node
       setNodes(prev => {
         let fresh;
         if (dragNode.id === 'central') fresh = prev.central;
@@ -448,10 +479,20 @@ function App() {
     setDragging(false);
   };
 
-  useEffect(() => { const el=svgRef.current; if(el)el.addEventListener('wheel',handleWheel,{passive:false}); return()=>{if(el)el.removeEventListener('wheel',handleWheel);}; },[handleWheel]);
+  // Attach wheel + touch listeners with {passive:false} to allow preventDefault
+  useEffect(() => {
+    const el = svgRef.current; if (!el) return;
+    el.addEventListener('wheel', handleWheel, {passive:false});
+    el.addEventListener('touchmove', handlePointerMove, {passive:false});
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('touchmove', handlePointerMove);
+    };
+  }, [handleWheel, dragging, dragNode, dragNodeStart, didDrag, dragStart, viewBox]);
 
-  // ─── Node mousedown (start potential drag) ───
+  // ─── Node pointer-down (start potential drag — works for mouse + touch) ───
   const handleNodeMouseDown = (e, node) => {
+    if (e.touches) e.preventDefault();
     e.stopPropagation();
     const c = svgCoords(e);
     setDragNode(node);
@@ -703,9 +744,10 @@ function App() {
 
         {/* Mind Map + Detail Panel */}
         <div style={{flex:1,display:'flex',overflow:'hidden'}}>
-          <svg ref={svgRef} style={{flex:1,background:'#f8fafc',cursor: dragNode ? 'grabbing' : (dragging ? 'grabbing' : 'grab')}}
+          <svg ref={svgRef} style={{flex:1,background:'#f8fafc',cursor: dragNode ? 'grabbing' : (dragging ? 'grabbing' : 'grab'), touchAction:'none'}}
             viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
-            onMouseDown={handleCanvasMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+            onMouseDown={handlePointerDown} onMouseMove={handlePointerMove} onMouseUp={handlePointerUp} onMouseLeave={handlePointerUp}
+            onTouchStart={handlePointerDown} onTouchEnd={handlePointerUp} onTouchCancel={handlePointerUp}>
             <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e2e8f0" strokeWidth="0.5"/></pattern></defs>
             <rect x={viewBox.x-500} y={viewBox.y-500} width={viewBox.w+1000} height={viewBox.h+1000} fill="url(#grid)"/>
             {edges.map((e,i) => <CurvedLine key={i} x1={e.from.x} y1={e.from.y} x2={e.to.x} y2={e.to.y} color={e.color}/>)}
