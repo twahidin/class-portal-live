@@ -755,8 +755,8 @@ function App() {
         </div>
       </div>)}
 
-      {/* Main Content — minHeight:0 so flex shrinks and bottom toolbar stays visible on iPad */}
-      <div style={{flex:1,display:'flex',flexDirection:'column',minHeight:0}}>
+      {/* Main Content — paddingBottom reserves space for fixed toolbar so it's not covered on iPad */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',minHeight:0,paddingBottom:'calc(56px + env(safe-area-inset-bottom, 0px))'}}>
         {/* Header */}
         <div style={{background:'#0f172a',color:'#fff',padding:'12px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
           <div style={{display:'flex',alignItems:'center',gap:16}}>
@@ -939,8 +939,8 @@ function App() {
           </div>
         </div>
 
-        {/* Bottom Export Toolbar — always visible; minHeight:0 on parent keeps this in view on iPad */}
-        <div style={{background:'#f1f5f9',borderTop:'1px solid #e2e8f0',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,minHeight:56,zIndex:10,
+        {/* Bottom Export Toolbar — fixed to viewport so always visible on iPad (Safari 100vh issue) */}
+        <div style={{position:'fixed',bottom:0,left:0,right:0,background:'#f1f5f9',borderTop:'1px solid #e2e8f0',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',minHeight:56,zIndex:50,
           paddingBottom:'max(10px, env(safe-area-inset-bottom))'}}>
           <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
             <span style={{fontSize:11,color:'#64748b'}}>Nodes: <strong style={{color:'#1e293b'}}>{allFlat.length}</strong></span>
