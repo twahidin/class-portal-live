@@ -2420,6 +2420,53 @@ def _build_tree_summary(nodes_data):
     return '\n'.join(lines)
 
 
+def _build_report_payload(nodes_data, space):
+    """Build a full structured payload for the PDF report AI: topics, subtopics, all text, image markers, infographics."""
+    if not nodes_data:
+        return ''
+    sections = []
+    central = nodes_data.get('central', {})
+    sections.append("=== CENTRAL TOPIC ===")
+    sections.append(central.get('label', ''))
+    if central.get('content'):
+        sections.append(central['content'])
+    sections.append("")
+    layer1 = nodes_data.get('layer1', [])
+    layer2 = nodes_data.get('layer2', [])
+    layer3 = nodes_data.get('layer3', [])
+    for n1 in layer1:
+        sections.append(f"=== TOPIC: {n1.get('label', '')} ===")
+        if n1.get('content'):
+            sections.append(n1['content'])
+        if n1.get('hasImage'):
+            sections.append("[Includes image]")
+        for n2 in layer2:
+            if n2.get('parentId') != n1.get('id'):
+                continue
+            sections.append(f"  --- Subtopic: {n2.get('label', '')} ---")
+            if n2.get('content'):
+                sections.append(f"  {n2['content']}")
+            if n2.get('hasImage'):
+                sections.append("  [Includes image]")
+            for n3 in layer3:
+                if n3.get('parentId') != n2.get('id'):
+                    continue
+                lbl = n3.get('label', '')
+                txt = n3.get('textContent') or n3.get('content') or ''
+                img = " [Includes image]" if n3.get('hasImage') else ""
+                sections.append(f"  • {lbl}: {txt}{img}")
+        sections.append("")
+    infographics = space.get('infographics') or []
+    if infographics:
+        sections.append("=== GENERATED INFOGRAPHICS (from this space) ===")
+        for i, inf in enumerate(infographics, 1):
+            url = inf.get('url', '')
+            if url:
+                sections.append(f"  Infographic {i}: {url}")
+        sections.append("")
+    return '\n'.join(sections)
+
+
 def _get_collab_space_for_api(space_id):
     """Return (space, error_response). Checks teacher or student access."""
     space = db.db.collab_spaces.find_one({'space_id': space_id})
@@ -2829,31 +2876,31 @@ def api_collab_space_generate_pdf(space_id):
 
     nodes_data = space.get('nodes_data') or {}
     central_topic = space.get('central_topic') or 'Discussion'
-    tree_summary = _build_tree_summary(nodes_data) if nodes_data else ''
+    report_payload = _build_report_payload(nodes_data, space) if nodes_data else ''
 
-    # ── AI: generate polished study notes from the raw student content ──
+    # ── AI: generate a complete PDF report (Claude Sonnet preferred) from all topics, subtopics, text, images ──
     ai_notes = None
     teacher_id = space.get('teacher_id')
     teacher = Teacher.find_one({'teacher_id': teacher_id})
     client, model_name, provider = get_teacher_ai_service(teacher, 'anthropic')
     if not client:
         client, model_name, provider = get_teacher_ai_service(teacher, 'openai')
-    if client and tree_summary.strip():
-        ai_prompt = f"""You are creating study notes for students. Based on the following mind-map discussion contributions by students, produce **well-structured, educational study notes** that students can use to revise.
+    if client and report_payload.strip():
+        ai_prompt = f"""You are creating a complete PDF report for students from their Collab Space mind map. Your job is to capture ALL topics, subtopics, texts, and image references below and arrange them into a clear, professional report.
 
-Topic: {central_topic}
+Central topic: {central_topic}
 
-Student contributions from the mind-map:
-{tree_summary}
+Full structured data from the mind map (topics, subtopics, bullet points; "[Includes image]" means that node has an image):
+{report_payload}
 
 Requirements:
-- Keep the students' ideas and content as closely as possible, but reorganise them logically
-- Use clear headings and sub-headings
-- Add brief explanatory context where the student notes are too terse
-- Include key definitions, bullet points, and important takeaways
-- At the end, add a short "Key Takeaways" summary section
-- Format using Markdown (headings with #, bullet points with -, bold with **)
-- Do NOT add information that the students did not discuss — stay faithful to their work"""
+- Include every topic and subtopic and all text exactly as provided; do not omit any student content
+- Where you see "[Includes image]", note it in the report (e.g. "See image" or "[Image attached]") so the report reflects that visuals were contributed
+- If there are "GENERATED INFOGRAPHICS" listed, add a short "Generated infographics" section at the end that references them
+- Use a clear report structure: main sections for each topic, subheadings for subtopics, bullets for details
+- Use Markdown: headings with # / ## / ###, bullet points with -, bold with **
+- Add a brief "Key takeaways" section at the end summarising the main points
+- Do not invent content — only use what is in the data above"""
         try:
             if provider == 'anthropic':
                 resp = client.messages.create(model=model_name, max_tokens=3000,
