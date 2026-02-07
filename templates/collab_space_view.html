@@ -681,6 +681,11 @@ function App() {
     try {
       const r = await api('/generate-infographic');
       const ct = r.headers.get('Content-Type')||'';
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        setGenStatus(data.error || `Request failed (${r.status}). Try refreshing or re‑logging in.`);
+        return;
+      }
       if (!ct.includes('json')) { setGenStatus('Error: unexpected response'); return; }
       const data = await r.json();
       if (data.success) { setGenerationsUsed(data.generation_count || generationsUsed+1); setGenStatus('Infographic generated!'); }
@@ -689,7 +694,6 @@ function App() {
   };
   const handleGeneratePDF = async () => {
     setGenStatus('Generating study notes PDF...');
-    // Save latest nodes first
     try { await api('/save-nodes', {body: JSON.stringify({nodes_data: nodes})}); } catch(e) {}
     try {
       const r = await api('/generate-pdf');
@@ -702,7 +706,7 @@ function App() {
         setGenStatus('PDF downloaded!');
       } else {
         const data = await r.json().catch(() => ({}));
-        setGenStatus(data.error || 'Failed to generate PDF');
+        setGenStatus(data.error || (r.status === 401 || r.status === 403 ? 'Session expired? Try re‑logging in.' : `Request failed (${r.status}).`));
       }
     } catch(e) { setGenStatus('Error: ' + e.message); }
   };
@@ -751,8 +755,8 @@ function App() {
         </div>
       </div>)}
 
-      {/* Main Content */}
-      <div style={{flex:1,display:'flex',flexDirection:'column'}}>
+      {/* Main Content — minHeight:0 so flex shrinks and bottom toolbar stays visible on iPad */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',minHeight:0}}>
         {/* Header */}
         <div style={{background:'#0f172a',color:'#fff',padding:'12px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
           <div style={{display:'flex',alignItems:'center',gap:16}}>
@@ -834,8 +838,8 @@ function App() {
           </div>
         )}
 
-        {/* Mind Map + Detail Panel */}
-        <div style={{flex:1,display:'flex',overflow:'hidden'}}>
+        {/* Mind Map + Detail Panel — minHeight:0 so toolbar is not pushed off-screen */}
+        <div style={{flex:1,display:'flex',overflow:'hidden',minHeight:0}}>
           <svg ref={svgRef} style={{flex:1,background:'#f8fafc',cursor: dragNodeId ? 'grabbing' : (dragging ? 'grabbing' : 'grab'), touchAction:'none'}}
             viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`}
             onMouseDown={handlePointerDown} onMouseMove={handlePointerMove} onMouseUp={handlePointerUp} onMouseLeave={handlePointerUp}
@@ -935,8 +939,8 @@ function App() {
           </div>
         </div>
 
-        {/* Bottom Export Toolbar — fixed at bottom for iPad visibility */}
-        <div style={{background:'#f1f5f9',borderTop:'1px solid #e2e8f0',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,minHeight:56,
+        {/* Bottom Export Toolbar — always visible; minHeight:0 on parent keeps this in view on iPad */}
+        <div style={{background:'#f1f5f9',borderTop:'1px solid #e2e8f0',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,minHeight:56,zIndex:10,
           paddingBottom:'max(10px, env(safe-area-inset-bottom))'}}>
           <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
             <span style={{fontSize:11,color:'#64748b'}}>Nodes: <strong style={{color:'#1e293b'}}>{allFlat.length}</strong></span>
@@ -945,13 +949,15 @@ function App() {
             {isTeacher && <span style={{fontSize:11,color:'#10b981',fontWeight:600}}>Unlimited (Teacher)</span>}
             {genStatus && <span style={{fontSize:11,color:'#7c3aed',fontWeight:500}}>{genStatus}</span>}
           </div>
-          <div style={{display:'flex',gap:8,flexShrink:0}}>
-            <button onClick={handleGenerateInfographic} disabled={(!canGenerate && !isTeacher)||!FD.has_api_key}
-              style={{display:'flex',alignItems:'center',gap:5,padding:'8px 14px',background:((!canGenerate&&!isTeacher)||!FD.has_api_key)?'#94a3b8':'#7c3aed',color:'#fff',border:'none',borderRadius:8,fontSize:11,fontWeight:600,cursor:((!canGenerate&&!isTeacher)||!FD.has_api_key)?'not-allowed':'pointer'}}>
+          <div style={{display:'flex',gap:8,flexShrink:0,alignItems:'center'}}>
+            <button type="button" onClick={handleGenerateInfographic} disabled={(!canGenerate && !isTeacher)||!FD.has_api_key}
+              style={{display:'flex',alignItems:'center',justifyContent:'center',gap:5,minHeight:44,minWidth:44,padding:'10px 16px',background:((!canGenerate&&!isTeacher)||!FD.has_api_key)?'#94a3b8':'#7c3aed',color:'#fff',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:((!canGenerate&&!isTeacher)||!FD.has_api_key)?'not-allowed':'pointer',WebkitTapHighlightColor:'transparent'}}
+              title={!FD.has_api_key?'Teacher must set Nanobanana API key':((!canGenerate&&!isTeacher)?'No generations left':'Generate infographic')}>
               <BarChartIcon size={14}/> Infographic
             </button>
-            <button onClick={handleGeneratePDF} disabled={!canGenerate && !isTeacher}
-              style={{display:'flex',alignItems:'center',gap:5,padding:'8px 14px',background:(!canGenerate&&!isTeacher)?'#94a3b8':'#dc2626',color:'#fff',border:'none',borderRadius:8,fontSize:11,fontWeight:600,cursor:(!canGenerate&&!isTeacher)?'not-allowed':'pointer'}}>
+            <button type="button" onClick={handleGeneratePDF} disabled={!canGenerate && !isTeacher}
+              style={{display:'flex',alignItems:'center',justifyContent:'center',gap:5,minHeight:44,minWidth:44,padding:'10px 16px',background:(!canGenerate&&!isTeacher)?'#94a3b8':'#dc2626',color:'#fff',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:(!canGenerate&&!isTeacher)?'not-allowed':'pointer',WebkitTapHighlightColor:'transparent'}}
+              title={(!canGenerate&&!isTeacher)?'No generations left':'Generate PDF report'}>
               <DownloadIcon size={14}/> Study Notes PDF
             </button>
           </div>
