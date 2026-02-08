@@ -2178,6 +2178,8 @@ def student_python_execute():
         code = (data.get('code') or '').strip()
         if not code:
             return jsonify({'error': 'No code provided'}), 400
+        # Normalize smart/curly quotes to straight quotes (iPad and other keyboards insert Unicode quotes)
+        code = code.replace('\u201c', '"').replace('\u201d', '"').replace('\u2018', "'").replace('\u2019', "'")
         with tempfile.TemporaryDirectory() as tmpdir:
             result = subprocess.run(
                 [os.environ.get('PYTHON_EXECUTABLE', 'python3'), '-c', code],
