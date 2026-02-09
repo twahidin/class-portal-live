@@ -5291,6 +5291,38 @@ def _student_has_python_lab_access(student_id):
     return False
 
 
+# ============================================================================
+# COLLAB SPACE ACCESS - Which teachers/classes/teaching groups can use Collab Space (admin-set)
+# ============================================================================
+
+COLLAB_SPACE_ACCESS_CONFIG_ID = 'default'
+
+def _get_collab_space_access_config():
+    """Return { teacher_ids: [], class_ids: [], teaching_group_ids: [] } from admin allocation."""
+    doc = db.db.collab_space_access.find_one({'config_id': COLLAB_SPACE_ACCESS_CONFIG_ID})
+    if not doc:
+        return {'teacher_ids': [], 'class_ids': [], 'teaching_group_ids': []}
+    return {
+        'teacher_ids': list(doc.get('teacher_ids') or []),
+        'class_ids': list(doc.get('class_ids') or []),
+        'teaching_group_ids': list(doc.get('teaching_group_ids') or []),
+    }
+
+def _save_collab_space_access_config(teacher_ids, class_ids, teaching_group_ids):
+    """Save which teachers, classes and teaching groups have access to Collab Space."""
+    db.db.collab_space_access.update_one(
+        {'config_id': COLLAB_SPACE_ACCESS_CONFIG_ID},
+        {'$set': {
+            'config_id': COLLAB_SPACE_ACCESS_CONFIG_ID,
+            'teacher_ids': list(teacher_ids or []),
+            'class_ids': list(class_ids or []),
+            'teaching_group_ids': list(teaching_group_ids or []),
+            'updated_at': datetime.utcnow(),
+        }},
+        upsert=True,
+    )
+
+
 @app.context_processor
 def inject_module_access():
     """Make teacher_has_module_access, student_has_module_access, student_has_python_lab_access, teacher_has_python_lab_access available in all templates."""
@@ -6410,6 +6442,8 @@ def admin_dashboard():
     module_access = _get_module_access_config()
     # Python Lab access (which teachers/classes/teaching groups can use Python Lab)
     python_lab_access = _get_python_lab_access_config()
+    # Collab Space access (which teachers/classes/teaching groups can use Collab Space)
+    collab_space_access = _get_collab_space_access_config()
     teaching_groups = list(TeachingGroup.find({}))
     for g in teaching_groups:
         g['student_count'] = len(g.get('student_ids') or [])
@@ -6423,7 +6457,10 @@ def admin_dashboard():
                          module_access_class_ids=module_access['class_ids'],
                          python_lab_teacher_ids=python_lab_access['teacher_ids'],
                          python_lab_class_ids=python_lab_access['class_ids'],
-                         python_lab_teaching_group_ids=python_lab_access['teaching_group_ids'])
+                         python_lab_teaching_group_ids=python_lab_access['teaching_group_ids'],
+                         collab_space_teacher_ids=collab_space_access['teacher_ids'],
+                         collab_space_class_ids=collab_space_access['class_ids'],
+                         collab_space_teaching_group_ids=collab_space_access['teaching_group_ids'])
 
 
 @app.route('/admin/module-access', methods=['POST'])
@@ -6454,6 +6491,22 @@ def admin_save_python_lab_access():
         return jsonify({'success': True, 'message': 'Python Lab access updated.'})
     except Exception as e:
         logger.error("Error saving Python Lab access: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/collab-space-access', methods=['POST'])
+@admin_required
+def admin_save_collab_space_access():
+    """Save which teachers, classes and teaching groups have access to Collab Space."""
+    try:
+        data = request.get_json()
+        teacher_ids = list(data.get('teacher_ids') or [])
+        class_ids = list(data.get('class_ids') or [])
+        teaching_group_ids = list(data.get('teaching_group_ids') or [])
+        _save_collab_space_access_config(teacher_ids, class_ids, teaching_group_ids)
+        return jsonify({'success': True, 'message': 'Collab Space access updated.'})
+    except Exception as e:
+        logger.error("Error saving Collab Space access: %s", e)
         return jsonify({'error': str(e)}), 500
 
 
