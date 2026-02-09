@@ -1812,7 +1812,7 @@ def student_preview_feedback():
 @app.route('/student/submission/<submission_id>/file/<int:file_index>')
 @login_required
 def view_student_submission_file(submission_id, file_index):
-    """Serve student's submission file"""
+    """Serve student's submission file. Optional query param: rotate=90|180|270 to rotate PDF or image."""
     from gridfs import GridFS
     from bson import ObjectId
     
@@ -1828,12 +1828,45 @@ def view_student_submission_file(submission_id, file_index):
     if file_index >= len(file_ids):
         return 'File not found', 404
     
+    rotate = request.args.get('rotate', type=int)
+    if rotate not in (90, 180, 270):
+        rotate = None
+    
     fs = GridFS(db.db)
     try:
         file_data = fs.get(ObjectId(file_ids[file_index]))
         content_type = file_data.content_type or 'application/octet-stream'
+        data = file_data.read()
+        
+        if rotate and content_type == 'application/pdf':
+            try:
+                from PyPDF2 import PdfReader, PdfWriter
+                import io
+                reader = PdfReader(io.BytesIO(data))
+                writer = PdfWriter()
+                for page in reader.pages:
+                    page.rotate(rotate)
+                    writer.add_page(page)
+                out = io.BytesIO()
+                writer.write(out)
+                data = out.getvalue()
+            except Exception as rot_e:
+                logger.warning(f"PDF rotation failed: {rot_e}")
+        elif rotate and (content_type.startswith('image/') or content_type == 'application/octet-stream'):
+            try:
+                from PIL import Image
+                import io
+                img = Image.open(io.BytesIO(data)).convert('RGB')
+                rotated = img.rotate(-rotate, expand=True)
+                out = io.BytesIO()
+                rotated.save(out, format='JPEG', quality=95)
+                data = out.getvalue()
+                content_type = 'image/jpeg'
+            except Exception as rot_e:
+                logger.warning(f"Image rotation failed: {rot_e}")
+        
         return Response(
-            file_data.read(),
+            data,
             mimetype=content_type,
             headers={'Content-Disposition': 'inline'}
         )
@@ -1864,6 +1897,17 @@ def download_student_assignment_file(assignment_id, file_type):
     if not can_student_access_assignment(student, assignment):
         logger.error(f"Student {session['student_id']} cannot access assignment {assignment_id} due to target restrictions")
         return 'Unauthorized', 403
+    
+    # Answer key PDF: only allow if teacher enabled release and student has submitted at least once
+    if file_type == 'answer_key':
+        if not assignment.get('release_answer_key_pdf'):
+            return 'Answer key is not available for this assignment', 403
+        has_submission = Submission.find_one({
+            'assignment_id': assignment_id,
+            'student_id': session['student_id']
+        })
+        if not has_submission:
+            return 'Submit your assignment first to access the answer key', 403
     
     file_id_field = f"{file_type}_id"
     file_name_field = f"{file_type}_name"
@@ -4896,6 +4940,7 @@ def create_assignment():
                 'overall_review_limit': int(data.get('overall_review_limit', 1)),
                 'enable_question_help': data.get('enable_question_help') == 'on',
                 'question_help_limit': int(data.get('question_help_limit', 5)),
+                'release_answer_key_pdf': data.get('release_answer_key_pdf') == 'on',  # Students can download answer key PDF after submitting
                 'notify_student_telegram': data.get('notify_student_telegram') == 'on',
                 'linked_module_id': (data.get('linked_module_id') or '').strip() or None,  # Link to module tree for profile/mastery
                 'created_at': datetime.utcnow(),
@@ -5029,6 +5074,7 @@ def edit_assignment(assignment_id):
                 'overall_review_limit': int(data.get('overall_review_limit', 1)),
                 'enable_question_help': data.get('enable_question_help') == 'on',
                 'question_help_limit': int(data.get('question_help_limit', 5)),
+                'release_answer_key_pdf': data.get('release_answer_key_pdf') == 'on',
                 'notify_student_telegram': data.get('notify_student_telegram') == 'on',
                 'linked_module_id': (data.get('linked_module_id') or '').strip() or None,
                 'updated_at': datetime.utcnow()
@@ -5852,6 +5898,85 @@ def regenerate_ai_feedback(submission_id):
     except Exception as e:
         logger.error(f"Error regenerating AI feedback: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/teacher/review/<submission_id>/reevaluate-row', methods=['POST'])
+@teacher_required
+def reevaluate_row(submission_id):
+    """Re-evaluate a single feedback row (question/criterion/correction) using a cropped image region and optional teacher instructions."""
+    from gridfs import GridFS
+    from bson import ObjectId
+    from utils.ai_marking import reevaluate_single_item
+
+    try:
+        data = request.get_json() or {}
+        item_type = data.get('item_type')  # 'question' | 'criterion' | 'correction'
+        item_context = data.get('item_context', {})
+        additional_prompt = data.get('additional_prompt', '')
+        cropped_image = data.get('cropped_image')  # base64 JPEG (data URL or raw)
+        page_index = data.get('page_index')  # optional: include this page as full context
+        include_full_page = data.get('include_full_page', True)
+
+        if not item_type:
+            return jsonify({'success': False, 'error': 'item_type is required'}), 400
+        if not cropped_image and not additional_prompt:
+            return jsonify({'success': False, 'error': 'Provide a cropped image region or additional instructions'}), 400
+
+        submission = Submission.find_one({'submission_id': submission_id})
+        if not submission:
+            return jsonify({'success': False, 'error': 'Submission not found'}), 404
+
+        assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+        if not assignment or assignment['teacher_id'] != session['teacher_id']:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+
+        # Strip data URL prefix if present
+        cropped_b64 = None
+        if cropped_image:
+            if ',' in cropped_image:
+                cropped_b64 = cropped_image.split(',', 1)[1]
+            else:
+                cropped_b64 = cropped_image
+
+        # Optionally load a full page for context
+        full_page_images = None
+        if include_full_page and page_index is not None:
+            fs = GridFS(db.db)
+            file_ids = submission.get('file_ids', [])
+            idx = int(page_index)
+            if 0 <= idx < len(file_ids):
+                try:
+                    file_data = fs.get(ObjectId(file_ids[idx]))
+                    raw = file_data.read()
+                    ct = (file_data.content_type or '').lower()
+                    ptype = 'pdf' if 'pdf' in ct else 'image'
+                    full_page_images = [{'type': ptype, 'data': raw}]
+                except Exception as e:
+                    logger.warning(f"Could not read page {idx} for context: {e}")
+
+        result = reevaluate_single_item(
+            cropped_image_b64=cropped_b64,
+            item_type=item_type,
+            item_context=item_context,
+            additional_prompt=additional_prompt,
+            assignment=assignment,
+            teacher=teacher,
+            full_page_images=full_page_images,
+        )
+
+        if result.get('error') and not result.get('feedback') and not result.get('reasoning') and not result.get('correction'):
+            return jsonify({'success': False, 'error': result['error']}), 200
+
+        # Remove raw_response from client payload (large)
+        result.pop('raw_response', None)
+        return jsonify({'success': True, 'result': result})
+
+    except Exception as e:
+        logger.error(f"Error in reevaluate_row: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/teacher/review/<submission_id>/extract-answer-key', methods=['POST'])
 @teacher_required

@@ -1759,3 +1759,219 @@ Respond with JSON:"""
             ),
             'submission_quality': 'unknown'
         }
+
+
+def reevaluate_single_item(
+    cropped_image_b64: str,
+    item_type: str,
+    item_context: dict,
+    additional_prompt: str,
+    assignment: dict,
+    teacher: dict = None,
+    override_ai_model: str = None,
+    full_page_images: list = None,
+) -> dict:
+    """
+    Re-evaluate a single question, rubric criterion, or correction using a cropped
+    image region and optional teacher instructions.
+
+    Args:
+        cropped_image_b64: Base64-encoded JPEG of the selected region (or None if using full pages)
+        item_type: 'question' | 'criterion' | 'correction'
+        item_context: Current row data, e.g. {question_num, student_answer, correct_answer, feedback, marks, ...}
+        additional_prompt: Extra instructions from the teacher
+        assignment: Assignment document
+        teacher: Teacher document for API key
+        override_ai_model: Optional model override
+        full_page_images: Optional list of {'data': bytes, 'type': 'image'|'pdf'} for full page context
+
+    Returns:
+        Dictionary with updated fields for the row, plus optional new_corrections list
+    """
+    model_type = resolve_model_type(assignment, teacher, override_ai_model)
+    client, model_name, provider = get_teacher_ai_service(teacher, model_type)
+    if not client:
+        return {'error': f'AI service not available for {model_type}'}
+
+    try:
+        content = []
+
+        # --- Build system prompt depending on item_type ---
+        if item_type == 'question':
+            q_num = item_context.get('question_num', '?')
+            current_answer = item_context.get('student_answer', '')
+            current_correct = item_context.get('correct_answer', '')
+            current_feedback = item_context.get('feedback', '')
+            current_marks = item_context.get('marks', '')
+            marks_total = item_context.get('marks_total', '')
+
+            system_prompt = f"""You are an experienced teacher re-evaluating a single question from a student submission.
+
+Assignment: {assignment.get('title', 'Assignment')}
+Subject: {assignment.get('subject', 'General')}
+
+You are re-evaluating QUESTION {q_num} only.
+Current AI-extracted student answer: {current_answer}
+Current answer key: {current_correct}
+Current feedback: {current_feedback}
+Current marks: {current_marks}/{marks_total}
+
+The teacher has selected a specific region of the submission for you to look at more carefully.
+{('TEACHER INSTRUCTIONS: ' + additional_prompt) if additional_prompt else ''}
+
+Re-evaluate this question based on the highlighted/selected image region and any teacher instructions.
+Be precise and accurate in your re-assessment.
+
+Respond ONLY with valid JSON:
+{{
+    "question_num": {q_num},
+    "student_answer": "re-transcribed answer from the selected region",
+    "correct_answer": "{current_correct}",
+    "feedback": "updated feedback",
+    "marks_awarded": number,
+    "marks_total": {marks_total if marks_total else 'null'},
+    "improvement": "what to improve",
+    "needs_review": false,
+    "new_corrections": []
+}}
+
+The new_corrections array is optional. If the teacher asked you to identify errors or corrections, include them:
+[{{"location": "Q{q_num}", "error": "the error found", "correction": "suggested fix", "feedback": "explanation"}}]
+"""
+
+        elif item_type == 'criterion':
+            crit_name = item_context.get('name', '?')
+            current_reasoning = item_context.get('reasoning', '')
+            current_afi = item_context.get('afi', '')
+            current_marks = item_context.get('marks', '')
+            max_marks = item_context.get('max_marks', '')
+
+            rubrics_text = assignment.get('rubrics_text', '')
+
+            system_prompt = f"""You are an experienced teacher re-evaluating a single rubric criterion from a student essay submission.
+
+Assignment: {assignment.get('title', 'Essay')}
+Subject: {assignment.get('subject', 'English')}
+
+You are re-evaluating the criterion: "{crit_name}"
+Current reasoning: {current_reasoning}
+Current AFI (area for improvement): {current_afi}
+Current marks: {current_marks}/{max_marks}
+
+{('RUBRICS: ' + rubrics_text) if rubrics_text else ''}
+
+The teacher has selected a specific region of the essay for you to focus on.
+{('TEACHER INSTRUCTIONS: ' + additional_prompt) if additional_prompt else ''}
+
+Re-evaluate this criterion based on the highlighted/selected image region and the teacher's instructions.
+
+Respond ONLY with valid JSON:
+{{
+    "name": "{crit_name}",
+    "reasoning": "updated reasoning for the mark",
+    "afi": "updated areas for improvement",
+    "marks_awarded": number,
+    "max_marks": {max_marks if max_marks else 10},
+    "new_corrections": []
+}}
+
+The new_corrections array is optional. If the teacher asked you to highlight specific errors, include them:
+[{{"location": "location in essay", "error": "the error found", "correction": "suggested fix", "feedback": "explanation"}}]
+"""
+
+        elif item_type == 'correction':
+            current_location = item_context.get('location', '')
+            current_error = item_context.get('error', '')
+            current_correction = item_context.get('correction', '')
+            current_feedback = item_context.get('feedback', '')
+
+            system_prompt = f"""You are an experienced teacher re-evaluating a specific correction/error in a student essay.
+
+Assignment: {assignment.get('title', 'Essay')}
+Subject: {assignment.get('subject', 'English')}
+
+You are re-evaluating this correction:
+Location: {current_location}
+Current error noted: {current_error}
+Current suggested correction: {current_correction}
+Current feedback: {current_feedback}
+
+The teacher has selected a specific region of the essay for you to focus on.
+{('TEACHER INSTRUCTIONS: ' + additional_prompt) if additional_prompt else ''}
+
+Re-evaluate this correction based on the highlighted/selected image region and teacher instructions.
+
+Respond ONLY with valid JSON:
+{{
+    "location": "updated location",
+    "error": "the actual error text from the essay",
+    "correction": "the corrected version",
+    "feedback": "explanation of the error and fix",
+    "new_corrections": []
+}}
+
+The new_corrections array is optional. If you spot additional errors in the selected region, include them:
+[{{"location": "location", "error": "error text", "correction": "fix", "feedback": "explanation"}}]
+"""
+        else:
+            return {'error': f'Unknown item_type: {item_type}'}
+
+        # --- Add images to content ---
+        # Add cropped region first (primary focus)
+        if cropped_image_b64:
+            content.append({"type": "text", "text": "SELECTED REGION FROM SUBMISSION (focus on this):"})
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": cropped_image_b64
+                }
+            })
+
+        # Optionally include full page(s) for broader context
+        if full_page_images:
+            content.append({"type": "text", "text": "\nFULL PAGE CONTEXT (for reference):"})
+            for i, page in enumerate(full_page_images):
+                if page['type'] == 'image':
+                    img_data = resize_image_for_ai(page['data'])
+                    img_b64 = base64.standard_b64encode(img_data).decode('utf-8')
+                    content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img_b64
+                        }
+                    })
+                elif page['type'] == 'pdf':
+                    pdf_b64 = base64.standard_b64encode(page['data']).decode('utf-8')
+                    content.append({
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_b64
+                        }
+                    })
+
+        content.append({"type": "text", "text": "\nRe-evaluate and respond with JSON:"})
+
+        # Make API call
+        response_text = make_ai_api_call(
+            client=client,
+            model_name=model_name,
+            provider=provider,
+            system_prompt=system_prompt,
+            messages_content=content,
+            max_tokens=4000,
+            assignment=assignment,
+        )
+
+        result = parse_ai_response(response_text)
+        result['raw_response'] = response_text
+        return result
+
+    except Exception as e:
+        logger.error(f"Error re-evaluating single item: {e}")
+        return {'error': str(e)}

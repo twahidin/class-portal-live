@@ -262,6 +262,12 @@
                                             {% else %}
                                             <span class="text-muted fst-italic">—</span>
                                             {% endif %}
+                                            <button type="button" class="btn btn-outline-info btn-sm mt-1 reevaluate-row-btn" 
+                                                    data-item-type="question" data-item-id="{{ q.question_num }}"
+                                                    title="Re-evaluate this question with image selection & prompt"
+                                                    onclick="openReevaluateModal('question', '{{ q.question_num }}')">
+                                                <i class="bi bi-arrow-repeat me-1"></i>Re-evaluate
+                                            </button>
                                         </td>
                                     </tr>
                                     {% endfor %}
@@ -463,6 +469,83 @@
     </div>
 </div>
 
+<!-- Re-evaluate Row Modal -->
+<div class="modal fade" id="reevaluateModal" tabindex="-1" aria-labelledby="reevaluateModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title" id="reevaluateModalLabel">
+                    <i class="bi bi-arrow-repeat me-2"></i>Re-evaluate <span id="reeval-item-label">Question</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <!-- Left: Image selection -->
+                    <div class="col-lg-7">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label fw-bold mb-0">Select region from submission</label>
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="btn-group btn-group-sm">
+                                    <button type="button" class="btn btn-outline-secondary" onclick="reevalPrevPage()" id="reeval-prev-btn">
+                                        <i class="bi bi-chevron-left"></i>
+                                    </button>
+                                    <span class="btn btn-outline-secondary disabled" id="reeval-page-indicator">Page 1/1</span>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="reevalNextPage()" id="reeval-next-btn">
+                                        <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                </div>
+                                <button type="button" class="btn btn-outline-warning btn-sm" onclick="clearReevalSelection()" title="Clear selection">
+                                    <i class="bi bi-x-circle me-1"></i>Clear
+                                </button>
+                            </div>
+                        </div>
+                        <div class="position-relative border rounded bg-dark" style="overflow: auto; max-height: 60vh; cursor: crosshair;" id="reeval-image-container">
+                            <canvas id="reeval-canvas" style="display: block; max-width: 100%;"></canvas>
+                            <div id="reeval-selection-overlay" class="position-absolute border border-2 border-warning" 
+                                 style="display: none; pointer-events: none; box-shadow: 0 0 0 9999px rgba(0,0,0,0.4);"></div>
+                        </div>
+                        <small class="text-muted d-block mt-1">
+                            <i class="bi bi-info-circle me-1"></i>Click and drag to select a region. The AI will focus on this area.
+                        </small>
+                    </div>
+                    <!-- Right: Instructions + preview -->
+                    <div class="col-lg-5">
+                        <div class="mb-3">
+                            <label for="reeval-prompt" class="form-label fw-bold">Additional instructions (optional)</label>
+                            <textarea class="form-control" id="reeval-prompt" rows="4" 
+                                      placeholder="e.g., 'Re-read the student answer more carefully, the handwriting says X not Y' or 'Focus on the diagram in this region' or 'Identify grammar errors in this paragraph'"></textarea>
+                        </div>
+                        <div id="reeval-crop-preview-wrap" class="mb-3" style="display:none;">
+                            <label class="form-label fw-bold">Selected region preview</label>
+                            <div class="border rounded p-1 bg-light text-center">
+                                <img id="reeval-crop-preview" src="" alt="Cropped preview" 
+                                     style="max-width: 100%; max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        <div id="reeval-result-wrap" class="mb-3" style="display:none;">
+                            <label class="form-label fw-bold text-success">
+                                <i class="bi bi-check-circle me-1"></i>AI Result
+                            </label>
+                            <div class="border rounded p-2 bg-light small" id="reeval-result-content" style="max-height: 250px; overflow-y: auto;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info text-white" id="reeval-submit-btn" onclick="submitReevaluation()">
+                    <i class="bi bi-arrow-repeat me-1"></i>Re-evaluate with AI
+                </button>
+                <button type="button" class="btn btn-success" id="reeval-apply-btn" onclick="applyReevalResult()" style="display:none;">
+                    <i class="bi bi-check-lg me-1"></i>Apply to row
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Toast for notifications -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1050">
     <div id="toast" class="toast" role="alert">
@@ -579,6 +662,19 @@
     max-height: 95vh !important;
     max-width: 95vw !important;
     object-fit: contain;
+}
+
+/* Re-evaluate button */
+.reevaluate-row-btn {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    white-space: nowrap;
+}
+
+/* Re-evaluate canvas selection */
+#reeval-canvas {
+    user-select: none;
+    -webkit-user-select: none;
 }
 </style>
 {% endblock %}
@@ -992,7 +1088,334 @@
     
     // Initial total calculation
     calculateTotal();
-    
+
+    // ========== RE-EVALUATE SINGLE ROW ==========
+    let reevalItemType = null;
+    let reevalItemId = null;
+    let reevalPage = 0;
+    let reevalResult = null;
+    let reevalSelecting = false;
+    let reevalStartX = 0, reevalStartY = 0;
+    let reevalRect = null; // {x, y, w, h} in canvas coords
+    let reevalImage = null; // loaded Image object
+
+    function openReevaluateModal(itemType, itemId) {
+        reevalItemType = itemType;
+        reevalItemId = itemId;
+        reevalResult = null;
+        reevalRect = null;
+        reevalPage = currentPage;
+
+        document.getElementById('reeval-item-label').textContent =
+            itemType === 'question' ? `Question ${itemId}` : itemId;
+        document.getElementById('reeval-prompt').value = '';
+        document.getElementById('reeval-result-wrap').style.display = 'none';
+        document.getElementById('reeval-apply-btn').style.display = 'none';
+        document.getElementById('reeval-crop-preview-wrap').style.display = 'none';
+        document.getElementById('reeval-submit-btn').disabled = false;
+        document.getElementById('reeval-submit-btn').innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-evaluate with AI';
+
+        loadReevalPage(reevalPage);
+        new bootstrap.Modal(document.getElementById('reevaluateModal')).show();
+    }
+
+    function loadReevalPage(pageIdx) {
+        reevalPage = pageIdx;
+        const indicator = document.getElementById('reeval-page-indicator');
+        indicator.textContent = `Page ${pageIdx + 1}/${pageCount}`;
+        document.getElementById('reeval-prev-btn').disabled = pageIdx === 0;
+        document.getElementById('reeval-next-btn').disabled = pageIdx >= pageCount - 1;
+
+        const canvas = document.getElementById('reeval-canvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('reeval-selection-overlay');
+        overlay.style.display = 'none';
+        reevalRect = null;
+        document.getElementById('reeval-crop-preview-wrap').style.display = 'none';
+
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = function() {
+            reevalImage = img;
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            canvas.style.width = '100%';
+            canvas.style.height = 'auto';
+            ctx.drawImage(img, 0, 0);
+        };
+        img.src = `/teacher/submission/${submissionId}/file/${pageIdx}`;
+    }
+
+    function reevalPrevPage() {
+        if (reevalPage > 0) loadReevalPage(reevalPage - 1);
+    }
+
+    function reevalNextPage() {
+        if (reevalPage < pageCount - 1) loadReevalPage(reevalPage + 1);
+    }
+
+    function clearReevalSelection() {
+        reevalRect = null;
+        const overlay = document.getElementById('reeval-selection-overlay');
+        overlay.style.display = 'none';
+        document.getElementById('reeval-crop-preview-wrap').style.display = 'none';
+        // Redraw clean image
+        if (reevalImage) {
+            const canvas = document.getElementById('reeval-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(reevalImage, 0, 0);
+        }
+    }
+
+    // Canvas mouse interaction for rectangle selection
+    (function() {
+        const container = document.getElementById('reeval-image-container');
+        const canvas = document.getElementById('reeval-canvas');
+
+        function getCanvasCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (e.clientX - rect.left) * scaleX,
+                y: (e.clientY - rect.top + container.scrollTop) * scaleY
+            };
+        }
+
+        canvas.addEventListener('mousedown', function(e) {
+            if (!reevalImage) return;
+            reevalSelecting = true;
+            const coords = getCanvasCoords(e);
+            reevalStartX = coords.x;
+            reevalStartY = coords.y;
+            reevalRect = null;
+        });
+
+        canvas.addEventListener('mousemove', function(e) {
+            if (!reevalSelecting || !reevalImage) return;
+            const coords = getCanvasCoords(e);
+            const ctx = canvas.getContext('2d');
+
+            // Redraw image
+            ctx.drawImage(reevalImage, 0, 0);
+
+            // Draw selection rectangle
+            const x = Math.min(reevalStartX, coords.x);
+            const y = Math.min(reevalStartY, coords.y);
+            const w = Math.abs(coords.x - reevalStartX);
+            const h = Math.abs(coords.y - reevalStartY);
+
+            // Darken outside selection
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(0, 0, canvas.width, y);
+            ctx.fillRect(0, y, x, h);
+            ctx.fillRect(x + w, y, canvas.width - x - w, h);
+            ctx.fillRect(0, y + h, canvas.width, canvas.height - y - h);
+
+            // Draw border
+            ctx.strokeStyle = '#ffc107';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x, y, w, h);
+        });
+
+        canvas.addEventListener('mouseup', function(e) {
+            if (!reevalSelecting || !reevalImage) return;
+            reevalSelecting = false;
+            const coords = getCanvasCoords(e);
+
+            const x = Math.min(reevalStartX, coords.x);
+            const y = Math.min(reevalStartY, coords.y);
+            const w = Math.abs(coords.x - reevalStartX);
+            const h = Math.abs(coords.y - reevalStartY);
+
+            if (w < 10 || h < 10) {
+                clearReevalSelection();
+                return;
+            }
+
+            reevalRect = { x, y, w, h };
+            updateCropPreview();
+        });
+
+        canvas.addEventListener('mouseleave', function() {
+            if (reevalSelecting) {
+                reevalSelecting = false;
+                if (!reevalRect && reevalImage) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(reevalImage, 0, 0);
+                }
+            }
+        });
+    })();
+
+    function updateCropPreview() {
+        if (!reevalRect || !reevalImage) return;
+        const cropCanvas = document.createElement('canvas');
+        cropCanvas.width = reevalRect.w;
+        cropCanvas.height = reevalRect.h;
+        const ctx = cropCanvas.getContext('2d');
+        ctx.drawImage(reevalImage, reevalRect.x, reevalRect.y, reevalRect.w, reevalRect.h, 0, 0, reevalRect.w, reevalRect.h);
+        const dataUrl = cropCanvas.toDataURL('image/jpeg', 0.9);
+        document.getElementById('reeval-crop-preview').src = dataUrl;
+        document.getElementById('reeval-crop-preview-wrap').style.display = 'block';
+    }
+
+    function getCroppedImageDataUrl() {
+        if (!reevalRect || !reevalImage) return null;
+        const cropCanvas = document.createElement('canvas');
+        cropCanvas.width = reevalRect.w;
+        cropCanvas.height = reevalRect.h;
+        const ctx = cropCanvas.getContext('2d');
+        ctx.drawImage(reevalImage, reevalRect.x, reevalRect.y, reevalRect.w, reevalRect.h, 0, 0, reevalRect.w, reevalRect.h);
+        return cropCanvas.toDataURL('image/jpeg', 0.9);
+    }
+
+    function gatherItemContext(itemType, itemId) {
+        if (itemType === 'question') {
+            const row = document.querySelector(`tr.feedback-row[data-question="${itemId}"]`);
+            if (!row) return {};
+            const formData = new FormData(document.getElementById('feedback-form'));
+            return {
+                question_num: itemId,
+                student_answer: row.querySelector('.student-answer-text')?.textContent?.trim() || '',
+                correct_answer: formData.get(`answer_key_${itemId}`) || '',
+                feedback: formData.get(`feedback_${itemId}`) || '',
+                marks: formData.get(`marks_${itemId}`) || '',
+                marks_total: formData.get(`marks_total_${itemId}`) || ''
+            };
+        }
+        return {};
+    }
+
+    async function submitReevaluation() {
+        const btn = document.getElementById('reeval-submit-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Re-evaluating...';
+        document.getElementById('reeval-result-wrap').style.display = 'none';
+        document.getElementById('reeval-apply-btn').style.display = 'none';
+
+        const croppedImage = getCroppedImageDataUrl();
+        const additionalPrompt = document.getElementById('reeval-prompt').value.trim();
+
+        if (!croppedImage && !additionalPrompt) {
+            showToast('Warning', 'Please select a region on the image or provide additional instructions.');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-evaluate with AI';
+            return;
+        }
+
+        const itemContext = gatherItemContext(reevalItemType, reevalItemId);
+
+        try {
+            const response = await fetch(`/teacher/review/${submissionId}/reevaluate-row`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    item_type: reevalItemType,
+                    item_context: itemContext,
+                    additional_prompt: additionalPrompt,
+                    cropped_image: croppedImage,
+                    page_index: reevalPage,
+                    include_full_page: true
+                })
+            });
+
+            const data = await response.json();
+            if (data.success && data.result) {
+                reevalResult = data.result;
+                displayReevalResult(data.result);
+                document.getElementById('reeval-apply-btn').style.display = '';
+            } else {
+                showToast('Error', data.error || 'Re-evaluation failed');
+            }
+        } catch (e) {
+            showToast('Error', 'Re-evaluation failed: ' + e.message);
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-evaluate with AI';
+    }
+
+    function displayReevalResult(result) {
+        const wrap = document.getElementById('reeval-result-wrap');
+        const content = document.getElementById('reeval-result-content');
+        let html = '';
+
+        if (reevalItemType === 'question') {
+            html += `<p><strong>Student Answer:</strong> ${escapeHtml(result.student_answer || '')}</p>`;
+            html += `<p><strong>Feedback:</strong> ${escapeHtml(result.feedback || '')}</p>`;
+            if (result.improvement) html += `<p><strong>Improvement:</strong> ${escapeHtml(result.improvement)}</p>`;
+            html += `<p><strong>Marks:</strong> ${result.marks_awarded ?? '?'}/${result.marks_total ?? '?'}</p>`;
+        }
+
+        if (result.new_corrections && result.new_corrections.length > 0) {
+            html += `<hr><p class="fw-bold">New corrections found:</p>`;
+            result.new_corrections.forEach((c, i) => {
+                html += `<div class="mb-2 p-2 border rounded bg-white">
+                    <small class="text-muted">${escapeHtml(c.location || '')}</small><br>
+                    <strong>Error:</strong> ${escapeHtml(c.error || '')}<br>
+                    <strong>Fix:</strong> ${escapeHtml(c.correction || '')}<br>
+                    <small class="text-muted">${escapeHtml(c.feedback || '')}</small>
+                </div>`;
+            });
+        }
+
+        content.innerHTML = html;
+        wrap.style.display = 'block';
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function applyReevalResult() {
+        if (!reevalResult) return;
+
+        if (reevalItemType === 'question') {
+            const row = document.querySelector(`tr.feedback-row[data-question="${reevalItemId}"]`);
+            if (!row) return;
+
+            // Update student answer display
+            const answerCell = row.querySelector('.student-answer-cell');
+            if (answerCell && reevalResult.student_answer) {
+                answerCell.innerHTML = `<div class="student-answer-text">${escapeHtml(reevalResult.student_answer)}</div>`;
+            }
+
+            // Update feedback
+            const feedbackInput = row.querySelector('.feedback-input');
+            if (feedbackInput && reevalResult.feedback) {
+                feedbackInput.value = reevalResult.feedback;
+            }
+
+            // Update marks
+            const marksInput = row.querySelector('.marks-input');
+            if (marksInput && reevalResult.marks_awarded !== undefined && reevalResult.marks_awarded !== null) {
+                marksInput.value = reevalResult.marks_awarded;
+            }
+            const marksTotalInput = row.querySelector('.marks-total-input');
+            if (marksTotalInput && reevalResult.marks_total !== undefined && reevalResult.marks_total !== null) {
+                marksTotalInput.value = reevalResult.marks_total;
+            }
+
+            // Update hidden marks and result select if applicable
+            const hiddenMarks = row.querySelector('.marks-hidden');
+            if (hiddenMarks && reevalResult.marks_awarded !== undefined) {
+                hiddenMarks.value = reevalResult.marks_awarded;
+            }
+        }
+
+        updateMarkBoxColors();
+        calculateTotal();
+
+        // Close modal and trigger auto-save
+        bootstrap.Modal.getInstance(document.getElementById('reevaluateModal')).hide();
+        showToast('Success', 'Row updated with re-evaluation result');
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(saveFeedback, 1000);
+    }
+
     // Reject Modal Functions
     function openRejectModal() {
         new bootstrap.Modal(document.getElementById('rejectModal')).show();
