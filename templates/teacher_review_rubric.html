@@ -1314,13 +1314,18 @@
     let reevalStartX = 0, reevalStartY = 0;
     let reevalRect = null; // {x, y, w, h} in canvas coords
     let reevalImage = null; // loaded Image object
+    // For PDF submissions, we navigate within a single file using pdf_page
+    let reevalPdfMode = (fileType === 'pdf');
+    let reevalPdfPageCount = null; // discovered from server header
+    let reevalTotalPages = pageCount; // for images this is pageCount; for PDFs updated after first load
 
     function openReevaluateModal(itemType, itemId) {
         reevalItemType = itemType;
         reevalItemId = itemId;
         reevalResult = null;
         reevalRect = null;
-        reevalPage = currentPage;
+        reevalPage = reevalPdfMode ? 0 : currentPage;
+        reevalPdfPageCount = null;
 
         const label = itemType === 'criterion' ? `Criterion: ${itemId}` :
                        itemType === 'correction' ? `Correction #${parseInt(itemId) + 1}` : itemId;
@@ -1336,29 +1341,80 @@
         new bootstrap.Modal(document.getElementById('reevaluateModal')).show();
     }
 
+    function buildReevalImageUrl(pageIdx) {
+        if (reevalPdfMode) {
+            // PDF: always use file index 0, vary pdf_page
+            return `/teacher/submission/${submissionId}/file/0?as_image=1&pdf_page=${pageIdx}`;
+        }
+        // Images: each page is a separate file; as_image=1 is a no-op for images
+        return `/teacher/submission/${submissionId}/file/${pageIdx}?as_image=1`;
+    }
+
     function loadReevalPage(pageIdx) {
         reevalPage = pageIdx;
-        const indicator = document.getElementById('reeval-page-indicator');
-        indicator.textContent = `Page ${pageIdx + 1}/${pageCount}`;
-        document.getElementById('reeval-prev-btn').disabled = pageIdx === 0;
-        document.getElementById('reeval-next-btn').disabled = pageIdx >= pageCount - 1;
-
         const canvas = document.getElementById('reeval-canvas');
         const ctx = canvas.getContext('2d');
         reevalRect = null;
         document.getElementById('reeval-crop-preview-wrap').style.display = 'none';
 
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = function() {
-            reevalImage = img;
-            canvas.width = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            canvas.style.width = '100%';
-            canvas.style.height = 'auto';
-            ctx.drawImage(img, 0, 0);
-        };
-        img.src = `/teacher/submission/${submissionId}/file/${pageIdx}`;
+        // Show loading state
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = 400;
+        canvas.height = 100;
+        ctx.fillStyle = '#333';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('Loading page...', 150, 55);
+
+        const imgUrl = buildReevalImageUrl(pageIdx);
+
+        // Use fetch to get image + headers (for PDF page count discovery)
+        fetch(imgUrl)
+            .then(resp => {
+                // Check for PDF page count header
+                const pdfPages = resp.headers.get('X-PDF-Page-Count');
+                if (pdfPages) {
+                    reevalPdfPageCount = parseInt(pdfPages, 10);
+                    reevalTotalPages = reevalPdfPageCount;
+                }
+                updateReevalPageIndicator();
+                return resp.blob();
+            })
+            .then(blob => {
+                const objectUrl = URL.createObjectURL(blob);
+                const img = new Image();
+                img.onload = function() {
+                    reevalImage = img;
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    canvas.style.width = '100%';
+                    canvas.style.height = 'auto';
+                    ctx.drawImage(img, 0, 0);
+                    URL.revokeObjectURL(objectUrl);
+                };
+                img.onerror = function() {
+                    canvas.width = 400;
+                    canvas.height = 100;
+                    ctx.fillStyle = '#c00';
+                    ctx.font = '14px sans-serif';
+                    ctx.fillText('Failed to load page image.', 100, 55);
+                    URL.revokeObjectURL(objectUrl);
+                };
+                img.src = objectUrl;
+            })
+            .catch(() => {
+                canvas.width = 400;
+                canvas.height = 100;
+                ctx.fillStyle = '#c00';
+                ctx.font = '14px sans-serif';
+                ctx.fillText('Failed to load page image.', 100, 55);
+            });
+    }
+
+    function updateReevalPageIndicator() {
+        const indicator = document.getElementById('reeval-page-indicator');
+        indicator.textContent = `Page ${reevalPage + 1}/${reevalTotalPages}`;
+        document.getElementById('reeval-prev-btn').disabled = reevalPage === 0;
+        document.getElementById('reeval-next-btn').disabled = reevalPage >= reevalTotalPages - 1;
     }
 
     function reevalPrevPage() {
@@ -1366,7 +1422,7 @@
     }
 
     function reevalNextPage() {
-        if (reevalPage < pageCount - 1) loadReevalPage(reevalPage + 1);
+        if (reevalPage < reevalTotalPages - 1) loadReevalPage(reevalPage + 1);
     }
 
     function clearReevalSelection() {

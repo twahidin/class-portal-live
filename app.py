@@ -5577,7 +5577,13 @@ def review_submission(submission_id):
 @app.route('/teacher/submission/<submission_id>/file/<int:file_index>')
 @teacher_required
 def view_submission_file(submission_id, file_index):
-    """Serve submission file (image or PDF page)"""
+    """Serve submission file (image or PDF page).
+
+    Query params:
+        as_image=1  – convert PDF pages to JPEG images (useful for canvas drawing).
+                      For multi-page PDFs the optional `pdf_page` param selects which
+                      page to render (0-based, default 0).
+    """
     from gridfs import GridFS
     
     submission = Submission.find_one({'submission_id': submission_id})
@@ -5598,8 +5604,40 @@ def view_submission_file(submission_id, file_index):
         from bson import ObjectId
         file_data = fs.get(ObjectId(file_ids[file_index]))
         content_type = file_data.content_type or 'application/octet-stream'
+        raw = file_data.read()
+
+        # If caller requests an image version and the file is a PDF, convert it
+        as_image = request.args.get('as_image', '0') == '1'
+        is_pdf = 'pdf' in content_type.lower()
+
+        if as_image and is_pdf:
+            try:
+                from utils.ai_marking import convert_pdf_to_images
+                pdf_page = int(request.args.get('pdf_page', 0))
+                # Convert enough pages to reach the requested one (or all to get the count)
+                # First pass: convert a generous number to discover total page count
+                images_b64 = convert_pdf_to_images(raw, max_pages=max(pdf_page + 1, 50))
+                total_pdf_pages = len(images_b64)
+                if images_b64 and pdf_page < total_pdf_pages:
+                    import base64 as b64mod
+                    image_bytes = b64mod.b64decode(images_b64[pdf_page])
+                    return Response(
+                        image_bytes,
+                        mimetype='image/jpeg',
+                        headers={
+                            'Content-Disposition': 'inline',
+                            'X-PDF-Page-Count': str(total_pdf_pages),
+                            'Access-Control-Expose-Headers': 'X-PDF-Page-Count',
+                        }
+                    )
+                else:
+                    # Fallback: return raw PDF if conversion fails
+                    logger.warning(f"PDF page {pdf_page} conversion failed (total={total_pdf_pages}), falling back to raw PDF")
+            except Exception as conv_err:
+                logger.warning(f"PDF-to-image conversion failed: {conv_err}")
+
         return Response(
-            file_data.read(),
+            raw,
             mimetype=content_type,
             headers={'Content-Disposition': 'inline'}
         )
