@@ -21,7 +21,7 @@
                     <label class="text-muted small mb-0">Group by:</label>
                     <select id="group-by-select" class="form-select form-select-sm" style="width: auto; min-width: 160px;">
                         <option value="subject">Subject</option>
-                        <option value="class">Class</option>
+                        <option value="class" selected>Class</option>
                         <option value="subject_class">Subject & class</option>
                         <option value="none">Don't group</option>
                     </select>
@@ -128,7 +128,7 @@
     </div>
 
     {# Folders by subject #}
-    <div id="view-subject" class="assignments-view">
+    <div id="view-subject" class="assignments-view" style="display: none;">
         {% for folder in folders_by_subject %}
         <div class="assignment-folder mb-3">
             <button class="assignment-folder-header btn btn-outline-secondary w-100 d-flex align-items-center justify-content-between text-start py-2 px-3 rounded {{ 'collapsed' if not loop.first else '' }}" type="button" data-bs-toggle="collapse" data-bs-target="#folder-subject-{{ loop.index0 }}" aria-expanded="{{ 'true' if loop.first else 'false' }}">
@@ -147,7 +147,7 @@
     </div>
 
     {# Folders by class #}
-    <div id="view-class" class="assignments-view" style="display: none;">
+    <div id="view-class" class="assignments-view">
         {% for folder in folders_by_class %}
         <div class="assignment-folder mb-3">
             <button class="assignment-folder-header btn btn-outline-secondary w-100 d-flex align-items-center justify-content-between text-start py-2 px-3 rounded {{ 'collapsed' if not loop.first else '' }}" type="button" data-bs-toggle="collapse" data-bs-target="#folder-class-{{ loop.index0 }}" aria-expanded="{{ 'true' if loop.first else 'false' }}">
