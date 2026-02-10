@@ -2,6 +2,12 @@
 
 {% block title %}{{ assignment.title }} - School Portal{% endblock %}
 
+{% block head %}
+{% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+{% endif %}
+{% endblock %}
+
 {% block navbar %}
 <nav class="navbar navbar-expand-lg navbar-dark">
     <div class="container">
@@ -372,77 +378,32 @@
     <!-- Visible divider -->
     <hr class="my-4 border-2 border-secondary">
     
-    <!-- Editable Question Paper Section -->
+    <!-- Editable Question Paper Section - Full-width PDF with direct text overlay -->
     {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
     <div class="card mb-4" id="editable-question-section">
-        <div class="card-header bg-secondary text-white">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Work on Question Paper</h5>
-        </div>
-        <div class="card-body p-0">
-            <div class="row g-0">
-                <!-- PDF Viewer -->
-                <div class="col-lg-8 position-relative">
-                    <div class="position-relative" style="min-height: 500px;">
-                        <iframe id="question-paper-iframe" 
-                                src="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}"
-                                style="width: 100%; height: 70vh; border: 1px solid #dee2e6; border-radius: 0 0 0 0.25rem;"
-                                title="Question paper"></iframe>
-                    </div>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-light btn-sm" id="pdf-add-text-btn" title="Click this, then click on the PDF to add a text box">
+                    <i class="bi bi-input-cursor-text me-1"></i>Add text box
+                </button>
+                <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-light" id="pdf-zoom-out" title="Zoom out">−</button>
+                    <button type="button" class="btn btn-outline-light" id="pdf-zoom-val" disabled style="min-width: 4rem;">100%</button>
+                    <button type="button" class="btn btn-outline-light" id="pdf-zoom-in" title="Zoom in">+</button>
                 </div>
-                <!-- Text editor and Drawing tools panel -->
-                <div class="col-lg-4 border-start">
-                    <div class="p-3">
-                        <ul class="nav nav-tabs mb-2" role="tablist">
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#notes-tab" type="button">
-                                    <i class="bi bi-journal-text me-1"></i>Notes & Answers
-                                </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#draw-tab" type="button">
-                                    <i class="bi bi-pencil me-1"></i>Draw
-                                </button>
-                            </li>
-                        </ul>
-                        <div class="tab-content">
-                            <div class="tab-pane fade show active" id="notes-tab">
-                                <label class="form-label small">Your answers and notes:</label>
-                                <textarea class="form-control font-monospace" id="question-notes-editor" rows="12" 
-                                    placeholder="Type your answers and notes here..."></textarea>
-                                <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="saveQuestionNotes()">
-                                    <i class="bi bi-save me-1"></i>Save locally
-                                </button>
-                            </div>
-                            <div class="tab-pane fade" id="draw-tab">
-                                <div class="mb-2">
-                                    <label class="form-label small">Draw shapes and lines:</label>
-                                    <div class="btn-group btn-group-sm mb-2" role="group">
-                                        <button type="button" class="btn btn-outline-secondary active" id="draw-pen-btn" onclick="setDrawMode('pen')" title="Freehand">
-                                            <i class="bi bi-pencil"></i>
-                                        </button>
-                                        <button type="button" class="btn btn-outline-secondary" id="draw-line-btn" onclick="setDrawMode('line')" title="Line">
-                                            <i class="bi bi-slash-lg"></i>
-                                        </button>
-                                        <button type="button" class="btn btn-outline-secondary" id="draw-rect-btn" onclick="setDrawMode('rect')" title="Rectangle">
-                                            <i class="bi bi-square"></i>
-                                        </button>
-                                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearDrawingCanvas()" title="Clear">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </div>
-                                    <div class="input-group input-group-sm mb-2">
-                                        <span class="input-group-text">Color</span>
-                                        <input type="color" class="form-control form-control-color" id="draw-color" value="#000000" onchange="updateDrawColor(this.value)">
-                                    </div>
-                                </div>
-                                <canvas id="draw-canvas" width="280" height="350" 
-                                    style="border: 1px solid #dee2e6; border-radius: 4px; cursor: crosshair; touch-action: none;"></canvas>
-                                <p class="text-muted small mt-2 mb-0">Draw on the canvas. Use "Save as image" to download your work.</p>
-                                <button type="button" class="btn btn-sm btn-outline-success mt-2" onclick="downloadDrawing()">
-                                    <i class="bi bi-download me-1"></i>Save as image
-                                </button>
-                            </div>
-                        </div>
+                <span class="text-white-50 small" id="pdf-page-info">Page 1 / 1</span>
+                <button type="button" class="btn btn-outline-light btn-sm" id="pdf-save-annotations" title="Save annotations locally">
+                    <i class="bi bi-save me-1"></i>Save
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0 bg-dark">
+            <div id="pdf-viewer-container" class="overflow-auto" style="height: 80vh;">
+                <div id="pdf-pages-container" class="d-flex flex-column align-items-center p-3">
+                    <div class="text-white py-5" id="pdf-loading">
+                        <div class="spinner-border" role="status"></div>
+                        <p class="mt-2 mb-0">Loading PDF...</p>
                     </div>
                 </div>
             </div>
@@ -646,6 +607,26 @@
     transform: translateY(-2px);
     transition: all 0.2s ease;
 }
+
+/* PDF text overlay inputs */
+.pdf-text-input {
+    position: absolute;
+    border: 1px solid #0d6efd;
+    background: rgba(255,255,255,0.95);
+    padding: 2px 6px;
+    font-size: 14px;
+    font-family: inherit;
+    z-index: 10;
+    border-radius: 2px;
+}
+.pdf-text-input:focus {
+    outline: 2px solid #0d6efd;
+    outline-offset: 0;
+}
+.pdf-page-wrap {
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
 </style>
 
 <!-- Ask AI for Help Modal -->
@@ -820,104 +801,207 @@
         }
     });
     
-    // === QUESTION NOTES (localStorage) ===
-    const notesStorageKey = 'assignment_notes_{{ assignment.assignment_id }}';
-    document.addEventListener('DOMContentLoaded', function() {
-        const editor = document.getElementById('question-notes-editor');
-        if (editor) {
-            const saved = localStorage.getItem(notesStorageKey);
-            if (saved) editor.value = saved;
-            editor.addEventListener('input', () => localStorage.setItem(notesStorageKey, editor.value));
-        }
-    });
-    function saveQuestionNotes() {
-        const editor = document.getElementById('question-notes-editor');
-        if (editor) {
-            localStorage.setItem(notesStorageKey, editor.value);
-            alert('Notes saved locally.');
-        }
-    }
-    
-    // === DRAWING CANVAS ===
-    let drawMode = 'pen';
-    let drawColor = '#000000';
-    let isDrawing = false;
-    let startX = 0, startY = 0;
-    
-    document.addEventListener('DOMContentLoaded', function() {
-        const canvas = document.getElementById('draw-canvas');
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = drawColor;
-        ctx.lineWidth = 2;
+    // === PDF VIEWER WITH TEXT OVERLAY ===
+    {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
+    (function() {
+        const pdfUrl = '{{ url_for("download_student_assignment_file", assignment_id=assignment.assignment_id, file_type="question_paper") }}';
+        const fullUrl = (pdfUrl.startsWith('http') ? pdfUrl : (window.location.origin + pdfUrl));
+        const annotationsKey = 'pdf_annotations_{{ assignment.assignment_id }}';
         
-        function getPos(e) {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+        let pdfDoc = null;
+        let pdfScale = 1.2;
+        let currentPage = 1;
+        let addTextMode = false;
+        let annotations = {}; // { pageNum: [{ x, y, text, w, h }] }
+        
+        function loadAnnotations() {
+            try {
+                const saved = localStorage.getItem(annotationsKey);
+                if (saved) annotations = JSON.parse(saved);
+            } catch (e) { annotations = {}; }
         }
-        function startDraw(e) {
-            e.preventDefault();
-            isDrawing = true;
-            const pos = getPos(e);
-            startX = pos.x;
-            startY = pos.y;
-            if (drawMode === 'pen') ctx.beginPath();
+        function saveAnnotations() {
+            const toSave = {};
+            for (const [k, v] of Object.entries(annotations)) {
+                const inputs = document.querySelectorAll(`[data-pdf-anno][data-page="${k}"]`);
+                toSave[k] = Array.from(inputs).map(inp => ({
+                    x: parseFloat(inp.dataset.x), y: parseFloat(inp.dataset.y),
+                    text: inp.value, w: parseFloat(inp.dataset.w) || 150, h: parseFloat(inp.dataset.h) || 24
+                }));
+            }
+            localStorage.setItem(annotationsKey, JSON.stringify(toSave));
         }
-        function doDraw(e) {
-            e.preventDefault();
-            if (!isDrawing) return;
-            const pos = getPos(e);
-            if (drawMode === 'pen') {
-                ctx.lineTo(pos.x, pos.y);
-                ctx.stroke();
+        
+        function addTextAt(pageEl, pageNum, x, y) {
+            if (!annotations[pageNum]) annotations[pageNum] = [];
+            const overlay = pageEl.querySelector('.pdf-page-overlay');
+            if (!overlay) return;
+            const rect = overlay.getBoundingClientRect();
+            const relX = Math.max(0, Math.min(x - rect.left, rect.width - 160));
+            const relY = Math.max(0, Math.min(y - rect.top, rect.height - 30));
+            
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'pdf-text-input';
+            input.placeholder = 'Type here...';
+            input.value = '';
+            input.style.cssText = `left:${relX}px;top:${relY}px;width:150px;height:24px;`;
+            input.dataset.pdfAnno = '1';
+            input.dataset.page = pageNum;
+            input.dataset.x = relX;
+            input.dataset.y = relY;
+            input.dataset.w = 150;
+            input.dataset.h = 24;
+            input.addEventListener('input', saveAnnotations);
+            input.addEventListener('blur', saveAnnotations);
+            overlay.appendChild(input);
+            input.focus();
+            saveAnnotations();
+        }
+        
+        async function initPdfViewer() {
+            const container = document.getElementById('pdf-pages-container');
+            const loading = document.getElementById('pdf-loading');
+            if (!container || !loading) return;
+            
+            loadAnnotations();
+            
+            const pdfjsLib = window['pdfjs-dist/build/pdf'];
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            
+            try {
+                pdfDoc = await pdfjsLib.getDocument(fullUrl).promise;
+                const numPages = pdfDoc.numPages;
+                document.getElementById('pdf-page-info').textContent = `Page 1 / ${numPages}`;
+                loading.style.display = 'none';
+                
+                for (let i = 1; i <= numPages; i++) {
+                    const page = await pdfDoc.getPage(i);
+                    const viewport = page.getViewport({ scale: pdfScale });
+                    
+                    const pageWrap = document.createElement('div');
+                    pageWrap.className = 'pdf-page-wrap position-relative mb-3';
+                    pageWrap.style.width = viewport.width + 'px';
+                    pageWrap.style.height = viewport.height + 'px';
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    const ctx = canvas.getContext('2d');
+                    await page.render({ canvasContext: ctx, viewport }).promise;
+                    
+                    const overlay = document.createElement('div');
+                    overlay.className = 'pdf-page-overlay position-absolute top-0 start-0';
+                    overlay.style.width = viewport.width + 'px';
+                    overlay.style.height = viewport.height + 'px';
+                    overlay.style.pointerEvents = 'auto';
+                    overlay.style.cursor = 'crosshair';
+                    
+                    overlay.addEventListener('click', (e) => {
+                        if (addTextMode && e.target === overlay) {
+                            addTextAt(pageWrap, i, e.clientX, e.clientY);
+                        }
+                    });
+                    
+                    pageWrap.appendChild(canvas);
+                    pageWrap.appendChild(overlay);
+                    container.appendChild(pageWrap);
+                    
+                    (annotations[i] || []).forEach(a => {
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.className = 'pdf-text-input';
+                        input.value = a.text || '';
+                        input.style.cssText = `left:${a.x}px;top:${a.y}px;width:${a.w || 150}px;height:${a.h || 24}px;`;
+                        input.dataset.pdfAnno = '1';
+                        input.dataset.page = i;
+                        input.dataset.x = a.x;
+                        input.dataset.y = a.y;
+                        input.dataset.w = a.w || 150;
+                        input.dataset.h = a.h || 24;
+                        input.addEventListener('input', saveAnnotations);
+                        input.addEventListener('blur', saveAnnotations);
+                        overlay.appendChild(input);
+                    });
+                }
+            } catch (err) {
+                loading.innerHTML = '<p class="text-danger">Failed to load PDF. <a href="' + fullUrl + '" target="_blank" class="text-white">Open in new tab</a></p>';
+                console.error(err);
             }
         }
-        function endDraw(e) {
-            e.preventDefault();
-            if (!isDrawing) return;
-            const pos = getPos(e);
-            if (drawMode === 'line') {
-                ctx.beginPath();
-                ctx.moveTo(startX, startY);
-                ctx.lineTo(pos.x, pos.y);
-                ctx.stroke();
-            } else if (drawMode === 'rect') {
-                ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
-            }
-            isDrawing = false;
+        
+        function rerenderAll() {
+            saveAnnotations();
+            const container = document.getElementById('pdf-pages-container');
+            if (!container || !pdfDoc) return;
+            container.innerHTML = '';
+            document.getElementById('pdf-loading').style.display = 'none';
+            (async function render() {
+                const numPages = pdfDoc.numPages;
+                for (let i = 1; i <= numPages; i++) {
+                    const page = await pdfDoc.getPage(i);
+                    const viewport = page.getViewport({ scale: pdfScale });
+                    const pageWrap = document.createElement('div');
+                    pageWrap.className = 'pdf-page-wrap position-relative mb-3';
+                    pageWrap.style.width = viewport.width + 'px';
+                    pageWrap.style.height = viewport.height + 'px';
+                    const canvas = document.createElement('canvas');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                    const overlay = document.createElement('div');
+                    overlay.className = 'pdf-page-overlay position-absolute top-0 start-0';
+                    overlay.style.cssText = `width:${viewport.width}px;height:${viewport.height}px;pointer-events:auto;cursor:crosshair;`;
+                    overlay.addEventListener('click', (e) => {
+                        if (addTextMode && e.target === overlay) addTextAt(pageWrap, i, e.clientX, e.clientY);
+                    });
+                    pageWrap.appendChild(canvas);
+                    pageWrap.appendChild(overlay);
+                    (annotations[i] || []).forEach(a => {
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.className = 'pdf-text-input';
+                        input.value = a.text || '';
+                        input.style.cssText = `left:${a.x}px;top:${a.y}px;width:${a.w || 150}px;height:${a.h || 24}px;`;
+                        input.dataset.pdfAnno = '1';
+                        input.dataset.page = i;
+                        input.dataset.x = a.x;
+                        input.dataset.y = a.y;
+                        input.dataset.w = a.w || 150;
+                        input.dataset.h = a.h || 24;
+                        input.addEventListener('input', saveAnnotations);
+                        input.addEventListener('blur', saveAnnotations);
+                        overlay.appendChild(input);
+                    });
+                    container.appendChild(pageWrap);
+                }
+            })();
         }
-        ['mousedown','touchstart'].forEach(ev => canvas.addEventListener(ev, startDraw));
-        ['mousemove','touchmove'].forEach(ev => canvas.addEventListener(ev, doDraw));
-        ['mouseup','touchend','mouseleave'].forEach(ev => canvas.addEventListener(ev, endDraw));
-    });
-    function setDrawMode(mode) {
-        drawMode = mode;
-        document.querySelectorAll('#draw-pen-btn, #draw-line-btn, #draw-rect-btn').forEach(b => b?.classList.remove('active'));
-        const btn = document.getElementById('draw-' + mode + '-btn');
-        if (btn) btn.classList.add('active');
-    }
-    function updateDrawColor(color) {
-        drawColor = color;
-        const canvas = document.getElementById('draw-canvas');
-        if (canvas) canvas.getContext('2d').strokeStyle = color;
-    }
-    function clearDrawingCanvas() {
-        const canvas = document.getElementById('draw-canvas');
-        if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-    }
-    function downloadDrawing() {
-        const canvas = document.getElementById('draw-canvas');
-        if (!canvas) return;
-        const a = document.createElement('a');
-        a.download = 'drawing_{{ assignment.assignment_id }}.png';
-        a.href = canvas.toDataURL('image/png');
-        a.click();
-    }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            const addBtn = document.getElementById('pdf-add-text-btn');
+            const zoomIn = document.getElementById('pdf-zoom-in');
+            const zoomOut = document.getElementById('pdf-zoom-out');
+            const zoomVal = document.getElementById('pdf-zoom-val');
+            const saveBtn = document.getElementById('pdf-save-annotations');
+            
+            if (addBtn) {
+                addBtn.addEventListener('click', () => {
+                    addTextMode = !addTextMode;
+                    addBtn.classList.toggle('active', addTextMode);
+                    addBtn.title = addTextMode ? 'Click on the PDF to add a text box' : 'Click to enable add text mode';
+                });
+            }
+            if (zoomIn) zoomIn.addEventListener('click', () => { pdfScale = Math.min(3, pdfScale + 0.25); if (zoomVal) zoomVal.textContent = Math.round(pdfScale * 100) + '%'; rerenderAll(); });
+            if (zoomOut) zoomOut.addEventListener('click', () => { pdfScale = Math.max(0.5, pdfScale - 0.25); if (zoomVal) zoomVal.textContent = Math.round(pdfScale * 100) + '%'; rerenderAll(); });
+            if (saveBtn) saveBtn.addEventListener('click', () => { saveAnnotations(); alert('Annotations saved locally.'); });
+            
+            initPdfViewer().then(() => {
+                if (zoomVal) zoomVal.textContent = Math.round(pdfScale * 100) + '%';
+            });
+        });
+    })();
+    {% endif %}
     
     // === ASK AI FROM MODAL ===
     let modalQuestionImageData = null;
