@@ -107,45 +107,47 @@
         </div>
     </div>
     
-    <div class="row">
-        <!-- Left: Your Submission (reduced by 1/4 for correction column) -->
-        <div class="col-lg-4 mb-4">
+    <div class="row" id="review-row">
+        <!-- Left: Your Submission (same PDF/image viewer as teacher review page) -->
+        <div class="col-lg-4 mb-4" id="submission-panel">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="bi bi-file-earmark me-2"></i>Your Submission</h5>
                     {% if submission.file_ids %}
-                    <small class="text-muted">
-                        {% if submission.file_type == 'pdf' %}
-                        <i class="bi bi-file-pdf me-1"></i>PDF Document
-                        {% else %}
-                        <i class="bi bi-images me-1"></i>{{ submission.page_count }} page(s)
-                        {% endif %}
-                    </small>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" onclick="submissionPrevPage()" id="submission-prev-btn" disabled>
+                                <i class="bi bi-chevron-left"></i>
+                            </button>
+                            <span class="btn btn-outline-secondary disabled" id="submission-page-indicator">Page 1/{{ submission.page_count or (submission.file_ids|length) or 1 }}</span>
+                            <button class="btn btn-outline-secondary" onclick="submissionNextPage()" id="submission-next-btn" {% if (submission.page_count or (submission.file_ids|length) or 1) <= 1 %}disabled{% endif %}>
+                                <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </div>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" onclick="submissionZoomOut()" title="Zoom Out">
+                                <i class="bi bi-zoom-out"></i>
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="submissionZoomIn()" title="Zoom In">
+                                <i class="bi bi-zoom-in"></i>
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="submissionToggleFullscreen()" title="Toggle Fullscreen" id="submission-fullscreen-btn">
+                                <i class="bi bi-arrows-fullscreen"></i>
+                            </button>
+                        </div>
+                    </div>
                     {% endif %}
                 </div>
-                <div class="card-body p-0">
+                <div class="card-body p-0" style="height: calc(100vh - 350px); min-height: 320px; overflow: auto; background: #f0f0f0;" id="submission-body">
                     {% if submission.file_ids %}
-                    <div class="submission-viewer-container" style="height: calc(100vh - 350px); min-height: 320px; overflow: auto; background: #f5f5f5;">
+                    <div id="submission-viewer-wrap" style="display: flex; justify-content: center; align-items: flex-start; padding: 10px;">
                         {% if submission.file_type == 'pdf' %}
-                        <!-- PDF Viewer - Full scrollable document -->
-                        <iframe id="submission-viewer" 
+                        <iframe id="submission-pdf-viewer" 
                                 src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}"
-                                style="width: 100%; height: 100%; border: none;"></iframe>
+                                style="width: 100%; height: calc(100vh - 400px); min-height: 300px; border: none;"></iframe>
                         {% else %}
-                        <!-- Image Viewer - All pages stacked for scrolling -->
-                        <div class="image-pages p-3">
-                            {% for i in range(submission.page_count or 1) %}
-                            <div class="page-container mb-3 {% if i > 0 %}border-top pt-3{% endif %}">
-                                <div class="d-flex justify-content-between align-items-center mb-2">
-                                    <small class="text-muted fw-semibold">Page {{ i + 1 }} of {{ submission.page_count }}</small>
-                                </div>
-                                <img src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=i) }}"
-                                     style="width: 100%; height: auto; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" 
-                                     alt="Submission page {{ i + 1 }}"
-                                     loading="lazy">
-                            </div>
-                            {% endfor %}
-                        </div>
+                        <img id="submission-page-image" src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}" 
+                             style="width: 100%; height: auto; transform-origin: top center; object-fit: contain;" class="submission-img">
                         {% endif %}
                     </div>
                     {% else %}
@@ -159,7 +161,7 @@
         </div>
         
         <!-- Right: Feedback + Your correction/challenge column -->
-        <div class="col-lg-8 mb-4">
+        <div class="col-lg-8 mb-4" id="feedback-panel">
             <div class="card h-100">
                 <div class="card-header">
                     <h5 class="mb-0"><i class="bi bi-chat-left-text me-2"></i>Feedback</h5>
@@ -506,6 +508,103 @@
 {% endblock %}
 
 {% block scripts %}
+{% if submission.file_ids %}
+<script>
+(function() {
+    var submissionId = "{{ submission.submission_id }}";
+    var pageCount = {{ submission.page_count or (submission.file_ids|length) or 1 }};
+    var fileType = "{{ submission.file_type }}";
+    var currentPage = 0;
+
+    function submissionUpdatePageView() {
+        var ind = document.getElementById('submission-page-indicator');
+        var prevBtn = document.getElementById('submission-prev-btn');
+        var nextBtn = document.getElementById('submission-next-btn');
+        if (ind) ind.textContent = 'Page ' + (currentPage + 1) + '/' + pageCount;
+        if (prevBtn) prevBtn.disabled = currentPage === 0;
+        if (nextBtn) nextBtn.disabled = currentPage >= pageCount - 1;
+        var base = '/student/submission/' + submissionId + '/file/';
+        if (fileType === 'pdf') {
+            var iframe = document.getElementById('submission-pdf-viewer');
+            if (iframe) iframe.src = base + currentPage;
+        } else {
+            var img = document.getElementById('submission-page-image');
+            if (img) img.src = base + currentPage;
+        }
+    }
+    function submissionNextPage() {
+        if (currentPage < pageCount - 1) { currentPage++; submissionUpdatePageView(); }
+    }
+    function submissionPrevPage() {
+        if (currentPage > 0) { currentPage--; submissionUpdatePageView(); }
+    }
+
+    var submissionZoom = 1;
+    var submissionZoomStep = 0.25;
+    var submissionMaxZoom = 3;
+    var submissionMinZoom = 0.5;
+    function submissionZoomIn() {
+        if (submissionZoom < submissionMaxZoom) { submissionZoom += submissionZoomStep; submissionApplyZoom(); }
+    }
+    function submissionZoomOut() {
+        if (submissionZoom > submissionMinZoom) { submissionZoom -= submissionZoomStep; submissionApplyZoom(); }
+    }
+    function submissionApplyZoom() {
+        var img = document.getElementById('submission-page-image');
+        if (img) {
+            img.style.transform = 'scale(' + submissionZoom + ')';
+            img.style.transformOrigin = 'top center';
+        }
+    }
+
+    var submissionFullscreen = false;
+    function submissionToggleFullscreen() {
+        var submissionBody = document.getElementById('submission-body');
+        var fullscreenBtn = document.getElementById('submission-fullscreen-btn');
+        if (!document.fullscreenElement) {
+            submissionBody.requestFullscreen().then(function() {
+                submissionBody.style.height = '100vh';
+                submissionBody.style.background = '#1a1a1a';
+                if (fullscreenBtn) fullscreenBtn.innerHTML = '<i class="bi bi-fullscreen-exit"></i>';
+                submissionFullscreen = true;
+            }).catch(function() {
+                submissionExpandView();
+            });
+        } else {
+            document.exitFullscreen().then(function() { submissionRestoreView(); });
+        }
+    }
+    function submissionExpandView() {
+        var submissionPanel = document.getElementById('submission-panel');
+        var feedbackPanel = document.getElementById('feedback-panel');
+        var fullscreenBtn = document.getElementById('submission-fullscreen-btn');
+        if (submissionPanel) submissionPanel.className = 'col-12 mb-4';
+        if (feedbackPanel) feedbackPanel.style.display = 'none';
+        var body = document.getElementById('submission-body');
+        if (body) { body.style.height = '90vh'; }
+        if (fullscreenBtn) fullscreenBtn.innerHTML = '<i class="bi bi-fullscreen-exit"></i>';
+        submissionFullscreen = true;
+    }
+    function submissionRestoreView() {
+        var submissionPanel = document.getElementById('submission-panel');
+        var feedbackPanel = document.getElementById('feedback-panel');
+        var fullscreenBtn = document.getElementById('submission-fullscreen-btn');
+        var submissionBody = document.getElementById('submission-body');
+        if (submissionPanel) submissionPanel.className = 'col-lg-4 mb-4';
+        if (feedbackPanel) feedbackPanel.style.display = '';
+        if (submissionBody) {
+            submissionBody.style.height = 'calc(100vh - 350px)';
+            submissionBody.style.background = '#f0f0f0';
+        }
+        if (fullscreenBtn) fullscreenBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+        submissionFullscreen = false;
+    }
+    document.addEventListener('fullscreenchange', function() {
+        if (!document.fullscreenElement && submissionFullscreen) submissionRestoreView();
+    });
+})();
+</script>
+{% endif %}
 <script>
 (function() {
     // Send Corrections / Challenge
