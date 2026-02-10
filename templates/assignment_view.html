@@ -393,17 +393,65 @@
                     <button type="button" class="btn btn-outline-light" id="pdf-zoom-in" title="Zoom in">+</button>
                 </div>
                 <span class="text-white-50 small" id="pdf-page-info">Page 1 / 1</span>
+                <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" class="btn btn-outline-light btn-sm" download title="Download PDF">
+                    <i class="bi bi-download me-1"></i>Download
+                </a>
                 <button type="button" class="btn btn-outline-light btn-sm" id="pdf-save-annotations" title="Save annotations locally">
                     <i class="bi bi-save me-1"></i>Save
                 </button>
             </div>
         </div>
-        <div class="card-body p-0 bg-dark">
-            <div id="pdf-viewer-container" class="overflow-auto" style="height: 80vh;">
-                <div id="pdf-pages-container" class="d-flex flex-column align-items-center p-3">
-                    <div class="text-white py-5" id="pdf-loading">
-                        <div class="spinner-border" role="status"></div>
-                        <p class="mt-2 mb-0">Loading PDF...</p>
+        <div class="card-body p-0">
+            <div class="row g-0">
+                <div class="col-lg-8 bg-dark">
+                    <div id="pdf-viewer-container" class="overflow-auto" style="height: 80vh;">
+                        <div id="pdf-pages-container" class="d-flex flex-column align-items-center p-3">
+                            <div class="text-white py-5" id="pdf-loading">
+                                <div class="spinner-border" role="status"></div>
+                                <p class="mt-2 mb-0">Loading PDF...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-4 border-start">
+                    <div class="p-3">
+                        <ul class="nav nav-tabs mb-2" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#notes-tab" type="button">
+                                    <i class="bi bi-journal-text me-1"></i>Notes & Answers
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#draw-tab" type="button">
+                                    <i class="bi bi-pencil me-1"></i>Draw
+                                </button>
+                            </li>
+                        </ul>
+                        <div class="tab-content">
+                            <div class="tab-pane fade show active" id="notes-tab">
+                                <label class="form-label small">Your answers and notes:</label>
+                                <textarea class="form-control font-monospace" id="question-notes-editor" rows="12" placeholder="Type your answers and notes here..."></textarea>
+                                <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="saveQuestionNotes()"><i class="bi bi-save me-1"></i>Save locally</button>
+                            </div>
+                            <div class="tab-pane fade" id="draw-tab">
+                                <div class="mb-2">
+                                    <label class="form-label small">Draw shapes and lines:</label>
+                                    <div class="btn-group btn-group-sm mb-2" role="group">
+                                        <button type="button" class="btn btn-outline-secondary active" id="draw-pen-btn" onclick="setDrawMode('pen')" title="Freehand"><i class="bi bi-pencil"></i></button>
+                                        <button type="button" class="btn btn-outline-secondary" id="draw-line-btn" onclick="setDrawMode('line')" title="Line"><i class="bi bi-slash-lg"></i></button>
+                                        <button type="button" class="btn btn-outline-secondary" id="draw-rect-btn" onclick="setDrawMode('rect')" title="Rectangle"><i class="bi bi-square"></i></button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearDrawingCanvas()" title="Clear"><i class="bi bi-trash"></i></button>
+                                    </div>
+                                    <div class="input-group input-group-sm mb-2">
+                                        <span class="input-group-text">Color</span>
+                                        <input type="color" class="form-control form-control-color" id="draw-color" value="#000000" onchange="updateDrawColor(this.value)">
+                                    </div>
+                                </div>
+                                <canvas id="draw-canvas" width="280" height="350" style="border: 1px solid #dee2e6; border-radius: 4px; cursor: crosshair; touch-action: none;"></canvas>
+                                <p class="text-muted small mt-2 mb-0">Draw on the canvas. Use "Save as image" to download your work.</p>
+                                <button type="button" class="btn btn-sm btn-outline-success mt-2" onclick="downloadDrawing()"><i class="bi bi-download me-1"></i>Save as image</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -627,6 +675,31 @@
     background: #fff;
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
+.pdf-text-box-wrap {
+    position: absolute;
+    z-index: 10;
+}
+.pdf-text-delete {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: #dc3545;
+    color: white;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.pdf-text-delete:hover {
+    background: #bb2d3b;
+}
 </style>
 
 <!-- Ask AI for Help Modal -->
@@ -822,7 +895,9 @@
         }
         function saveAnnotations() {
             const toSave = {};
-            for (const [k, v] of Object.entries(annotations)) {
+            const pages = new Set();
+            document.querySelectorAll('[data-pdf-anno][data-page]').forEach(inp => pages.add(inp.dataset.page));
+            for (const k of pages) {
                 const inputs = document.querySelectorAll(`[data-pdf-anno][data-page="${k}"]`);
                 toSave[k] = Array.from(inputs).map(inp => ({
                     x: parseFloat(inp.dataset.x), y: parseFloat(inp.dataset.y),
@@ -832,30 +907,51 @@
             localStorage.setItem(annotationsKey, JSON.stringify(toSave));
         }
         
-        function addTextAt(pageEl, pageNum, x, y) {
-            if (!annotations[pageNum]) annotations[pageNum] = [];
-            const overlay = pageEl.querySelector('.pdf-page-overlay');
-            if (!overlay) return;
-            const rect = overlay.getBoundingClientRect();
-            const relX = Math.max(0, Math.min(x - rect.left, rect.width - 160));
-            const relY = Math.max(0, Math.min(y - rect.top, rect.height - 30));
+        function removeTextBox(wrap) {
+            wrap.remove();
+            saveAnnotations();
+        }
+        
+        function createTextBox(overlay, pageNum, x, y, text = '', w = 150, h = 24) {
+            const wrap = document.createElement('div');
+            wrap.className = 'pdf-text-box-wrap';
+            wrap.style.cssText = `left:${x}px;top:${y}px;`;
             
             const input = document.createElement('input');
             input.type = 'text';
             input.className = 'pdf-text-input';
             input.placeholder = 'Type here...';
-            input.value = '';
-            input.style.cssText = `left:${relX}px;top:${relY}px;width:150px;height:24px;`;
+            input.value = text;
+            input.style.cssText = `width:${w}px;height:${h}px;`;
             input.dataset.pdfAnno = '1';
             input.dataset.page = pageNum;
-            input.dataset.x = relX;
-            input.dataset.y = relY;
-            input.dataset.w = 150;
-            input.dataset.h = 24;
+            input.dataset.x = x;
+            input.dataset.y = y;
+            input.dataset.w = w;
+            input.dataset.h = h;
             input.addEventListener('input', saveAnnotations);
             input.addEventListener('blur', saveAnnotations);
-            overlay.appendChild(input);
+            
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'pdf-text-delete';
+            delBtn.title = 'Delete';
+            delBtn.innerHTML = '×';
+            delBtn.addEventListener('click', (e) => { e.stopPropagation(); removeTextBox(wrap); });
+            
+            wrap.appendChild(input);
+            wrap.appendChild(delBtn);
+            overlay.appendChild(wrap);
             input.focus();
+        }
+        
+        function addTextAt(pageEl, pageNum, x, y) {
+            const overlay = pageEl.querySelector('.pdf-page-overlay');
+            if (!overlay) return;
+            const rect = overlay.getBoundingClientRect();
+            const relX = Math.max(0, Math.min(x - rect.left, rect.width - 160));
+            const relY = Math.max(0, Math.min(y - rect.top, rect.height - 30));
+            createTextBox(overlay, pageNum, relX, relY, '');
             saveAnnotations();
         }
         
@@ -908,20 +1004,7 @@
                     container.appendChild(pageWrap);
                     
                     (annotations[i] || []).forEach(a => {
-                        const input = document.createElement('input');
-                        input.type = 'text';
-                        input.className = 'pdf-text-input';
-                        input.value = a.text || '';
-                        input.style.cssText = `left:${a.x}px;top:${a.y}px;width:${a.w || 150}px;height:${a.h || 24}px;`;
-                        input.dataset.pdfAnno = '1';
-                        input.dataset.page = i;
-                        input.dataset.x = a.x;
-                        input.dataset.y = a.y;
-                        input.dataset.w = a.w || 150;
-                        input.dataset.h = a.h || 24;
-                        input.addEventListener('input', saveAnnotations);
-                        input.addEventListener('blur', saveAnnotations);
-                        overlay.appendChild(input);
+                        createTextBox(overlay, i, a.x, a.y, a.text || '', a.w || 150, a.h || 24);
                     });
                 }
             } catch (err) {
@@ -958,20 +1041,7 @@
                     pageWrap.appendChild(canvas);
                     pageWrap.appendChild(overlay);
                     (annotations[i] || []).forEach(a => {
-                        const input = document.createElement('input');
-                        input.type = 'text';
-                        input.className = 'pdf-text-input';
-                        input.value = a.text || '';
-                        input.style.cssText = `left:${a.x}px;top:${a.y}px;width:${a.w || 150}px;height:${a.h || 24}px;`;
-                        input.dataset.pdfAnno = '1';
-                        input.dataset.page = i;
-                        input.dataset.x = a.x;
-                        input.dataset.y = a.y;
-                        input.dataset.w = a.w || 150;
-                        input.dataset.h = a.h || 24;
-                        input.addEventListener('input', saveAnnotations);
-                        input.addEventListener('blur', saveAnnotations);
-                        overlay.appendChild(input);
+                        createTextBox(overlay, i, a.x, a.y, a.text || '', a.w || 150, a.h || 24);
                     });
                     container.appendChild(pageWrap);
                 }
@@ -1002,6 +1072,79 @@
         });
     })();
     {% endif %}
+    
+    // === QUESTION NOTES (localStorage) ===
+    const notesStorageKey = 'assignment_notes_{{ assignment.assignment_id }}';
+    document.addEventListener('DOMContentLoaded', function() {
+        const editor = document.getElementById('question-notes-editor');
+        if (editor) {
+            const saved = localStorage.getItem(notesStorageKey);
+            if (saved) editor.value = saved;
+            editor.addEventListener('input', () => localStorage.setItem(notesStorageKey, editor.value));
+        }
+    });
+    function saveQuestionNotes() {
+        const editor = document.getElementById('question-notes-editor');
+        if (editor) {
+            localStorage.setItem(notesStorageKey, editor.value);
+            alert('Notes saved locally.');
+        }
+    }
+    
+    // === DRAWING CANVAS ===
+    let drawMode = 'pen', drawColor = '#000000', isDrawing = false, startX = 0, startY = 0;
+    document.addEventListener('DOMContentLoaded', function() {
+        const canvas = document.getElementById('draw-canvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = drawColor;
+        ctx.lineWidth = 2;
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+        }
+        function startDraw(e) { e.preventDefault(); isDrawing = true; const pos = getPos(e); startX = pos.x; startY = pos.y; if (drawMode === 'pen') ctx.beginPath(); }
+        function doDraw(e) { e.preventDefault(); if (!isDrawing) return; const pos = getPos(e); if (drawMode === 'pen') { ctx.lineTo(pos.x, pos.y); ctx.stroke(); } }
+        function endDraw(e) {
+            e.preventDefault();
+            if (!isDrawing) return;
+            const pos = getPos(e);
+            if (drawMode === 'line') { ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(pos.x, pos.y); ctx.stroke(); }
+            else if (drawMode === 'rect') ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+            isDrawing = false;
+        }
+        ['mousedown','touchstart'].forEach(ev => canvas.addEventListener(ev, startDraw));
+        ['mousemove','touchmove'].forEach(ev => canvas.addEventListener(ev, doDraw));
+        ['mouseup','touchend','mouseleave'].forEach(ev => canvas.addEventListener(ev, endDraw));
+    });
+    function setDrawMode(mode) {
+        drawMode = mode;
+        document.querySelectorAll('#draw-pen-btn, #draw-line-btn, #draw-rect-btn').forEach(b => b?.classList.remove('active'));
+        const btn = document.getElementById('draw-' + mode + '-btn');
+        if (btn) btn.classList.add('active');
+    }
+    function updateDrawColor(color) {
+        drawColor = color;
+        const canvas = document.getElementById('draw-canvas');
+        if (canvas) canvas.getContext('2d').strokeStyle = color;
+    }
+    function clearDrawingCanvas() {
+        const canvas = document.getElementById('draw-canvas');
+        if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    }
+    function downloadDrawing() {
+        const canvas = document.getElementById('draw-canvas');
+        if (!canvas) return;
+        const a = document.createElement('a');
+        a.download = 'drawing_{{ assignment.assignment_id }}.png';
+        a.href = canvas.toDataURL('image/png');
+        a.click();
+    }
     
     // === ASK AI FROM MODAL ===
     let modalQuestionImageData = null;
