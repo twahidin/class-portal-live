@@ -5040,7 +5040,7 @@ def review_submission(submission_id):
 @app.route('/teacher/submission/<submission_id>/file/<int:file_index>')
 @teacher_required
 def view_submission_file(submission_id, file_index):
-    """Serve submission file (image or PDF page)"""
+    """Serve submission file (image or PDF page as image)"""
     from gridfs import GridFS
     
     submission = Submission.find_one({'submission_id': submission_id})
@@ -5061,8 +5061,42 @@ def view_submission_file(submission_id, file_index):
         from bson import ObjectId
         file_data = fs.get(ObjectId(file_ids[file_index]))
         content_type = file_data.content_type or 'application/octet-stream'
+        file_bytes = file_data.read()
+        
+        # If as_image=1 is requested and the file is a PDF, convert the page to PNG
+        as_image = request.args.get('as_image')
+        is_pdf = content_type == 'application/pdf' or (file_data.filename and file_data.filename.lower().endswith('.pdf'))
+        
+        if as_image and is_pdf:
+            import fitz  # PyMuPDF
+            import io
+            
+            pdf_page = int(request.args.get('pdf_page', 0))
+            doc = fitz.open(stream=file_bytes, filetype='pdf')
+            page_count = len(doc)
+            
+            if pdf_page < 0 or pdf_page >= page_count:
+                doc.close()
+                return 'Page not found', 404
+            
+            page = doc[pdf_page]
+            # Render at 2x zoom for good quality
+            mat = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=mat)
+            png_bytes = pix.tobytes("png")
+            doc.close()
+            
+            return Response(
+                png_bytes,
+                mimetype='image/png',
+                headers={
+                    'Content-Disposition': 'inline',
+                    'X-PDF-Page-Count': str(page_count)
+                }
+            )
+        
         return Response(
-            file_data.read(),
+            file_bytes,
             mimetype=content_type,
             headers={'Content-Disposition': 'inline'}
         )
@@ -5700,6 +5734,176 @@ def download_feedback_pdf(submission_id):
     except Exception as e:
         logger.error(f"Error generating PDF: {e}")
         return f'Error generating PDF: {str(e)}', 500
+
+@app.route('/teacher/review/<submission_id>/feedback-excel')
+@teacher_required
+def teacher_download_feedback_excel(submission_id):
+    """Download the Excel file with AI feedback comments (teacher access)"""
+    from gridfs import GridFS
+    from bson import ObjectId
+
+    submission = Submission.find_one({'submission_id': submission_id})
+    if not submission:
+        return 'Not found', 404
+
+    assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+    if not assignment or assignment['teacher_id'] != session['teacher_id']:
+        return 'Unauthorized', 403
+
+    excel_id = submission.get('spreadsheet_feedback_excel_id')
+    if not excel_id:
+        return 'No feedback Excel available', 404
+
+    fs = GridFS(db.db)
+    try:
+        file_data = fs.get(ObjectId(excel_id))
+        content_type = file_data.content_type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        student = Student.find_one({'student_id': submission['student_id']})
+        student_name = student['name'].replace(' ', '_') if student else 'student'
+        filename = f"feedback_{student_name}_{assignment['assignment_id']}.xlsx"
+        return Response(
+            file_data.read(),
+            mimetype=content_type,
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        logger.error(f"Error serving feedback Excel: {e}")
+        return 'File not found', 404
+
+@app.route('/teacher/review/<submission_id>/feedback-pdf')
+@teacher_required
+def teacher_download_feedback_pdf(submission_id):
+    """Download the feedback PDF report (teacher access from excel feedback view)"""
+    from gridfs import GridFS
+    from bson import ObjectId
+
+    submission = Submission.find_one({'submission_id': submission_id})
+    if not submission:
+        return 'Not found', 404
+
+    assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+    if not assignment or assignment['teacher_id'] != session['teacher_id']:
+        return 'Unauthorized', 403
+
+    pdf_id = submission.get('spreadsheet_feedback_pdf_id')
+    if not pdf_id:
+        return 'No feedback PDF available', 404
+
+    fs = GridFS(db.db)
+    try:
+        file_data = fs.get(ObjectId(pdf_id))
+        student = Student.find_one({'student_id': submission['student_id']})
+        student_name = student['name'].replace(' ', '_') if student else 'student'
+        filename = f"feedback_{student_name}_{assignment['assignment_id']}.pdf"
+        return Response(
+            file_data.read(),
+            mimetype='application/pdf',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        logger.error(f"Error serving feedback PDF: {e}")
+        return 'File not found', 404
+
+@app.route('/teacher/review/<submission_id>/excel-feedback')
+@app.route('/submissions/<submission_id>/excel-feedback')
+@student_or_teacher_required
+def view_excel_feedback(submission_id):
+    """View the spreadsheet feedback page (teacher or student)"""
+    is_teacher = 'teacher_id' in session
+
+    if is_teacher:
+        submission = Submission.find_one({'submission_id': submission_id})
+        if not submission:
+            return redirect(url_for('teacher_submissions'))
+        assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+        if not assignment or assignment['teacher_id'] != session['teacher_id']:
+            return redirect(url_for('teacher_submissions'))
+    else:
+        submission = Submission.find_one({
+            'submission_id': submission_id,
+            'student_id': session['student_id']
+        })
+        if not submission:
+            return redirect(url_for('student_submissions'))
+        assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+        if not assignment:
+            return redirect(url_for('student_submissions'))
+
+    student = Student.find_one({'student_id': submission['student_id']})
+    ai_feedback = submission.get('ai_feedback', {})
+    spreadsheet_feedback = ai_feedback.get('spreadsheet_feedback', {})
+    teacher_feedback = submission.get('teacher_feedback', {})
+
+    return render_template('excel_feedback_view.html',
+                         submission=submission,
+                         assignment=assignment,
+                         student=student,
+                         spreadsheet_feedback=spreadsheet_feedback,
+                         teacher_feedback=teacher_feedback,
+                         is_teacher=is_teacher)
+
+@app.route('/teacher/review/<submission_id>/save-excel-feedback', methods=['POST'])
+@teacher_required
+def save_excel_feedback(submission_id):
+    """Save teacher feedback for spreadsheet questions"""
+    try:
+        data = request.get_json()
+
+        submission = Submission.find_one({'submission_id': submission_id})
+        if not submission:
+            return jsonify({'error': 'Submission not found'}), 404
+
+        assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+        if not assignment or assignment['teacher_id'] != session['teacher_id']:
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        teacher_feedback = submission.get('teacher_feedback', {})
+        teacher_feedback['spreadsheet_overall_feedback'] = data.get('overall_feedback', '')
+        teacher_feedback['spreadsheet_questions'] = data.get('questions', {})
+        teacher_feedback['spreadsheet_edited_at'] = datetime.utcnow()
+        teacher_feedback['spreadsheet_edited_by'] = session['teacher_id']
+
+        Submission.update_one(
+            {'submission_id': submission_id},
+            {'$set': {'teacher_feedback': teacher_feedback, 'updated_at': datetime.utcnow()}}
+        )
+
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error saving excel feedback: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/submissions/<submission_id>/feedback-excel')
+@login_required
+def download_submission_feedback_excel(submission_id):
+    """Download the Excel file with AI feedback comments (student access)"""
+    from gridfs import GridFS
+    from bson import ObjectId
+
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id']
+    })
+    if not submission:
+        return 'Not found', 404
+
+    excel_id = submission.get('spreadsheet_feedback_excel_id')
+    if not excel_id:
+        return 'No feedback Excel available', 404
+
+    fs = GridFS(db.db)
+    try:
+        file_data = fs.get(ObjectId(excel_id))
+        content_type = file_data.content_type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        filename = f"feedback_{submission_id}.xlsx"
+        return Response(
+            file_data.read(),
+            mimetype=content_type,
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        logger.error(f"Error serving feedback Excel: {e}")
+        return 'File not found', 404
 
 @app.route('/teacher/submissions/<submission_id>/approve', methods=['POST'])
 @teacher_required
