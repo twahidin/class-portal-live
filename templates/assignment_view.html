@@ -38,32 +38,11 @@
             <li class="breadcrumb-item active">{{ assignment.title }}</li>
         </ol>
     </nav>
-    
-    <!-- AI Help Usage Alert -->
-    <div id="ai-usage-alert" class="alert alert-info alert-dismissible fade show mb-3" style="display: none;">
-        <div class="d-flex align-items-center">
-            <i class="bi bi-info-circle me-2"></i>
-            <div class="flex-grow-1">
-                <strong>AI Help Limits for this Assignment</strong>
-                <div class="mt-1 small">
-                    <span id="question-help-status" class="me-3"></span>
-                    <span id="overall-review-status"></span>
-                </div>
-            </div>
-        </div>
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
-    
-    <!-- AI Help Disabled Alert -->
-    <div id="ai-disabled-alert" class="alert alert-warning mb-3" style="display: none;">
-        <i class="bi bi-exclamation-triangle me-2"></i>
-        <span id="ai-disabled-message"></span>
-    </div>
-    
+
     <div class="row align-items-stretch">
         <!-- Left: Assignment Details -->
-        <div class="col-lg-6 mb-4">
-            <div class="card h-100">
+        <div class="col-lg-6 mb-4 d-flex">
+            <div class="card flex-fill">
                 <div class="card-header bg-primary text-white">
                     <h5 class="mb-0"><i class="bi bi-file-text me-2"></i>Assignment Details</h5>
                 </div>
@@ -94,7 +73,7 @@
                     
                     <!-- Question Paper / Spreadsheet materials -->
                     {% if assignment.marking_type == 'spreadsheet' %}
-                    <div class="question-paper-section mt-4">
+                    <div class="question-paper-section mt-auto">
                         <h6><i class="bi bi-file-earmark-excel me-2"></i>Spreadsheet assignment</h6>
                         <div class="d-grid gap-2">
                             {% if assignment.spreadsheet_student_template_id %}
@@ -110,27 +89,26 @@
                             </a>
                             {% endif %}
                         </div>
-                        <p class="text-muted small mt-2 mb-0">Complete the Excel template and upload it below. You will receive a PDF report and a commented Excel file with feedback.</p>
+                        <p class="text-muted small mt-2 mb-0">Complete the Excel template and upload it below.</p>
                     </div>
                     {% elif assignment.question_paper_id %}
-                    <div class="question-paper-section mt-4">
+                    <div class="question-paper-section mt-auto">
                         <h6><i class="bi bi-file-pdf me-2"></i>Question Paper</h6>
                         <div class="d-grid gap-2">
                             <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
                                class="btn btn-outline-primary" target="_blank" download>
                                 <i class="bi bi-download me-1"></i>Download and View Question Paper
                             </a>
-                            <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
-                               class="btn btn-primary" target="_blank">
+                            <button type="button" class="btn btn-primary" onclick="loadQuestionPaperInEditor()">
                                 <i class="bi bi-pencil-square me-1"></i>Edit Question Paper Online
-                            </a>
+                            </button>
                         </div>
                     </div>
                     {% endif %}
                     
                     <!-- Submission Status -->
                     {% if existing_submission %}
-                    <div class="alert {% if existing_submission.get('submitted_via') == 'manual' %}alert-info{% else %}alert-success{% endif %} mt-4">
+                    <div class="alert {% if existing_submission.get('submitted_via') == 'manual' %}alert-info{% else %}alert-success{% endif %} mt-4 mb-0">
                         <h6 class="alert-heading"><i class="bi bi-check-circle me-2"></i>{% if existing_submission.get('submitted_via') == 'manual' %}Submitted by Teacher{% else %}Already Submitted{% endif %}</h6>
                         {% if existing_submission.get('submitted_via') == 'manual' %}
                         <p class="mb-2">This assignment was submitted on your behalf by your teacher on {{ (existing_submission.submitted_at|sgt).strftime('%d %B %Y at %H:%M') }} SGT.</p>
@@ -151,13 +129,13 @@
                         </div>
                     </div>
                     {% elif rejected_submission %}
-                    <div class="alert alert-danger mt-4">
+                    <div class="alert alert-danger mt-4 mb-0">
                         <h6 class="alert-heading"><i class="bi bi-x-circle me-2"></i>Submission Rejected</h6>
                         <p class="mb-2">Your teacher rejected your previous submission.</p>
                         {% if rejected_submission.get('rejection_reason') %}
                         <p class="mb-2"><strong>Reason:</strong> {{ rejected_submission.rejection_reason }}</p>
                         {% endif %}
-                        <p class="mb-2 small text-muted">You can resubmit using the Hard Copy Submission box. Please follow any instructions from your teacher above.</p>
+                        <p class="mb-2 small text-muted">You can resubmit using the Hard Copy Submission form.</p>
                         <hr>
                         <div class="d-flex gap-2">
                             <a href="{{ url_for('view_submission', submission_id=rejected_submission.submission_id) }}" class="btn btn-outline-danger btn-sm">
@@ -170,122 +148,15 @@
             </div>
         </div>
         
-        <!-- Right: Hard Copy Submission or Submission Complete -->
-        <div class="col-lg-6 mb-4">
-            {% if not existing_submission %}
-            <div class="card h-100">
-                <div class="card-header bg-success text-white">
-                    <h5 class="mb-0"><i class="bi bi-send-check me-2"></i>Hard Copy Submission</h5>
-                </div>
-                <div class="card-body d-flex flex-column">
-                    <form id="submission-form" enctype="multipart/form-data" class="d-flex flex-column flex-grow-1">
-                        <input type="hidden" name="assignment_id" value="{{ assignment.assignment_id }}">
-                        
-                        <!-- Upload Method Tabs -->
-                        <ul class="nav nav-pills nav-fill mb-3" role="tablist">
-                            {% if assignment.marking_type == 'spreadsheet' %}
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#excel-upload" type="button">
-                                    <i class="bi bi-file-earmark-excel me-1"></i>Excel
-                                </button>
-                            </li>
-                            {% else %}
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#photo-upload" type="button">
-                                    <i class="bi bi-camera me-1"></i>Photos
-                                </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pdf-upload" type="button">
-                                    <i class="bi bi-file-pdf me-1"></i>PDF
-                                </button>
-                            </li>
-                            {% endif %}
-                        </ul>
-                        
-                        <div class="tab-content">
-                            {% if assignment.marking_type == 'spreadsheet' %}
-                            <!-- Excel Upload (spreadsheet assignments only) -->
-                            <div class="tab-pane fade show active" id="excel-upload">
-                                <div class="upload-zone" id="excel-zone">
-                                    <input type="file" class="d-none" id="excel-input" name="files" accept=".xlsx,.xls">
-                                    <label for="excel-input" class="upload-label">
-                                        <i class="bi bi-file-earmark-excel" style="font-size: 2.5rem; color: #217346;"></i>
-                                        <h6 class="mt-2">Click to upload your Excel spreadsheet</h6>
-                                        <p class="text-muted small mb-0">Upload your completed .xlsx file</p>
-                                    </label>
-                                </div>
-                                <div id="excel-preview" class="mt-3" style="display: none;">
-                                    <div class="alert alert-success">
-                                        <i class="bi bi-check-circle me-2"></i>
-                                        <span id="excel-filename">file.xlsx</span>
-                                        <button type="button" class="btn-close float-end" onclick="clearExcel()"></button>
-                                    </div>
-                                </div>
-                            </div>
-                            {% else %}
-                            <!-- Photo Upload -->
-                            <div class="tab-pane fade show active" id="photo-upload">
-                                <div class="upload-zone" id="photo-zone">
-                                    <input type="file" class="d-none" id="photo-input" name="photos" 
-                                           accept="image/*" multiple capture="environment">
-                                    <label for="photo-input" class="upload-label">
-                                        <i class="bi bi-camera" style="font-size: 2.5rem; color: #28a745;"></i>
-                                        <h6 class="mt-2">Click to upload final submission</h6>
-                                        <p class="text-muted small mb-0">Or drag and drop images here</p>
-                                    </label>
-                                </div>
-                                
-                                <!-- Preview -->
-                                <div id="photo-preview" class="photo-preview mt-3" style="display: none;">
-                                    <h6 class="small"><i class="bi bi-images me-1"></i>Pages to submit:</h6>
-                                    <div class="preview-grid" id="preview-grid"></div>
-                                </div>
-                            </div>
-                            
-                            <!-- PDF Upload -->
-                            <div class="tab-pane fade" id="pdf-upload">
-                                <div class="upload-zone" id="pdf-zone">
-                                    <input type="file" class="d-none" id="pdf-input" name="pdf" accept=".pdf">
-                                    <label for="pdf-input" class="upload-label">
-                                        <i class="bi bi-file-earmark-pdf" style="font-size: 2.5rem; color: #dc3545;"></i>
-                                        <h6 class="mt-2">Click to upload PDF</h6>
-                                        <p class="text-muted small mb-0">Or drag and drop here</p>
-                                    </label>
-                                </div>
-                                
-                                <div id="pdf-preview" class="mt-3" style="display: none;">
-                                    <div class="alert alert-success">
-                                        <i class="bi bi-check-circle me-2"></i>
-                                        <span id="pdf-filename">file.pdf</span>
-                                        <button type="button" class="btn-close float-end" onclick="clearPdf()"></button>
-                                    </div>
-                                </div>
-                            </div>
-                            {% endif %}
-                        </div>
-                        
-                        <!-- Submit Button -->
-                        <div class="d-grid gap-2 mt-3">
-                            <button type="submit" class="btn btn-success btn-lg" id="submit-btn" disabled>
-                                <i class="bi bi-send-fill me-1"></i>Submit Assignment
-                            </button>
-                        </div>
-                        
-                        <div class="alert alert-warning mt-3 small py-2">
-                            <i class="bi bi-exclamation-triangle me-1"></i>
-                            <strong>Note:</strong> Once submitted, you cannot change your answers. {% if assignment.marking_type == 'spreadsheet' %}Your spreadsheet will be evaluated and you will receive a PDF report and a commented Excel file.{% else %}AI will provide feedback, then your teacher will review.{% endif %}
-                        </div>
-                    </form>
-                </div>
-            </div>
-            {% else %}
-            <!-- Already submitted - show status (by student or by teacher) -->
-            <div class="card h-100">
+        <!-- Right: Hard Copy Submission / Submission Status -->
+        <div class="col-lg-6 mb-4 d-flex">
+            {% if existing_submission %}
+            <!-- Already submitted - show status -->
+            <div class="card flex-fill">
                 <div class="card-header {% if existing_submission.get('submitted_via') == 'manual' %}bg-info{% else %}bg-success{% endif %} text-white">
                     <h5 class="mb-0"><i class="bi bi-check-circle me-2"></i>{% if existing_submission.get('submitted_via') == 'manual' %}Submitted by Teacher{% else %}Submission Complete{% endif %}</h5>
                 </div>
-                <div class="card-body text-center py-5">
+                <div class="card-body text-center d-flex flex-column justify-content-center">
                     <div class="mb-4">
                         <i class="bi bi-patch-check" style="font-size: 4rem; color: {% if existing_submission.get('submitted_via') == 'manual' %}#0dcaf0{% else %}#28a745{% endif %};"></i>
                     </div>
@@ -335,71 +206,236 @@
                     </a>
                 </div>
             </div>
+            {% else %}
+            <!-- Hard Copy Submission -->
+            <div class="card flex-fill">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-printer me-2"></i>Hard Copy Submission</h5>
+                </div>
+                <div class="card-body d-flex flex-column">
+                    {% if rejected_submission %}
+                    <div class="alert alert-danger py-2 mb-3">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        Your previous submission was rejected. Please resubmit below.
+                    </div>
+                    {% endif %}
+                    
+                    <form id="submission-form" enctype="multipart/form-data" class="flex-fill d-flex flex-column">
+                        <input type="hidden" name="assignment_id" value="{{ assignment.assignment_id }}">
+                        
+                        <!-- Upload Method Tabs -->
+                        <ul class="nav nav-pills nav-fill mb-3" role="tablist">
+                            {% if assignment.marking_type == 'spreadsheet' %}
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#excel-upload" type="button">
+                                    <i class="bi bi-file-earmark-excel me-1"></i>Excel
+                                </button>
+                            </li>
+                            {% else %}
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#photo-upload" type="button">
+                                    <i class="bi bi-camera me-1"></i>Photos
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#pdf-upload" type="button">
+                                    <i class="bi bi-file-pdf me-1"></i>PDF
+                                </button>
+                            </li>
+                            {% endif %}
+                        </ul>
+                        
+                        <div class="tab-content flex-fill">
+                            {% if assignment.marking_type == 'spreadsheet' %}
+                            <!-- Excel Upload -->
+                            <div class="tab-pane fade show active" id="excel-upload">
+                                <div class="upload-zone" id="excel-zone">
+                                    <input type="file" class="d-none" id="excel-input" name="files" accept=".xlsx,.xls">
+                                    <label for="excel-input" class="upload-label">
+                                        <i class="bi bi-file-earmark-excel" style="font-size: 2.5rem; color: #217346;"></i>
+                                        <h6 class="mt-2">Click to upload your Excel spreadsheet</h6>
+                                        <p class="text-muted small mb-0">Upload your completed .xlsx file</p>
+                                    </label>
+                                </div>
+                                <div id="excel-preview" class="mt-3" style="display: none;">
+                                    <div class="alert alert-success">
+                                        <i class="bi bi-check-circle me-2"></i>
+                                        <span id="excel-filename">file.xlsx</span>
+                                        <button type="button" class="btn-close float-end" onclick="clearExcel()"></button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <!-- Photo Upload -->
+                            <div class="tab-pane fade show active" id="photo-upload">
+                                <div class="upload-zone" id="photo-zone">
+                                    <input type="file" class="d-none" id="photo-input" name="photos" 
+                                           accept="image/*" multiple capture="environment">
+                                    <label for="photo-input" class="upload-label">
+                                        <i class="bi bi-camera" style="font-size: 2.5rem; color: #28a745;"></i>
+                                        <h6 class="mt-2">Click to upload your hard copy</h6>
+                                        <p class="text-muted small mb-0">Or drag and drop images here</p>
+                                    </label>
+                                </div>
+                                <div id="photo-preview" class="photo-preview mt-3" style="display: none;">
+                                    <h6 class="small"><i class="bi bi-images me-1"></i>Pages to submit:</h6>
+                                    <div class="preview-grid" id="preview-grid"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- PDF Upload -->
+                            <div class="tab-pane fade" id="pdf-upload">
+                                <div class="upload-zone" id="pdf-zone">
+                                    <input type="file" class="d-none" id="pdf-input" name="pdf" accept=".pdf">
+                                    <label for="pdf-input" class="upload-label">
+                                        <i class="bi bi-file-earmark-pdf" style="font-size: 2.5rem; color: #dc3545;"></i>
+                                        <h6 class="mt-2">Click to upload PDF</h6>
+                                        <p class="text-muted small mb-0">Or drag and drop here</p>
+                                    </label>
+                                </div>
+                                <div id="pdf-preview" class="mt-3" style="display: none;">
+                                    <div class="alert alert-success">
+                                        <i class="bi bi-check-circle me-2"></i>
+                                        <span id="pdf-filename">file.pdf</span>
+                                        <button type="button" class="btn-close float-end" onclick="clearPdf()"></button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <div class="d-grid gap-2 mt-auto pt-3">
+                            <button type="submit" class="btn btn-success btn-lg" id="submit-btn" disabled>
+                                <i class="bi bi-send-fill me-1"></i>Submit Hard Copy
+                            </button>
+                        </div>
+                        
+                        <div class="alert alert-warning mt-3 small py-2 mb-0">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            <strong>Note:</strong> Once submitted, you cannot change your answers. {% if assignment.marking_type == 'spreadsheet' %}Your spreadsheet will be evaluated and you will receive a PDF report and a commented Excel file with feedback.{% else %}AI will provide feedback, then your teacher will review.{% endif %}
+                        </div>
+                    </form>
+                </div>
+            </div>
             {% endif %}
         </div>
     </div>
     
-    <!-- Divider after Assignment Details and Hard Copy Submission -->
-    <hr class="my-4 border-secondary" style="border-width: 2px !important;">
+    <!-- ═══════════ Visible Divider Line ═══════════ -->
+    <hr class="my-4" style="border: none; border-top: 3px solid #dee2e6;">
     
-    <!-- Action buttons -->
-    <div class="d-flex flex-wrap gap-2 mb-4">
-        <button type="button" class="btn btn-primary">
-            <i class="bi bi-file-earmark-arrow-up me-1"></i>Submit Online Question Paper
+    <!-- ═══════════ Action Buttons ═══════════ -->
+    <div class="d-flex justify-content-center gap-3 flex-wrap my-4">
+        <button type="button" class="btn btn-primary btn-lg px-4 shadow-sm" onclick="scrollToEditor()">
+            <i class="bi bi-file-earmark-text me-2"></i>Submit Online Question Paper
         </button>
-        <button type="button" class="btn btn-info">
-            <i class="bi bi-robot me-1"></i>Request AI Assistant
+        <button type="button" class="btn btn-warning btn-lg px-4 shadow-sm">
+            <i class="bi bi-robot me-2"></i>Request AI Assistant
         </button>
-        <button type="button" class="btn btn-outline-secondary">
-            <i class="bi bi-person-raised-hand me-1"></i>Ask a Teacher
+        <button type="button" class="btn btn-info btn-lg px-4 shadow-sm text-white">
+            <i class="bi bi-person-raised-hand me-2"></i>Ask a Teacher
         </button>
     </div>
     
-    <!-- Divider before PDF editor -->
-    <hr class="my-4 border-secondary" style="border-width: 2px !important;">
+    <!-- ═══════════ Visible Divider Line ═══════════ -->
+    <hr class="my-4" style="border: none; border-top: 3px solid #dee2e6;">
     
-    <!-- Editable Question Paper PDF Editor -->
-    <div class="card mb-4">
-        <div class="card-header bg-light">
-            <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Editable Question Paper</h5>
+    <!-- ═══════════ PDF Editor Section ═══════════ -->
+    <div class="card mb-4" id="pdf-editor-section">
+        <div class="card-header bg-dark text-white">
+            <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Online Question Paper Editor</h5>
         </div>
         <div class="card-body p-0">
-            <!-- Toolbar: type, pencil, lines, shapes, colours -->
-            <div class="pdf-editor-toolbar d-flex flex-wrap align-items-center gap-2 p-2 border-bottom bg-light">
-                <div class="btn-group" role="group">
-                    <button type="button" class="btn btn-outline-dark btn-sm pdf-tool active" data-tool="text" title="Type text">
-                        <i class="bi bi-type"></i> Text
-                    </button>
-                    <button type="button" class="btn btn-outline-dark btn-sm pdf-tool" data-tool="pencil" title="Draw with pencil">
-                        <i class="bi bi-pencil"></i> Pencil
-                    </button>
-                    <button type="button" class="btn btn-outline-dark btn-sm pdf-tool" data-tool="line" title="Draw line">
-                        <i class="bi bi-dash-lg"></i> Line
-                    </button>
-                    <button type="button" class="btn btn-outline-dark btn-sm pdf-tool" data-tool="rect" title="Rectangle">
-                        <i class="bi bi-square"></i> Rectangle
-                    </button>
-                    <button type="button" class="btn btn-outline-dark btn-sm pdf-tool" data-tool="ellipse" title="Ellipse">
-                        <i class="bi bi-circle"></i> Ellipse
-                    </button>
-                </div>
-                <div class="d-flex align-items-center gap-1">
-                    <label class="small text-muted mb-0 me-1">Colour:</label>
-                    <input type="color" id="pdf-editor-color" value="#000000" class="form-control form-control-color p-1" style="width: 2.5rem; height: 1.75rem;" title="Stroke/fill colour">
-                </div>
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="pdf-editor-clear" title="Clear drawings">
-                    <i class="bi bi-eraser me-1"></i>Clear
-                </button>
-            </div>
-            <!-- PDF view + annotation canvas -->
-            <div class="position-relative overflow-auto" style="min-height: 500px; background: #525659;">
-                <div id="pdf-editor-pages" class="d-flex flex-column align-items-center p-3">
-                    <!-- PDF pages and overlay canvases will be inserted here by JS -->
-                    <div class="text-center text-white py-5" id="pdf-editor-placeholder">
-                        <i class="bi bi-file-pdf" style="font-size: 3rem;"></i>
-                        <p class="mt-2 mb-0">Question paper will load here. Use the toolbar to type, draw, and annotate.</p>
+            <!-- Toolbar -->
+            <div class="pdf-editor-toolbar p-3 bg-light border-bottom">
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <!-- Drawing Tools -->
+                    <div class="btn-group" role="group" aria-label="Drawing tools">
+                        <button type="button" class="btn btn-outline-dark tool-btn active" data-tool="select" title="Select & Move">
+                            <i class="bi bi-cursor"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-dark tool-btn" data-tool="pencil" title="Pencil / Freehand">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-dark tool-btn" data-tool="line" title="Draw Line">
+                            <i class="bi bi-slash-lg"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-dark tool-btn" data-tool="rect" title="Rectangle">
+                            <i class="bi bi-square"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-dark tool-btn" data-tool="circle" title="Circle / Ellipse">
+                            <i class="bi bi-circle"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-dark tool-btn" data-tool="text" title="Add Text">
+                            <i class="bi bi-fonts"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="vr d-none d-md-block"></div>
+                    
+                    <!-- Color Picker -->
+                    <div class="d-flex align-items-center gap-1">
+                        <label class="form-label mb-0 small fw-bold">Color:</label>
+                        <input type="color" id="draw-color" value="#000000" class="form-control form-control-color" style="width: 40px; height: 38px;">
+                    </div>
+                    
+                    <!-- Stroke Width -->
+                    <div class="d-flex align-items-center gap-1">
+                        <label class="form-label mb-0 small fw-bold">Size:</label>
+                        <select id="stroke-width" class="form-select form-select-sm" style="width: 100px;">
+                            <option value="1">Thin</option>
+                            <option value="2" selected>Medium</option>
+                            <option value="4">Thick</option>
+                            <option value="8">Extra Thick</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Font Size (for text tool) -->
+                    <div class="d-flex align-items-center gap-1">
+                        <label class="form-label mb-0 small fw-bold">Font:</label>
+                        <select id="font-size" class="form-select form-select-sm" style="width: 80px;">
+                            <option value="14">14</option>
+                            <option value="18" selected>18</option>
+                            <option value="24">24</option>
+                            <option value="32">32</option>
+                            <option value="48">48</option>
+                        </select>
+                    </div>
+                    
+                    <div class="vr d-none d-md-block"></div>
+                    
+                    <!-- Actions -->
+                    <div class="btn-group ms-auto" role="group">
+                        <button type="button" class="btn btn-outline-secondary" id="undo-btn" title="Undo">
+                            <i class="bi bi-arrow-counterclockwise"></i> Undo
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" id="clear-canvas-btn" title="Clear All Drawings">
+                            <i class="bi bi-trash"></i> Clear
+                        </button>
                     </div>
                 </div>
+            </div>
+            
+            <!-- Page Navigation -->
+            <div class="d-flex justify-content-between align-items-center px-3 py-2 bg-white border-bottom">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="prev-page-btn" disabled>
+                    <i class="bi bi-chevron-left me-1"></i>Previous Page
+                </button>
+                <span class="fw-bold" id="page-info">Page 1 of 1</span>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="next-page-btn" disabled>
+                    Next Page<i class="bi bi-chevron-right ms-1"></i>
+                </button>
+            </div>
+            
+            <!-- Canvas Container -->
+            <div class="pdf-canvas-container text-center p-3" id="pdf-canvas-container">
+                <div id="editor-placeholder" class="py-5">
+                    <i class="bi bi-file-earmark-pdf" style="font-size: 4rem; color: #6c757d;"></i>
+                    <h5 class="text-muted mt-3">No Question Paper Loaded</h5>
+                    <p class="text-muted">Click <strong>"Edit Question Paper Online"</strong> in Assignment Details to load the question paper into the editor.</p>
+                </div>
+                <canvas id="pdf-fabric-canvas" style="display: none;"></canvas>
             </div>
         </div>
     </div>
@@ -422,18 +458,15 @@
 </div>
 
 <style>
+/* ── Upload Zones ── */
 .upload-zone {
     border: 3px dashed #dee2e6;
     border-radius: 12px;
-    padding: 40px 20px;
+    padding: 30px 20px;
     text-align: center;
     cursor: pointer;
     transition: all 0.3s ease;
     background: #fafafa;
-}
-
-.upload-zone-sm {
-    padding: 20px 15px;
 }
 
 .upload-zone:hover, .upload-zone.dragover {
@@ -452,15 +485,11 @@
     margin: 0;
 }
 
+/* ── Preview Grids ── */
 .preview-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-    gap: 10px;
-}
-
-.preview-grid-sm {
-    grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 8px;
 }
 
 .preview-item {
@@ -479,264 +508,88 @@
 
 .preview-item .page-num {
     position: absolute;
-    top: 5px;
-    left: 5px;
+    top: 4px;
+    left: 4px;
     background: rgba(0,0,0,0.7);
     color: white;
-    padding: 2px 8px;
+    padding: 2px 6px;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
 }
 
 .preview-item .remove-btn {
     position: absolute;
-    top: 5px;
-    right: 5px;
+    top: 4px;
+    right: 4px;
     background: #dc3545;
     color: white;
     border: none;
     border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    font-size: 0.75rem;
+    width: 22px;
+    height: 22px;
+    font-size: 0.7rem;
     cursor: pointer;
 }
 
+/* ── Score Display ── */
 .score-display {
     padding: 20px;
     background: linear-gradient(135deg, #f0fff4, #e8f5e9);
     border-radius: 12px;
 }
 
-.feedback-buttons .btn {
-    text-align: left;
-    padding: 10px 15px;
+/* ── PDF Editor ── */
+.pdf-canvas-container {
+    background: #e9ecef;
+    min-height: 500px;
+    position: relative;
 }
 
-.feedback-buttons .btn i {
-    width: 20px;
+.pdf-editor-toolbar .tool-btn.active {
+    background-color: #212529;
+    color: #fff;
+    border-color: #212529;
 }
 
-#ai-feedback-content {
-    max-height: 300px;
-    overflow-y: auto;
-    font-size: 0.9rem;
+.pdf-editor-toolbar .tool-btn {
+    min-width: 42px;
 }
 
-#ai-feedback-content .feedback-section {
-    margin-bottom: 15px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid #eee;
+#pdf-fabric-canvas {
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    border-radius: 4px;
 }
 
-#ai-feedback-content .feedback-section:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-    padding-bottom: 0;
+/* ── Action Buttons ── */
+.btn-lg.px-4 {
+    min-width: 200px;
 }
 
-.btn-close-sm {
-    font-size: 0.6rem;
-    padding: 0.3rem;
-}
-
-/* Help section styles */
-.help-btn {
-    text-align: left;
-    padding: 12px 15px;
-}
-
-.help-btn i {
-    font-size: 1.1rem;
-}
-
-#help-content {
-    max-height: 350px;
-    overflow-y: auto;
-    font-size: 0.9rem;
-}
-
-.help-response .help-text {
-    line-height: 1.7;
-    white-space: pre-wrap;
-}
-
-.help-response h6 {
-    margin-bottom: 0.75rem;
-}
-
-.help-response ul {
-    margin-bottom: 0;
-}
-
-.help-response ul li {
-    margin-bottom: 0.5rem;
-}
-
-/* Feedback table styles */
-.feedback-table {
-    font-size: 0.875rem;
-}
-.feedback-table th {
-    background-color: #f8f9fa;
-    font-weight: 600;
-}
-.feedback-table .status-icon {
-    font-size: 1.2rem;
-}
-.feedback-table .btn-view-detail {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-}
-.question-detail-content {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 1rem;
-    margin-top: 0.5rem;
+@media (max-width: 768px) {
+    .btn-lg.px-4 {
+        min-width: auto;
+        width: 100%;
+    }
 }
 </style>
-
-<!-- Feedback Detail Modal -->
-<div class="modal fade" id="feedbackModal" tabindex="-1" aria-labelledby="feedbackModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header bg-info text-white">
-                <h5 class="modal-title" id="feedbackModalLabel">
-                    <i class="bi bi-robot me-2"></i>AI Feedback Details
-                </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body" id="feedbackModalBody">
-                <!-- Will be populated by JavaScript -->
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-success" onclick="downloadFeedbackPDF()">
-                    <i class="bi bi-download me-1"></i>Download PDF
-                </button>
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
+<!-- PDF.js Library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- Fabric.js Library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+
 <script>
-    // === AI USAGE TRACKING ===
-    const assignmentId = "{{ assignment.assignment_id }}";
-    let aiUsage = {
-        question_help: { enabled: true, used: 0, limit: 5, remaining: 5 },
-        overall_review: { enabled: true, used: 0, limit: 1, remaining: 1 }
-    };
-    
-    // Fetch AI usage on page load
-    async function loadAiUsage() {
-        try {
-            const response = await fetch(`/api/student/ai-usage/${assignmentId}`);
-            const data = await response.json();
-            
-            if (data.success) {
-                aiUsage = data;
-                updateAiUsageUI();
-            }
-        } catch (e) {
-            console.log('Could not load AI usage:', e);
-        }
-    }
-    
-    function updateAiUsageUI() {
-        const questionHelp = aiUsage.question_help;
-        const overallReview = aiUsage.overall_review;
-        
-        // Update question help section (element may be removed)
-        const questionHelpCard = document.getElementById('question-help-card');
-        const questionHelpBadge = document.getElementById('question-help-badge');
-        const questionHelpWarning = document.getElementById('question-help-limit-warning');
-        const questionHelpLimitText = document.getElementById('question-help-limit-text');
-        const questionHelpStatus = document.getElementById('question-help-status');
-        
-        if (questionHelpCard) {
-        if (!questionHelp.enabled) {
-            questionHelpCard.style.opacity = '0.6';
-            if (questionHelpBadge) { questionHelpBadge.textContent = 'Disabled'; questionHelpBadge.className = 'badge bg-secondary'; questionHelpBadge.style.display = 'inline'; }
-            if (questionHelpWarning) questionHelpWarning.style.display = 'block';
-            if (questionHelpLimitText) questionHelpLimitText.textContent = 'Question help is not available for this assignment.';
-            document.querySelectorAll('.help-btn').forEach(btn => btn.disabled = true);
-            if (questionHelpStatus) questionHelpStatus.innerHTML = '<i class="bi bi-x-circle text-danger me-1"></i>Question Help: Disabled';
-        } else if (questionHelp.remaining <= 0) {
-            if (questionHelpBadge) { questionHelpBadge.textContent = 'Limit Reached'; questionHelpBadge.className = 'badge bg-danger'; questionHelpBadge.style.display = 'inline'; }
-            if (questionHelpWarning) questionHelpWarning.style.display = 'block';
-            if (questionHelpLimitText) questionHelpLimitText.textContent = `You have used all ${questionHelp.limit} question help requests for this assignment.`;
-            document.querySelectorAll('.help-btn').forEach(btn => btn.disabled = true);
-            if (questionHelpStatus) questionHelpStatus.innerHTML = `<i class="bi bi-x-circle text-danger me-1"></i>Question Help: 0/${questionHelp.limit} remaining`;
-        } else {
-            if (questionHelpBadge) { questionHelpBadge.textContent = `${questionHelp.remaining}/${questionHelp.limit} remaining`; questionHelpBadge.className = questionHelp.remaining <= 1 ? 'badge bg-warning text-dark' : 'badge bg-dark'; questionHelpBadge.style.display = 'inline'; }
-            if (questionHelp.remaining <= 2 && questionHelpWarning) { questionHelpWarning.style.display = 'block'; if (questionHelpLimitText) questionHelpLimitText.textContent = `You have ${questionHelp.remaining} question help request(s) remaining.`; }
-            if (questionHelpStatus) questionHelpStatus.innerHTML = `<i class="bi bi-check-circle text-success me-1"></i>Question Help: ${questionHelp.remaining}/${questionHelp.limit} remaining`;
-        }
-        }
-        
-        // Update overall review section (element may be removed)
-        const overallReviewCard = document.getElementById('overall-review-card');
-        const overallReviewBadge = document.getElementById('overall-review-badge');
-        const overallReviewWarning = document.getElementById('overall-review-limit-warning');
-        const overallReviewLimitText = document.getElementById('overall-review-limit-text');
-        const overallReviewStatus = document.getElementById('overall-review-status');
-        
-        if (overallReviewCard) {
-            if (!overallReview.enabled) {
-                // Overall review is disabled
-                overallReviewCard.style.opacity = '0.6';
-                overallReviewBadge.textContent = 'Disabled';
-                overallReviewBadge.className = 'badge bg-secondary';
-                overallReviewBadge.style.display = 'inline';
-                overallReviewWarning.style.display = 'block';
-                overallReviewLimitText.textContent = 'Overall review is not available for this assignment.';
-                document.querySelectorAll('.feedback-btn').forEach(btn => btn.disabled = true);
-                if (overallReviewStatus) overallReviewStatus.innerHTML = '<i class="bi bi-x-circle text-danger me-1"></i>Overall Review: Disabled';
-            } else if (overallReview.remaining <= 0) {
-                // Limit reached
-                overallReviewBadge.textContent = 'Limit Reached';
-                overallReviewBadge.className = 'badge bg-danger text-white';
-                overallReviewBadge.style.display = 'inline';
-                overallReviewWarning.style.display = 'block';
-                overallReviewLimitText.textContent = `You have used all ${overallReview.limit} overall review(s) for this assignment.`;
-                document.querySelectorAll('.feedback-btn').forEach(btn => btn.disabled = true);
-                if (overallReviewStatus) overallReviewStatus.innerHTML = `<i class="bi bi-x-circle text-danger me-1"></i>Overall Review: 0/${overallReview.limit} remaining`;
-            } else {
-                // Has remaining uses
-                overallReviewBadge.textContent = `${overallReview.remaining}/${overallReview.limit} remaining`;
-                overallReviewBadge.className = overallReview.remaining <= 1 ? 'badge bg-warning text-dark' : 'badge bg-light text-dark';
-                overallReviewBadge.style.display = 'inline';
-                if (overallReview.remaining <= 1 && overallReview.limit > 1) {
-                    overallReviewWarning.style.display = 'block';
-                    overallReviewLimitText.textContent = `You have ${overallReview.remaining} overall review(s) remaining.`;
-                }
-                if (overallReviewStatus) overallReviewStatus.innerHTML = `<i class="bi bi-check-circle text-success me-1"></i>Overall Review: ${overallReview.remaining}/${overallReview.limit} remaining`;
-            }
-        }
-        
-        // Show the usage alert banner if there are any limits
-        const usageAlert = document.getElementById('ai-usage-alert');
-        if (usageAlert && (questionHelp.limit < 99 || overallReview.limit < 99)) {
-            usageAlert.style.display = 'block';
-        }
-    }
-    
-    // Load usage on page load
-    document.addEventListener('DOMContentLoaded', loadAiUsage);
-    
-    // === FINAL SUBMISSION UPLOADS ===
+    // ═══════════════════════════════════════════════
+    // HARD COPY SUBMISSION HANDLERS
+    // ═══════════════════════════════════════════════
     let uploadedPhotos = [];
     let uploadedPdf = null;
     let uploadedExcel = null;
     const isSpreadsheetAssignment = {{ 'true' if assignment.marking_type == 'spreadsheet' else 'false' }};
     
-    // === REVIEW UPLOADS ===
-    let reviewPhotos = [];
-    let reviewPdf = null;
-    
-    // Photo input handling for final submission
+    // Photo input handling
     const photoInput = document.getElementById('photo-input');
     const photoZone = document.getElementById('photo-zone');
     const photoPreview = document.getElementById('photo-preview');
@@ -789,7 +642,7 @@
         updateSubmitButton();
     }
     
-    // PDF input handling for final submission
+    // PDF input handling
     const pdfInput = document.getElementById('pdf-input');
     const pdfZone = document.getElementById('pdf-zone');
     const pdfPreview = document.getElementById('pdf-preview');
@@ -818,18 +671,7 @@
         updateSubmitButton();
     }
     
-    function updateSubmitButton() {
-        const submitBtn = document.getElementById('submit-btn');
-        if (submitBtn) {
-            if (isSpreadsheetAssignment) {
-                submitBtn.disabled = !uploadedExcel;
-            } else {
-                submitBtn.disabled = uploadedPhotos.length === 0 && !uploadedPdf;
-            }
-        }
-    }
-    
-    // Excel input handling (spreadsheet assignments only)
+    // Excel input handling
     const excelInput = document.getElementById('excel-input');
     const excelZone = document.getElementById('excel-zone');
     const excelPreview = document.getElementById('excel-preview');
@@ -846,6 +688,7 @@
             }
         });
     }
+    
     function clearExcel() {
         uploadedExcel = null;
         if (excelInput) excelInput.value = '';
@@ -854,96 +697,18 @@
         updateSubmitButton();
     }
     
-    // === REVIEW SECTION HANDLERS (only when Review My Work section exists) ===
-    const reviewPhotoInput = document.getElementById('review-photo-input');
-    const reviewPhotoZone = document.getElementById('review-photo-zone');
-    const reviewPhotoPreview = document.getElementById('review-photo-preview');
-    const reviewPreviewGrid = document.getElementById('review-preview-grid');
-    
-    if (reviewPhotoInput && reviewPhotoZone) {
-        reviewPhotoInput.addEventListener('change', handleReviewPhotoSelect);
-        setupDragDrop(reviewPhotoZone, reviewPhotoInput, handleReviewPhotoSelect);
-    }
-    
-    function handleReviewPhotoSelect(e) {
-        const files = Array.from(e.target.files);
-        files.forEach((file) => {
-            if (file.type.startsWith('image/')) {
-                reviewPhotos.push(file);
+    function updateSubmitButton() {
+        const submitBtn = document.getElementById('submit-btn');
+        if (submitBtn) {
+            if (isSpreadsheetAssignment) {
+                submitBtn.disabled = !uploadedExcel;
+            } else {
+                submitBtn.disabled = uploadedPhotos.length === 0 && !uploadedPdf;
             }
-        });
-        updateReviewPhotoPreview();
-        updateFeedbackButtons();
-    }
-    
-    function updateReviewPhotoPreview() {
-        if (reviewPhotos.length === 0) {
-            reviewPhotoPreview.style.display = 'none';
-            reviewPhotoZone.classList.remove('has-files');
-            return;
-        }
-        reviewPhotoPreview.style.display = 'block';
-        reviewPhotoZone.classList.add('has-files');
-        reviewPreviewGrid.innerHTML = '';
-        reviewPhotos.forEach((file, idx) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const div = document.createElement('div');
-                div.className = 'preview-item';
-                div.innerHTML = `
-                    <img src="${e.target.result}" alt="Page ${idx + 1}">
-                    <span class="page-num">${idx + 1}</span>
-                    <button type="button" class="remove-btn" onclick="removeReviewPhoto(${idx})">×</button>
-                `;
-                reviewPreviewGrid.appendChild(div);
-            };
-            reader.readAsDataURL(file);
-        });
-    }
-    
-    function removeReviewPhoto(index) {
-        reviewPhotos.splice(index, 1);
-        updateReviewPhotoPreview();
-        updateFeedbackButtons();
-    }
-    
-    // Review PDF handling
-    const reviewPdfInput = document.getElementById('review-pdf-input');
-    const reviewPdfZone = document.getElementById('review-pdf-zone');
-    const reviewPdfPreview = document.getElementById('review-pdf-preview');
-    
-    if (reviewPdfInput) {
-        reviewPdfInput.addEventListener('change', handleReviewPdfSelect);
-        setupDragDrop(reviewPdfZone, reviewPdfInput, handleReviewPdfSelect, 'application/pdf');
-    }
-    
-    function handleReviewPdfSelect(e) {
-        const file = e.target.files[0];
-        if (file && file.type === 'application/pdf') {
-            reviewPdf = file;
-            reviewPdfZone.classList.add('has-files');
-            reviewPdfPreview.style.display = 'block';
-            document.getElementById('review-pdf-filename').textContent = file.name;
-            updateFeedbackButtons();
         }
     }
     
-    function clearReviewPdf() {
-        reviewPdf = null;
-        reviewPdfInput.value = '';
-        reviewPdfZone.classList.remove('has-files');
-        reviewPdfPreview.style.display = 'none';
-        updateFeedbackButtons();
-    }
-    
-    function updateFeedbackButtons() {
-        const hasFiles = reviewPhotos.length > 0 || reviewPdf;
-        document.querySelectorAll('.feedback-btn').forEach(btn => {
-            btn.disabled = !hasFiles;
-        });
-    }
-    
-    // Helper function for drag and drop
+    // Drag and drop helper
     function setupDragDrop(zone, input, handler, fileType = null) {
         if (!zone) return;
         zone.addEventListener('dragover', (e) => {
@@ -964,647 +729,7 @@
         });
     }
     
-    // === AI FEEDBACK FUNCTION ===
-    // Track if user has acknowledged the AI warning
-    let aiWarningAcknowledged = false;
-    
-    async function getAIFeedback(feedbackType) {
-        const feedbackResult = document.getElementById('ai-feedback-result');
-        const feedbackContent = document.getElementById('ai-feedback-content');
-        if (!feedbackResult || !feedbackContent) return;
-        
-        if (reviewPhotos.length === 0 && !reviewPdf) {
-            alert('Please upload your work first to get AI feedback.');
-            return;
-        }
-        
-        // Show AI warning if not already acknowledged
-        if (!aiWarningAcknowledged) {
-            const confirmed = confirm(
-                '⚠️ AI Feedback Warning\n\n' +
-                'AI responses are generative in nature and may contain errors. ' +
-                'Always verify the feedback against your notes, textbook, or ask your teacher.\n\n' +
-                'Use this as a learning tool, not the final answer.\n\n' +
-                'Click OK to continue.'
-            );
-            if (!confirmed) {
-                return;
-            }
-            aiWarningAcknowledged = true;
-        }
-        
-        // Show loading state
-        feedbackContent.innerHTML = `
-            <div class="text-center py-4">
-                <div class="spinner-border text-primary mb-2" role="status"></div>
-                <p class="mb-0 text-muted">AI is reviewing your work...</p>
-            </div>
-        `;
-        feedbackResult.style.display = 'block';
-        
-        // Disable buttons while loading
-        document.querySelectorAll('.feedback-btn').forEach(btn => btn.disabled = true);
-        
-        const formData = new FormData();
-        formData.append('assignment_id', '{{ assignment.assignment_id }}');
-        formData.append('feedback_type', feedbackType);
-        
-        if (reviewPhotos.length > 0) {
-            reviewPhotos.forEach((photo, idx) => {
-                formData.append('files', photo, `page_${idx + 1}.jpg`);
-            });
-            formData.append('file_type', 'images');
-        } else if (reviewPdf) {
-            formData.append('files', reviewPdf);
-            formData.append('file_type', 'pdf');
-        }
-        
-        try {
-            const response = await fetch('/student/preview-feedback', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                // Store feedback data globally for modal/download
-                currentFeedbackData = result.feedback;
-                currentFeedbackType = feedbackType;
-                
-                feedbackContent.innerHTML = formatFeedback(result.feedback, feedbackType);
-                
-                // Update usage if returned in response
-                if (result.usage) {
-                    aiUsage.overall_review.used = result.usage.used;
-                    aiUsage.overall_review.remaining = result.usage.remaining;
-                    updateAiUsageUI();
-                }
-            } else {
-                // Check if limit was reached
-                if (result.limit_reached) {
-                    aiUsage.overall_review.remaining = 0;
-                    updateAiUsageUI();
-                }
-                feedbackContent.innerHTML = `
-                    <div class="alert alert-danger mb-0">
-                        <i class="bi bi-exclamation-circle me-1"></i>
-                        ${result.error || 'Failed to get feedback. Please try again.'}
-                    </div>
-                `;
-            }
-        } catch (error) {
-            feedbackContent.innerHTML = `
-                <div class="alert alert-danger mb-0">
-                    <i class="bi bi-exclamation-circle me-1"></i>
-                    Error connecting to server. Please try again.
-                </div>
-            `;
-            console.error(error);
-        }
-        
-        // Re-enable buttons (but check limits)
-        if (aiUsage.overall_review.enabled && aiUsage.overall_review.remaining > 0) {
-            updateFeedbackButtons();
-        }
-    }
-    
-    function formatFeedback(feedback, feedbackType) {
-        let html = '';
-        
-        if (feedback.warning) {
-            html += `<div class="alert alert-warning py-2 mb-3"><i class="bi bi-exclamation-triangle me-1"></i>${feedback.warning}</div>`;
-        }
-        
-        if (feedbackType === 'overall') {
-            html += `<div class="feedback-section">
-                <h6 class="text-primary"><i class="bi bi-clipboard-check me-1"></i>Overall Feedback</h6>
-                <p class="mb-2">${feedback.overall || feedback.feedback || 'No feedback available.'}</p>
-            </div>`;
-            if (feedback.areas_to_improve && feedback.areas_to_improve.length > 0) {
-                html += `<div class="feedback-section">
-                    <h6 class="text-warning"><i class="bi bi-arrow-up-circle me-1"></i>Areas to Improve (${feedback.areas_to_improve.length})</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-bordered feedback-table mb-2">
-                            <thead>
-                                <tr>
-                                    <th style="width: 40px;">#</th>
-                                    <th>What to Improve</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
-                feedback.areas_to_improve.forEach((area, idx) => {
-                    html += `<tr>
-                        <td class="text-center"><strong>${idx + 1}</strong></td>
-                        <td>${area}</td>
-                    </tr>`;
-                });
-                html += `</tbody>
-                        </table>
-                    </div>
-                </div>`;
-            }
-        } else if (feedbackType === 'hints') {
-            html += `<div class="feedback-section">
-                <h6 class="text-success"><i class="bi bi-lightbulb me-1"></i>Starting Hints</h6>`;
-            if (feedback.hints && feedback.hints.length > 0) {
-                html += `<div class="table-responsive">
-                    <table class="table table-sm table-bordered feedback-table mb-2">
-                        <thead>
-                            <tr>
-                                <th style="width: 40px;"><i class="bi bi-lightbulb"></i></th>
-                                <th>Hint</th>
-                            </tr>
-                        </thead>
-                        <tbody>`;
-                feedback.hints.forEach((hint, idx) => {
-                    html += `<tr>
-                        <td class="text-center text-warning"><i class="bi bi-lightbulb-fill"></i></td>
-                        <td>${hint}</td>
-                    </tr>`;
-                });
-                html += `</tbody>
-                    </table>
-                </div>`;
-            } else {
-                html += `<p class="mb-0">${feedback.feedback || 'No hints available for completed questions.'}</p>`;
-            }
-            html += `</div>`;
-        } else if (feedbackType === 'check') {
-            html += `<div class="feedback-section">
-                <h6 class="text-info"><i class="bi bi-check2-square me-1"></i>Answer Check</h6>
-                <p class="mb-0">${feedback.check_result || feedback.feedback || 'Unable to check answers.'}</p>
-            </div>`;
-            if (feedback.questions_status) {
-                html += `<div class="feedback-section">
-                    <h6><i class="bi bi-list-check me-1"></i>Question Status</h6>
-                    <div class="small">${feedback.questions_status}</div>
-                </div>`;
-            }
-        }
-        
-        // Add action buttons at the bottom
-        html += `
-            <div class="mt-3 pt-2 border-top d-flex gap-2">
-                <button type="button" class="btn btn-sm btn-outline-primary" onclick="openFeedbackModal()">
-                    <i class="bi bi-arrows-fullscreen me-1"></i>View Full Details
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-success" onclick="downloadFeedbackPDF()">
-                    <i class="bi bi-file-pdf me-1"></i>Download PDF
-                </button>
-            </div>
-        `;
-        
-        return html || `<p class="mb-0">${feedback.feedback || feedback.overall || 'Feedback not available.'}</p>`;
-    }
-    
-    function closeFeedback() {
-        const el = document.getElementById('ai-feedback-result');
-        if (el) el.style.display = 'none';
-    }
-    
-    // Store current feedback data globally for modal/download
-    let currentFeedbackData = null;
-    let currentFeedbackType = null;
-    
-    function openFeedbackModal() {
-        if (!currentFeedbackData) {
-            alert('No feedback data available.');
-            return;
-        }
-        
-        const modalBody = document.getElementById('feedbackModalBody');
-        modalBody.innerHTML = formatFeedbackForModal(currentFeedbackData, currentFeedbackType);
-        
-        const modal = new bootstrap.Modal(document.getElementById('feedbackModal'));
-        modal.show();
-    }
-    
-    function formatFeedbackForModal(feedback, feedbackType) {
-        let html = '';
-        
-        // Assignment info header
-        html += `
-            <div class="alert alert-light mb-4">
-                <div class="row">
-                    <div class="col-md-6">
-                        <strong><i class="bi bi-file-text me-1"></i>Assignment:</strong> {{ assignment.title }}
-                    </div>
-                    <div class="col-md-3">
-                        <strong><i class="bi bi-book me-1"></i>Subject:</strong> {{ assignment.subject }}
-                    </div>
-                    <div class="col-md-3">
-                        <strong><i class="bi bi-star me-1"></i>Total Marks:</strong> {{ assignment.total_marks }}
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        // Warning if present
-        if (feedback.warning) {
-            html += `<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-1"></i>${feedback.warning}</div>`;
-        }
-        
-        // Overall feedback
-        if (feedback.overall || feedback.feedback) {
-            html += `
-                <div class="card mb-4">
-                    <div class="card-header bg-primary text-white">
-                        <h6 class="mb-0"><i class="bi bi-clipboard-check me-1"></i>Overall Feedback</h6>
-                    </div>
-                    <div class="card-body">
-                        <p class="mb-0">${feedback.overall || feedback.feedback}</p>
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Areas to improve table
-        if (feedback.areas_to_improve && feedback.areas_to_improve.length > 0) {
-            html += `
-                <div class="card mb-4">
-                    <div class="card-header bg-warning text-dark">
-                        <h6 class="mb-0"><i class="bi bi-arrow-up-circle me-1"></i>Areas to Improve</h6>
-                    </div>
-                    <div class="card-body p-0">
-                        <table class="table table-hover feedback-table mb-0">
-                            <thead>
-                                <tr>
-                                    <th style="width: 50px;">#</th>
-                                    <th>Area for Improvement</th>
-                                    <th style="width: 100px;">Priority</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-            `;
-            feedback.areas_to_improve.forEach((area, idx) => {
-                const priority = idx === 0 ? '<span class="badge bg-danger">High</span>' : 
-                                 idx === 1 ? '<span class="badge bg-warning text-dark">Medium</span>' : 
-                                 '<span class="badge bg-secondary">Normal</span>';
-                html += `
-                    <tr>
-                        <td><strong>${idx + 1}</strong></td>
-                        <td>${area}</td>
-                        <td>${priority}</td>
-                    </tr>
-                `;
-            });
-            html += `
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Hints section
-        if (feedback.hints && feedback.hints.length > 0) {
-            html += `
-                <div class="card mb-4">
-                    <div class="card-header bg-success text-white">
-                        <h6 class="mb-0"><i class="bi bi-lightbulb me-1"></i>Helpful Hints</h6>
-                    </div>
-                    <div class="card-body p-0">
-                        <table class="table table-hover feedback-table mb-0">
-                            <thead>
-                                <tr>
-                                    <th style="width: 50px;">#</th>
-                                    <th>Hint</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-            `;
-            feedback.hints.forEach((hint, idx) => {
-                html += `
-                    <tr>
-                        <td><i class="bi bi-lightbulb text-warning"></i></td>
-                        <td>${hint}</td>
-                    </tr>
-                `;
-            });
-            html += `
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Questions status if available
-        if (feedback.questions_status) {
-            html += `
-                <div class="card mb-4">
-                    <div class="card-header bg-info text-white">
-                        <h6 class="mb-0"><i class="bi bi-list-check me-1"></i>Question Status</h6>
-                    </div>
-                    <div class="card-body">
-                        <div>${feedback.questions_status}</div>
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Check result if available
-        if (feedback.check_result) {
-            html += `
-                <div class="card mb-4">
-                    <div class="card-header bg-secondary text-white">
-                        <h6 class="mb-0"><i class="bi bi-check2-square me-1"></i>Answer Check Result</h6>
-                    </div>
-                    <div class="card-body">
-                        <p class="mb-0">${feedback.check_result}</p>
-                    </div>
-                </div>
-            `;
-        }
-        
-        return html || '<p class="text-muted">No detailed feedback available.</p>';
-    }
-    
-    function downloadFeedbackPDF() {
-        if (!currentFeedbackData) {
-            alert('No feedback data available to download.');
-            return;
-        }
-        
-        // Create a printable version
-        const printContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>AI Feedback - {{ assignment.title }}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
-                    h1 { color: #333; border-bottom: 2px solid #17a2b8; padding-bottom: 10px; }
-                    h2 { color: #17a2b8; margin-top: 20px; }
-                    .info-box { background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-                    .warning { background: #fff3cd; padding: 10px; border-radius: 5px; border-left: 4px solid #ffc107; margin-bottom: 15px; }
-                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                    th, td { border: 1px solid #dee2e6; padding: 10px; text-align: left; }
-                    th { background: #e9ecef; }
-                    .priority-high { color: #dc3545; font-weight: bold; }
-                    .priority-medium { color: #ffc107; font-weight: bold; }
-                    .footer { margin-top: 30px; font-size: 0.85rem; color: #6c757d; border-top: 1px solid #dee2e6; padding-top: 15px; }
-                </style>
-            </head>
-            <body>
-                <h1>📝 AI Feedback Report</h1>
-                <div class="info-box">
-                    <strong>Assignment:</strong> {{ assignment.title }}<br>
-                    <strong>Subject:</strong> {{ assignment.subject }}<br>
-                    <strong>Total Marks:</strong> {{ assignment.total_marks }}<br>
-                    <strong>Date:</strong> ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
-                </div>
-                
-                ${currentFeedbackData.warning ? `<div class="warning">⚠️ ${currentFeedbackData.warning}</div>` : ''}
-                
-                ${currentFeedbackData.overall || currentFeedbackData.feedback ? `
-                    <h2>📋 Overall Feedback</h2>
-                    <p>${currentFeedbackData.overall || currentFeedbackData.feedback}</p>
-                ` : ''}
-                
-                ${currentFeedbackData.areas_to_improve && currentFeedbackData.areas_to_improve.length > 0 ? `
-                    <h2>🎯 Areas to Improve</h2>
-                    <table>
-                        <thead>
-                            <tr><th>#</th><th>Area</th><th>Priority</th></tr>
-                        </thead>
-                        <tbody>
-                            ${currentFeedbackData.areas_to_improve.map((area, idx) => `
-                                <tr>
-                                    <td>${idx + 1}</td>
-                                    <td>${area}</td>
-                                    <td class="${idx === 0 ? 'priority-high' : idx === 1 ? 'priority-medium' : ''}">${idx === 0 ? 'High' : idx === 1 ? 'Medium' : 'Normal'}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                ` : ''}
-                
-                ${currentFeedbackData.hints && currentFeedbackData.hints.length > 0 ? `
-                    <h2>💡 Helpful Hints</h2>
-                    <table>
-                        <thead>
-                            <tr><th>#</th><th>Hint</th></tr>
-                        </thead>
-                        <tbody>
-                            ${currentFeedbackData.hints.map((hint, idx) => `
-                                <tr><td>${idx + 1}</td><td>${hint}</td></tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                ` : ''}
-                
-                ${currentFeedbackData.check_result ? `
-                    <h2>✅ Answer Check</h2>
-                    <p>${currentFeedbackData.check_result}</p>
-                ` : ''}
-                
-                <div class="footer">
-                    Generated by AI Teaching Assistant | ${new Date().toLocaleString()}
-                </div>
-            </body>
-            </html>
-        `;
-        
-        // Open print dialog
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(printContent);
-        printWindow.document.close();
-        printWindow.onload = function() {
-            printWindow.print();
-        };
-    }
-    
-    // === HELP SECTION FUNCTIONS ===
-    // Image handling functions
-    let questionImageData = null;
-    let answerImageData = null;
-    
-    function previewImage(type) {
-        const input = document.getElementById(`${type}-image-input`);
-        const preview = document.getElementById(`${type}-image-preview`);
-        const img = document.getElementById(`${type}-preview-img`);
-        
-        if (input.files && input.files[0]) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                img.src = e.target.result;
-                preview.style.display = 'block';
-                
-                if (type === 'question') {
-                    questionImageData = e.target.result;
-                } else {
-                    answerImageData = e.target.result;
-                }
-            };
-            reader.readAsDataURL(input.files[0]);
-        }
-    }
-    
-    function removeImage(type) {
-        const input = document.getElementById(`${type}-image-input`);
-        const preview = document.getElementById(`${type}-image-preview`);
-        
-        input.value = '';
-        preview.style.display = 'none';
-        
-        if (type === 'question') {
-            questionImageData = null;
-        } else {
-            answerImageData = null;
-        }
-    }
-    
-    async function askForHelp(helpType) {
-        const question = document.getElementById('help-question').value.trim();
-        const answer = document.getElementById('help-answer').value.trim();
-        
-        // Check if either text or image is provided for question
-        const hasQuestionContent = question || questionImageData;
-        
-        if (!hasQuestionContent) {
-            alert('Please enter the question text or upload a photo of the question.');
-            return;
-        }
-        
-        // For 'wrong' and 'improve' types, answer is recommended
-        const hasAnswerContent = answer || answerImageData;
-        if ((helpType === 'wrong' || helpType === 'improve') && !hasAnswerContent) {
-            if (!confirm('You haven\'t provided an answer. The AI feedback will be more helpful if you provide your answer attempt. Continue anyway?')) {
-                return;
-            }
-        }
-        
-        const helpResult = document.getElementById('help-result');
-        const helpContent = document.getElementById('help-content');
-        
-        // Show loading state
-        helpContent.innerHTML = `
-            <div class="text-center py-4">
-                <div class="spinner-border text-warning mb-2" role="status"></div>
-                <p class="mb-0 text-muted">AI is analyzing${questionImageData || answerImageData ? ' your images' : ''}...</p>
-            </div>
-        `;
-        helpResult.style.display = 'block';
-        
-        // Disable buttons while loading
-        document.querySelectorAll('.help-btn').forEach(btn => btn.disabled = true);
-        
-        try {
-            const response = await fetch('/api/student/question-help', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    assignment_id: '{{ assignment.assignment_id }}',
-                    question: question,
-                    answer: answer,
-                    question_image: questionImageData,
-                    answer_image: answerImageData,
-                    help_type: helpType
-                })
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                helpContent.innerHTML = formatHelpResponse(result.help, helpType);
-                
-                // Update usage if returned in response
-                if (result.usage) {
-                    aiUsage.question_help.used = result.usage.used;
-                    aiUsage.question_help.remaining = result.usage.remaining;
-                    updateAiUsageUI();
-                }
-            } else {
-                // Check if limit was reached
-                if (result.limit_reached) {
-                    aiUsage.question_help.remaining = 0;
-                    updateAiUsageUI();
-                }
-                helpContent.innerHTML = `
-                    <div class="alert alert-danger mb-0">
-                        <i class="bi bi-exclamation-circle me-1"></i>
-                        ${result.error || 'Failed to get help. Please try again.'}
-                    </div>
-                `;
-            }
-        } catch (error) {
-            helpContent.innerHTML = `
-                <div class="alert alert-danger mb-0">
-                    <i class="bi bi-exclamation-circle me-1"></i>
-                    Error connecting to server. Please try again.
-                </div>
-            `;
-            console.error(error);
-        }
-        
-        // Re-enable buttons (but check limits)
-        if (aiUsage.question_help.enabled && aiUsage.question_help.remaining > 0) {
-            document.querySelectorAll('.help-btn').forEach(btn => btn.disabled = false);
-        }
-    }
-    
-    function formatHelpResponse(help, helpType) {
-        let icon, title, colorClass;
-        
-        if (helpType === 'stuck') {
-            icon = 'bi-lightbulb';
-            title = 'Getting Started';
-            colorClass = 'text-danger';
-        } else if (helpType === 'wrong') {
-            icon = 'bi-search';
-            title = 'What Went Wrong';
-            colorClass = 'text-warning';
-        } else if (helpType === 'improve') {
-            icon = 'bi-graph-up-arrow';
-            title = 'How to Improve';
-            colorClass = 'text-success';
-        } else if (helpType === 'explain') {
-            icon = 'bi-lightbulb-fill';
-            title = 'Concept Explanation';
-            colorClass = 'text-info';
-        } else if (helpType === 'breakdown') {
-            icon = 'bi-list-ol';
-            title = 'Question Breakdown';
-            colorClass = 'text-primary';
-        } else if (helpType === 'formula') {
-            icon = 'bi-calculator';
-            title = 'Formula/Method Guide';
-            colorClass = 'text-secondary';
-        } else if (helpType === 'example') {
-            icon = 'bi-journal-code';
-            title = 'Similar Example';
-            colorClass = 'text-dark';
-        } else {
-            icon = 'bi-chat-dots';
-            title = 'AI Help';
-            colorClass = 'text-primary';
-        }
-        
-        return `
-            <div class="help-response">
-                <h6 class="${colorClass}"><i class="${icon} me-1"></i>${title}</h6>
-                <div class="help-text">${help.response || help.feedback || 'No response available.'}</div>
-                ${help.hints ? `
-                    <div class="mt-3">
-                        <h6 class="text-muted small"><i class="bi bi-bookmark me-1"></i>Tips:</h6>
-                        <ul class="mb-0 small">
-                            ${help.hints.map(h => `<li>${h}</li>`).join('')}
-                        </ul>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    }
-    
-    function closeHelp() {
-        document.getElementById('help-result').style.display = 'none';
-    }
-    
-    // === FORM SUBMISSION ===
+    // Form submission
     const form = document.getElementById('submission-form');
     if (form) {
         form.addEventListener('submit', async (e) => {
@@ -1666,166 +791,279 @@
         });
     }
     
-    // === PDF EDITOR (editable question paper) ===
-    (function() {
-        const questionPaperUrl = {% if assignment.get('question_paper_id') %}{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper')|tojson }}{% else %}null{% endif %};
-        const container = document.getElementById('pdf-editor-pages');
-        const placeholder = document.getElementById('pdf-editor-placeholder');
-        const toolbar = document.querySelector('.pdf-editor-toolbar');
-        const colorInput = document.getElementById('pdf-editor-color');
-        const clearBtn = document.getElementById('pdf-editor-clear');
+    // ═══════════════════════════════════════════════
+    // PDF EDITOR (Fabric.js + PDF.js)
+    // ═══════════════════════════════════════════════
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    
+    let pdfDoc = null;
+    let fabricCanvas = null;
+    let currentPage = 1;
+    let totalPages = 0;
+    let pageAnnotations = {};  // pageNum -> serialised fabric objects
+    let currentTool = 'select';
+    let isShapeDrawing = false;
+    let shapeStartX = 0, shapeStartY = 0;
+    let activeShape = null;
+    
+    const questionPaperUrl = "{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') if assignment.question_paper_id else '' }}";
+    
+    // Load question paper into the editor
+    async function loadQuestionPaperInEditor() {
+        if (!questionPaperUrl) {
+            alert('No question paper available for this assignment.');
+            return;
+        }
         
-        if (!container || !questionPaperUrl) return;
+        const placeholder = document.getElementById('editor-placeholder');
+        const canvasEl = document.getElementById('pdf-fabric-canvas');
         
-        let currentTool = 'pencil';
-        let drawing = false;
-        let startX, startY;
-        let canvases = [];
-        let ctxs = [];
+        placeholder.innerHTML = `
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <h5 class="text-muted">Loading Question Paper...</h5>
+        `;
         
-        document.querySelectorAll('.pdf-tool').forEach(btn => {
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('.pdf-tool').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                currentTool = this.getAttribute('data-tool');
+        try {
+            pdfDoc = await pdfjsLib.getDocument(questionPaperUrl).promise;
+            totalPages = pdfDoc.numPages;
+            
+            // Hide placeholder, show canvas
+            placeholder.style.display = 'none';
+            canvasEl.style.display = 'block';
+            
+            // Initialize Fabric.js canvas
+            fabricCanvas = new fabric.Canvas('pdf-fabric-canvas', {
+                isDrawingMode: false,
+                selection: true,
+                backgroundColor: '#fff'
+            });
+            
+            setupCanvasEvents();
+            await renderPage(1);
+            
+            // Scroll to editor
+            document.getElementById('pdf-editor-section').scrollIntoView({ behavior: 'smooth' });
+        } catch (err) {
+            console.error('PDF load error:', err);
+            placeholder.innerHTML = `
+                <i class="bi bi-exclamation-triangle-fill text-danger" style="font-size: 3rem;"></i>
+                <h5 class="text-muted mt-3">Failed to Load Question Paper</h5>
+                <p class="text-muted">Please try downloading the PDF instead.</p>
+            `;
+        }
+    }
+    
+    // Render a specific page
+    async function renderPage(pageNum) {
+        if (!pdfDoc || !fabricCanvas) return;
+        
+        // Save current page annotations before switching
+        if (fabricCanvas.getObjects().length > 0) {
+            pageAnnotations[currentPage] = fabricCanvas.getObjects().map(obj => obj.toJSON());
+        }
+        
+        currentPage = pageNum;
+        
+        const page = await pdfDoc.getPage(pageNum);
+        const scale = 2;  // render at 2x for sharpness
+        const viewport = page.getViewport({ scale });
+        
+        // Render PDF page to a temporary canvas
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = viewport.width;
+        tempCanvas.height = viewport.height;
+        const ctx = tempCanvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        
+        const imgDataUrl = tempCanvas.toDataURL('image/png');
+        
+        // Fit to container width
+        const container = document.getElementById('pdf-canvas-container');
+        const maxWidth = container.clientWidth - 40;
+        const ratio = maxWidth / viewport.width;
+        const displayW = maxWidth;
+        const displayH = viewport.height * ratio;
+        
+        fabricCanvas.setWidth(displayW);
+        fabricCanvas.setHeight(displayH);
+        fabricCanvas.clear();
+        
+        // Set the PDF page as the background image
+        fabric.Image.fromURL(imgDataUrl, function(img) {
+            img.scaleToWidth(displayW);
+            fabricCanvas.setBackgroundImage(img, function() {
+                // Restore annotations for this page if any exist
+                if (pageAnnotations[pageNum] && pageAnnotations[pageNum].length > 0) {
+                    fabric.util.enlivenObjects(pageAnnotations[pageNum], function(objects) {
+                        objects.forEach(obj => fabricCanvas.add(obj));
+                        fabricCanvas.renderAll();
+                    });
+                } else {
+                    fabricCanvas.renderAll();
+                }
             });
         });
         
-        function getColor() { return colorInput ? colorInput.value : '#000000'; }
-        
-        if (clearBtn) {
-            clearBtn.addEventListener('click', function() {
-                ctxs.forEach(ctx => {
-                    if (ctx) ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-                });
-            });
-        }
-        
-        function setupCanvasEvents(canvas, ctx) {
-            if (!canvas || !ctx) return;
-            canvas.addEventListener('mousedown', function(e) {
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                startX = (e.clientX - rect.left) * scaleX;
-                startY = (e.clientY - rect.top) * scaleY;
-                if (currentTool === 'text') {
-                    const t = prompt('Enter text:');
-                    if (t) {
-                        ctx.font = '18px Arial';
-                        ctx.fillStyle = getColor();
-                        ctx.fillText(t, startX, startY);
-                    }
-                    return;
-                }
-                drawing = true;
-                if (currentTool === 'pencil') {
-                    ctx.beginPath();
-                    ctx.moveTo(startX, startY);
-                    ctx.strokeStyle = getColor();
-                    ctx.lineWidth = 2;
-                }
-            });
-            canvas.addEventListener('mousemove', function(e) {
-                if (!drawing) return;
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                const x = (e.clientX - rect.left) * scaleX;
-                const y = (e.clientY - rect.top) * scaleY;
-                if (currentTool === 'pencil') {
-                    ctx.lineTo(x, y);
-                    ctx.stroke();
-                }
-            });
-            canvas.addEventListener('mouseup', function(e) {
-                if (!drawing) return;
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                const x = (e.clientX - rect.left) * scaleX;
-                const y = (e.clientY - rect.top) * scaleY;
+        updatePageNav();
+    }
+    
+    function updatePageNav() {
+        document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+        document.getElementById('prev-page-btn').disabled = (currentPage <= 1);
+        document.getElementById('next-page-btn').disabled = (currentPage >= totalPages);
+    }
+    
+    // Canvas mouse events for shape drawing
+    function setupCanvasEvents() {
+        fabricCanvas.on('mouse:down', function(opt) {
+            const pointer = fabricCanvas.getPointer(opt.e);
+            const color = document.getElementById('draw-color').value;
+            const sw = parseInt(document.getElementById('stroke-width').value);
+            
+            if (['line', 'rect', 'circle'].includes(currentTool)) {
+                isShapeDrawing = true;
+                shapeStartX = pointer.x;
+                shapeStartY = pointer.y;
+                
                 if (currentTool === 'line') {
-                    ctx.beginPath();
-                    ctx.moveTo(startX, startY);
-                    ctx.lineTo(x, y);
-                    ctx.strokeStyle = getColor();
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
+                    activeShape = new fabric.Line([shapeStartX, shapeStartY, shapeStartX, shapeStartY], {
+                        stroke: color, strokeWidth: sw, selectable: false
+                    });
                 } else if (currentTool === 'rect') {
-                    ctx.strokeStyle = getColor();
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(Math.min(startX,x), Math.min(startY,y), Math.abs(x-startX), Math.abs(y-startY));
-                } else if (currentTool === 'ellipse') {
-                    const cx = (startX + x) / 2, cy = (startY + y) / 2;
-                    const rx = Math.abs(x - startX) / 2, ry = Math.abs(y - startY) / 2;
-                    ctx.beginPath();
-                    ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
-                    ctx.strokeStyle = getColor();
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                }
-                drawing = false;
-            });
-            canvas.addEventListener('mouseleave', () => { drawing = false; });
-        }
-        
-        if (typeof pdfjsLib === 'undefined') {
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-            script.onload = initPdfEditor;
-            document.head.appendChild(script);
-            if (typeof pdfjsLib !== 'undefined') pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        } else {
-            initPdfEditor();
-        }
-        
-        function initPdfEditor() {
-            if (typeof pdfjsLib === 'undefined') return;
-            pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsLib.GlobalWorkerOptions.workerSrc || 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            const loadingTask = pdfjsLib.getDocument(questionPaperUrl);
-            loadingTask.promise.then(function(pdf) {
-                if (placeholder) placeholder.style.display = 'none';
-                const numPages = pdf.numPages;
-                for (let i = 1; i <= numPages; i++) {
-                    pdf.getPage(i).then(function(page) {
-                        const viewport = page.getViewport({ scale: 1.5 });
-                        const wrap = document.createElement('div');
-                        wrap.className = 'position-relative mb-3';
-                        wrap.style.width = viewport.width + 'px';
-                        const canvas = document.createElement('canvas');
-                        canvas.height = viewport.height;
-                        canvas.width = viewport.width;
-                        canvas.style.display = 'block';
-                        canvas.style.background = '#fff';
-                        const annotCanvas = document.createElement('canvas');
-                        annotCanvas.width = viewport.width;
-                        annotCanvas.height = viewport.height;
-                        annotCanvas.style.position = 'absolute';
-                        annotCanvas.style.left = '0';
-                        annotCanvas.style.top = '0';
-                        annotCanvas.style.pointerEvents = 'auto';
-                        annotCanvas.style.cursor = 'crosshair';
-                        wrap.appendChild(canvas);
-                        wrap.appendChild(annotCanvas);
-                        container.appendChild(wrap);
-                        const ctx = canvas.getContext('2d');
-                        const annotCtx = annotCanvas.getContext('2d');
-                        canvases.push(annotCanvas);
-                        ctxs.push(annotCtx);
-                        page.render({ canvasContext: ctx, viewport: viewport });
-                        setupCanvasEvents(annotCanvas, annotCtx);
+                    activeShape = new fabric.Rect({
+                        left: shapeStartX, top: shapeStartY, width: 0, height: 0,
+                        fill: 'transparent', stroke: color, strokeWidth: sw, selectable: false
+                    });
+                } else if (currentTool === 'circle') {
+                    activeShape = new fabric.Ellipse({
+                        left: shapeStartX, top: shapeStartY, rx: 0, ry: 0,
+                        fill: 'transparent', stroke: color, strokeWidth: sw, selectable: false
                     });
                 }
-            }).catch(function(err) {
-                if (placeholder) {
-                    placeholder.innerHTML = '<i class="bi bi-exclamation-circle me-2"></i>Could not load question paper. You can download it from Assignment Details.';
-                    placeholder.classList.remove('text-white');
-                    placeholder.classList.add('text-warning');
-                }
-                console.error('PDF load error:', err);
-            });
+                if (activeShape) fabricCanvas.add(activeShape);
+            } else if (currentTool === 'text') {
+                const fontSize = parseInt(document.getElementById('font-size').value);
+                const itext = new fabric.IText('Type here', {
+                    left: pointer.x, top: pointer.y,
+                    fontSize: fontSize, fill: color, fontFamily: 'Arial'
+                });
+                fabricCanvas.add(itext);
+                fabricCanvas.setActiveObject(itext);
+                itext.enterEditing();
+            }
+        });
+        
+        fabricCanvas.on('mouse:move', function(opt) {
+            if (!isShapeDrawing || !activeShape) return;
+            const pointer = fabricCanvas.getPointer(opt.e);
+            
+            if (currentTool === 'line') {
+                activeShape.set({ x2: pointer.x, y2: pointer.y });
+            } else if (currentTool === 'rect') {
+                const w = pointer.x - shapeStartX;
+                const h = pointer.y - shapeStartY;
+                activeShape.set({
+                    left: w < 0 ? pointer.x : shapeStartX,
+                    top: h < 0 ? pointer.y : shapeStartY,
+                    width: Math.abs(w), height: Math.abs(h)
+                });
+            } else if (currentTool === 'circle') {
+                activeShape.set({
+                    left: Math.min(shapeStartX, pointer.x),
+                    top: Math.min(shapeStartY, pointer.y),
+                    rx: Math.abs(pointer.x - shapeStartX) / 2,
+                    ry: Math.abs(pointer.y - shapeStartY) / 2
+                });
+            }
+            fabricCanvas.renderAll();
+        });
+        
+        fabricCanvas.on('mouse:up', function() {
+            isShapeDrawing = false;
+            if (activeShape) {
+                activeShape.setCoords();
+                activeShape = null;
+            }
+        });
+    }
+    
+    // Tool selection buttons
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentTool = this.dataset.tool;
+            
+            if (!fabricCanvas) return;
+            
+            fabricCanvas.isDrawingMode = (currentTool === 'pencil');
+            if (currentTool === 'pencil') {
+                fabricCanvas.freeDrawingBrush.color = document.getElementById('draw-color').value;
+                fabricCanvas.freeDrawingBrush.width = parseInt(document.getElementById('stroke-width').value);
+            }
+            
+            const isSelect = (currentTool === 'select');
+            fabricCanvas.selection = isSelect;
+            fabricCanvas.forEachObject(o => { o.selectable = isSelect; });
+        });
+    });
+    
+    // Update drawing color in real-time
+    document.getElementById('draw-color').addEventListener('input', function() {
+        if (fabricCanvas && fabricCanvas.isDrawingMode) {
+            fabricCanvas.freeDrawingBrush.color = this.value;
         }
-    })();
+    });
+    
+    // Update stroke width in real-time
+    document.getElementById('stroke-width').addEventListener('change', function() {
+        if (fabricCanvas && fabricCanvas.isDrawingMode) {
+            fabricCanvas.freeDrawingBrush.width = parseInt(this.value);
+        }
+    });
+    
+    // Page navigation
+    document.getElementById('prev-page-btn').addEventListener('click', () => {
+        if (currentPage > 1) renderPage(currentPage - 1);
+    });
+    document.getElementById('next-page-btn').addEventListener('click', () => {
+        if (currentPage < totalPages) renderPage(currentPage + 1);
+    });
+    
+    // Undo last drawing
+    document.getElementById('undo-btn').addEventListener('click', function() {
+        if (!fabricCanvas) return;
+        const objs = fabricCanvas.getObjects();
+        if (objs.length > 0) {
+            fabricCanvas.remove(objs[objs.length - 1]);
+            fabricCanvas.renderAll();
+        }
+    });
+    
+    // Clear all drawings on current page
+    document.getElementById('clear-canvas-btn').addEventListener('click', function() {
+        if (!fabricCanvas) return;
+        if (confirm('Clear all your drawings on this page?')) {
+            fabricCanvas.getObjects().slice().forEach(obj => fabricCanvas.remove(obj));
+            fabricCanvas.renderAll();
+            delete pageAnnotations[currentPage];
+        }
+    });
+    
+    // Scroll to editor section
+    function scrollToEditor() {
+        document.getElementById('pdf-editor-section').scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // Handle window resize - re-render current page to fit
+    let resizeTimeout;
+    window.addEventListener('resize', function() {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            if (pdfDoc && fabricCanvas) {
+                renderPage(currentPage);
+            }
+        }, 300);
+    });
 </script>
 {% endblock %}
