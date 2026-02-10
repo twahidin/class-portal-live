@@ -51,7 +51,8 @@
     </div>
     <p class="text-muted small mt-2">Click any node to edit; right-click to expand or collapse branches. Drag to pan, use buttons to zoom.</p>
 
-    <!-- Textbook RAG: store entire textbook for this module tree -->
+    <!-- Textbook RAG: disabled for now — will reconnect with external vector DB later -->
+    <!--
     <div class="card mt-4 shadow-sm">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-journal-book me-2"></i>Textbook (RAG)</span>
@@ -84,7 +85,7 @@
                         <i class="bi bi-upload me-1"></i>Add PDF or TXT (chapter or full book)
                     </button>
                 </form>
-                <p class="form-text small mb-0">Upload PDFs or TXT files—each upload is added to the RAG (e.g. chapter by chapter). TXT must be UTF-8. Requires OPENAI_API_KEY.</p>
+                <p class="form-text small mb-0">Upload PDFs or TXT files — each upload is added to the RAG (e.g. chapter by chapter). TXT must be UTF-8. Requires OPENAI_API_KEY.</p>
             </div>
             <div id="textbook-delete-area" style="display: none;">
                 <button type="button" class="btn btn-outline-danger btn-sm" id="textbook-delete-btn">
@@ -94,6 +95,7 @@
             <div id="textbook-message" class="alert d-none mt-2"></div>
         </div>
     </div>
+    -->
 </div>
 
 <div class="flat-context-menu" id="teacherContextMenu">
@@ -586,94 +588,8 @@
             .catch(function() { alert('Delete failed'); btn.disabled = false; });
     });
 
-    // Textbook RAG
+    // Textbook RAG — disabled for now (will reconnect with external vector DB later)
     const moduleId = '{{ module.module_id }}';
-    const textbookStatus = document.getElementById('textbook-status');
-    const textbookUploadArea = document.getElementById('textbook-upload-area');
-    const textbookDeleteArea = document.getElementById('textbook-delete-area');
-    const textbookMessage = document.getElementById('textbook-message');
-
-    function showTextbookMessage(msg, isError) {
-        textbookMessage.textContent = msg;
-        textbookMessage.className = 'alert alert-' + (isError ? 'danger' : 'success') + ' mt-2';
-        textbookMessage.classList.remove('d-none');
-    }
-    function hideTextbookMessage() { textbookMessage.classList.add('d-none'); }
-
-    function loadTextbookStatus() {
-        textbookStatus.innerHTML = '<span class="text-muted">Loading…</span>';
-        fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/textbook')
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d.has_textbook) {
-                    textbookStatus.innerHTML = '<i class="bi bi-journal-check text-success me-1"></i><strong>' + (d.name || 'Textbook') + '</strong>';
-                    if (d.chunk_count) textbookStatus.innerHTML += ' <span class="text-muted">(' + d.chunk_count + ' chunks';
-                    if (d.upload_count > 0) textbookStatus.innerHTML += ' · ' + d.upload_count + ' upload' + (d.upload_count === 1 ? '' : 's');
-                    if (d.chunk_count) textbookStatus.innerHTML += ')</span>';
-                    textbookUploadArea.style.display = 'block';
-                    textbookDeleteArea.style.display = 'block';
-                } else {
-                    textbookStatus.innerHTML = '<span class="text-muted">No content yet. Upload a PDF or TXT (or add chapters one at a time) so the AI tutor can answer from it.</span>';
-                    textbookUploadArea.style.display = 'block';
-                    textbookDeleteArea.style.display = 'none';
-                }
-            })
-            .catch(function() { textbookStatus.innerHTML = '<span class="text-danger">Could not load status</span>'; textbookUploadArea.style.display = 'block'; });
-    }
-    loadTextbookStatus();
-
-    document.getElementById('textbook-upload-form') && document.getElementById('textbook-upload-form').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const file = document.getElementById('textbook-file').files[0];
-        if (!file) { showTextbookMessage('Please select a PDF or TXT file', true); return; }
-        const formData = new FormData();
-        formData.append('textbook_file', file);
-        formData.append('title', document.getElementById('textbook-title').value.trim());
-        const btn = document.getElementById('textbook-upload-btn');
-        const progressEl = document.getElementById('textbook-upload-progress');
-        const progressText = document.getElementById('textbook-progress-text');
-        const formEl = document.getElementById('textbook-upload-form');
-        btn.disabled = true;
-        hideTextbookMessage();
-        progressEl.classList.remove('d-none');
-        formEl.style.opacity = '0.6';
-        formEl.style.pointerEvents = 'none';
-        var statusSteps = ['Uploading file…', 'Processing text…', 'Chunking content…', 'Generating embeddings…', 'Storing in vector DB…'];
-        var stepIdx = 0;
-        var statusInterval = setInterval(function() {
-            progressText.textContent = statusSteps[stepIdx % statusSteps.length];
-            stepIdx++;
-        }, 8000);
-        fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/textbook', { method: 'POST', body: formData })
-            .then(function(r) { return r.json().catch(function() { return {}; }); })
-            .then(function(d) {
-                if (d.success) {
-                    var msg = d.total_chunk_count != null
-                        ? 'Added ' + (d.chunk_count || 0) + ' chunks; total ' + d.total_chunk_count + ' chunks.'
-                        : 'Uploaded: ' + (d.chunk_count || 0) + ' chunks indexed.';
-                    showTextbookMessage(msg);
-                    loadTextbookStatus();
-                    document.getElementById('textbook-file').value = '';
-                }
-                else showTextbookMessage(d.error || 'Upload failed', true);
-            })
-            .catch(function() { showTextbookMessage('Network error', true); })
-            .finally(function() {
-                clearInterval(statusInterval);
-                progressEl.classList.add('d-none');
-                formEl.style.opacity = '';
-                formEl.style.pointerEvents = '';
-                btn.disabled = false;
-            });
-    });
-
-    document.getElementById('textbook-delete-btn') && document.getElementById('textbook-delete-btn').addEventListener('click', function() {
-        if (!confirm('Remove the textbook from this module? The AI will no longer use it for answers.')) return;
-        fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/textbook', { method: 'DELETE' })
-            .then(function(r) { return r.json(); })
-            .then(function(d) { if (d.success) { loadTextbookStatus(); hideTextbookMessage(); } else showTextbookMessage(d.error || 'Delete failed', true); })
-            .catch(function() { showTextbookMessage('Network error', true); });
-    });
 })();
 </script>
 {% endblock %}
