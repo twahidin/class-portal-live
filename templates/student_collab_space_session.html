@@ -9,7 +9,7 @@
         <div class="collapse navbar-collapse">
             <ul class="navbar-nav me-auto">
                 <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}"><i class="bi bi-house me-1"></i>Dashboard</a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('student_collab_space') }}"><i class="bi bi-people me-1"></i>Collab Space</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('student_collab_space_join') }}"><i class="bi bi-people me-1"></i>Collab Space</a></li>
                 <li class="nav-item"><a class="nav-link active" href="#">{{ space.name or space.space_id }}</a></li>
             </ul>
             <span class="navbar-text">{{ session.student_name }}</span>
@@ -21,7 +21,7 @@
 {% block content %}
 <div class="container py-4">
     <div class="mb-4">
-        <a href="{{ url_for('student_collab_space') }}" class="text-muted text-decoration-none small"><i class="bi bi-arrow-left me-1"></i>Back</a>
+        <a href="{{ url_for('student_collab_space_join') }}" class="text-muted text-decoration-none small"><i class="bi bi-arrow-left me-1"></i>Back</a>
         <h1 class="mt-1">{{ space.name or space.space_id }}</h1>
         <p class="text-muted mb-0">Topic: {{ space.central_topic or 'Discussion' }}</p>
     </div>

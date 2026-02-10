@@ -2088,7 +2088,7 @@ def student_collab_space_session(space_id):
         return redirect(url_for('dashboard'))
     space = db.db.collab_spaces.find_one({'space_id': space_id, 'is_active': True})
     if not space:
-        return redirect(url_for('student_collab_space'))
+        return redirect(url_for('student_collab_space_join'))
     return render_template('student_collab_space_session.html', space=space)
 
 
