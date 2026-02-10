@@ -5068,23 +5068,29 @@ def view_submission_file(submission_id, file_index):
         is_pdf = content_type == 'application/pdf' or (file_data.filename and file_data.filename.lower().endswith('.pdf'))
         
         if as_image and is_pdf:
-            import fitz  # PyMuPDF
             import io
             
             pdf_page = int(request.args.get('pdf_page', 0))
-            doc = fitz.open(stream=file_bytes, filetype='pdf')
-            page_count = len(doc)
+            
+            # Get page count from PyPDF2
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            page_count = len(pdf_reader.pages)
             
             if pdf_page < 0 or pdf_page >= page_count:
-                doc.close()
                 return 'Page not found', 404
             
-            page = doc[pdf_page]
-            # Render at 2x zoom for good quality
-            mat = fitz.Matrix(2.0, 2.0)
-            pix = page.get_pixmap(matrix=mat)
-            png_bytes = pix.tobytes("png")
-            doc.close()
+            # Convert PDF page to image using pdf2image (already in requirements)
+            from pdf2image import convert_from_bytes
+            images = convert_from_bytes(
+                file_bytes,
+                first_page=pdf_page + 1,  # pdf2image uses 1-based page numbers
+                last_page=pdf_page + 1,
+                dpi=200
+            )
+            
+            img_buffer = io.BytesIO()
+            images[0].save(img_buffer, format='PNG')
+            png_bytes = img_buffer.getvalue()
             
             return Response(
                 png_bytes,
