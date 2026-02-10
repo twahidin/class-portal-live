@@ -3,9 +3,8 @@
 {% block title %}{{ assignment.title }} - School Portal{% endblock %}
 
 {% block head %}
-{% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-{% endif %}
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
 {% endblock %}
 
 {% block navbar %}
@@ -378,82 +377,34 @@
     <!-- Visible divider -->
     <hr class="my-4 border-2 border-secondary">
     
-    <!-- Editable Question Paper Section - Full-width PDF with direct text overlay -->
+    <!-- Editable Question Paper Section - Type directly on PDF -->
     {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
     <div class="card mb-4" id="editable-question-section">
         <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Work on Question Paper</h5>
-            <div class="d-flex align-items-center gap-2">
-                <button type="button" class="btn btn-light btn-sm" id="pdf-add-text-btn" title="Click this, then click on the PDF to add a text box">
-                    <i class="bi bi-input-cursor-text me-1"></i>Add text box
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <button type="button" class="btn btn-light btn-sm" id="pdf-add-text-btn" onclick="toggleAddTextMode()" title="Click on PDF to add text box">
+                    <i class="bi bi-type me-1"></i>Add text box
                 </button>
+                <span class="text-white-50 small">|</span>
                 <div class="btn-group btn-group-sm">
-                    <button type="button" class="btn btn-outline-light" id="pdf-zoom-out" title="Zoom out">−</button>
-                    <button type="button" class="btn btn-outline-light" id="pdf-zoom-val" disabled style="min-width: 4rem;">100%</button>
-                    <button type="button" class="btn btn-outline-light" id="pdf-zoom-in" title="Zoom in">+</button>
+                    <button type="button" class="btn btn-outline-light" onclick="pdfPrevPage()" title="Previous page"><i class="bi bi-chevron-left"></i></button>
+                    <span class="btn btn-outline-light disabled" id="pdf-page-indicator">1 / 1</span>
+                    <button type="button" class="btn btn-outline-light" onclick="pdfNextPage()" title="Next page"><i class="bi bi-chevron-right"></i></button>
                 </div>
-                <span class="text-white-50 small" id="pdf-page-info">Page 1 / 1</span>
-                <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" class="btn btn-outline-light btn-sm" download title="Download PDF">
-                    <i class="bi bi-download me-1"></i>Download
-                </a>
-                <button type="button" class="btn btn-outline-light btn-sm" id="pdf-save-annotations" title="Save annotations locally">
-                    <i class="bi bi-save me-1"></i>Save
+                <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-light" onclick="pdfZoomOut()" title="Zoom out"><i class="bi bi-dash"></i></button>
+                    <span class="btn btn-outline-light disabled" id="pdf-zoom-indicator">100%</span>
+                    <button type="button" class="btn btn-outline-light" onclick="pdfZoomIn()" title="Zoom in"><i class="bi bi-plus"></i></button>
+                </div>
+                <button type="button" class="btn btn-success btn-sm" onclick="downloadAnnotatedPdf()" title="Download PDF with your answers">
+                    <i class="bi bi-download me-1"></i>Download with answers
                 </button>
             </div>
         </div>
-        <div class="card-body p-0">
-            <div class="row g-0">
-                <div class="col-lg-8 bg-dark">
-                    <div id="pdf-viewer-container" class="overflow-auto" style="height: 80vh;">
-                        <div id="pdf-pages-container" class="d-flex flex-column align-items-center p-3">
-                            <div class="text-white py-5" id="pdf-loading">
-                                <div class="spinner-border" role="status"></div>
-                                <p class="mt-2 mb-0">Loading PDF...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-lg-4 border-start">
-                    <div class="p-3">
-                        <ul class="nav nav-tabs mb-2" role="tablist">
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#notes-tab" type="button">
-                                    <i class="bi bi-journal-text me-1"></i>Notes & Answers
-                                </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#draw-tab" type="button">
-                                    <i class="bi bi-pencil me-1"></i>Draw
-                                </button>
-                            </li>
-                        </ul>
-                        <div class="tab-content">
-                            <div class="tab-pane fade show active" id="notes-tab">
-                                <label class="form-label small">Your answers and notes:</label>
-                                <textarea class="form-control font-monospace" id="question-notes-editor" rows="12" placeholder="Type your answers and notes here..."></textarea>
-                                <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="saveQuestionNotes()"><i class="bi bi-save me-1"></i>Save locally</button>
-                            </div>
-                            <div class="tab-pane fade" id="draw-tab">
-                                <div class="mb-2">
-                                    <label class="form-label small">Draw shapes and lines:</label>
-                                    <div class="btn-group btn-group-sm mb-2" role="group">
-                                        <button type="button" class="btn btn-outline-secondary active" id="draw-pen-btn" onclick="setDrawMode('pen')" title="Freehand"><i class="bi bi-pencil"></i></button>
-                                        <button type="button" class="btn btn-outline-secondary" id="draw-line-btn" onclick="setDrawMode('line')" title="Line"><i class="bi bi-slash-lg"></i></button>
-                                        <button type="button" class="btn btn-outline-secondary" id="draw-rect-btn" onclick="setDrawMode('rect')" title="Rectangle"><i class="bi bi-square"></i></button>
-                                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearDrawingCanvas()" title="Clear"><i class="bi bi-trash"></i></button>
-                                    </div>
-                                    <div class="input-group input-group-sm mb-2">
-                                        <span class="input-group-text">Color</span>
-                                        <input type="color" class="form-control form-control-color" id="draw-color" value="#000000" onchange="updateDrawColor(this.value)">
-                                    </div>
-                                </div>
-                                <canvas id="draw-canvas" width="280" height="350" style="border: 1px solid #dee2e6; border-radius: 4px; cursor: crosshair; touch-action: none;"></canvas>
-                                <p class="text-muted small mt-2 mb-0">Draw on the canvas. Use "Save as image" to download your work.</p>
-                                <button type="button" class="btn btn-sm btn-outline-success mt-2" onclick="downloadDrawing()"><i class="bi bi-download me-1"></i>Save as image</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        <div class="card-body p-0 overflow-auto">
+            <div id="pdf-viewer-container" class="position-relative d-inline-block" style="min-height: 80vh;">
+                <div id="pdf-pages-wrap" class="text-center p-2"></div>
             </div>
         </div>
     </div>
@@ -656,49 +607,13 @@
     transition: all 0.2s ease;
 }
 
-/* PDF text overlay inputs */
-.pdf-text-input {
-    position: absolute;
-    border: 1px solid #0d6efd;
-    background: rgba(255,255,255,0.95);
-    padding: 2px 6px;
-    font-size: 14px;
-    font-family: inherit;
-    z-index: 10;
-    border-radius: 2px;
-}
-.pdf-text-input:focus {
-    outline: 2px solid #0d6efd;
-    outline-offset: 0;
-}
-.pdf-page-wrap {
+.pdf-page-canvas {
+    display: block;
     background: #fff;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
-.pdf-text-box-wrap {
-    position: absolute;
-    z-index: 10;
-}
-.pdf-text-delete {
-    position: absolute;
-    top: -8px;
-    right: -8px;
-    width: 20px;
-    height: 20px;
-    border: none;
-    background: #dc3545;
-    color: white;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 1;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.pdf-text-delete:hover {
-    background: #bb2d3b;
+.pdf-text-annotation {
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 </style>
 
@@ -875,275 +790,241 @@
     });
     
     // === PDF VIEWER WITH TEXT OVERLAY ===
-    {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
-    (function() {
-        const pdfUrl = '{{ url_for("download_student_assignment_file", assignment_id=assignment.assignment_id, file_type="question_paper") }}';
-        const fullUrl = (pdfUrl.startsWith('http') ? pdfUrl : (window.location.origin + pdfUrl));
-        const annotationsKey = 'pdf_annotations_{{ assignment.assignment_id }}';
-        
-        let pdfDoc = null;
-        let pdfScale = 1.2;
-        let currentPage = 1;
-        let addTextMode = false;
-        let annotations = {}; // { pageNum: [{ x, y, text, w, h }] }
-        
-        function loadAnnotations() {
-            try {
-                const saved = localStorage.getItem(annotationsKey);
-                if (saved) annotations = JSON.parse(saved);
-            } catch (e) { annotations = {}; }
+    const pdfAnnotationsKey = 'assignment_pdf_annotations_{{ assignment.assignment_id }}';
+    const pdfUrl = '{{ url_for("download_student_assignment_file", assignment_id=assignment.assignment_id, file_type="question_paper") }}';
+    let pdfDoc = null;
+    let pdfCurrentPage = 1;
+    let pdfTotalPages = 1;
+    let pdfScale = 1.5;
+    let pdfAddTextMode = false;
+    let pdfPageContainers = [];
+    
+    document.addEventListener('DOMContentLoaded', async function() {
+        const container = document.getElementById('pdf-pages-wrap');
+        if (!container) return;
+        try {
+            pdfDoc = await pdfjsLib.getDocument(pdfUrl).promise;
+            pdfTotalPages = pdfDoc.numPages;
+            updatePdfPageIndicator();
+            await renderAllPdfPages();
+            requestAnimationFrame(() => loadPdfAnnotations());
+            setupPdfScrollListener();
+        } catch (e) {
+            console.error('PDF load error:', e);
+            container.innerHTML = '<div class="alert alert-danger">Failed to load PDF. <a href="' + pdfUrl + '" download>Download instead</a></div>';
         }
-        function saveAnnotations() {
-            const toSave = {};
-            const pages = new Set();
-            document.querySelectorAll('[data-pdf-anno][data-page]').forEach(inp => pages.add(inp.dataset.page));
-            for (const k of pages) {
-                const inputs = document.querySelectorAll(`[data-pdf-anno][data-page="${k}"]`);
-                toSave[k] = Array.from(inputs).map(inp => ({
-                    x: parseFloat(inp.dataset.x), y: parseFloat(inp.dataset.y),
-                    text: inp.value, w: parseFloat(inp.dataset.w) || 150, h: parseFloat(inp.dataset.h) || 24
-                }));
-            }
-            localStorage.setItem(annotationsKey, JSON.stringify(toSave));
+    });
+    
+    async function renderAllPdfPages() {
+        const container = document.getElementById('pdf-pages-wrap');
+        if (!container || !pdfDoc) return;
+        container.innerHTML = '';
+        pdfPageContainers = [];
+        for (let i = 1; i <= pdfTotalPages; i++) {
+            const page = await pdfDoc.getPage(i);
+            const viewport = page.getViewport({ scale: pdfScale });
+            const pageWrap = document.createElement('div');
+            pageWrap.className = 'position-relative d-inline-block mb-3';
+            pageWrap.dataset.page = i;
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            canvas.className = 'pdf-page-canvas shadow-sm';
+            const ctx = canvas.getContext('2d');
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            const overlay = document.createElement('div');
+            overlay.className = 'pdf-page-overlay';
+            overlay.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;cursor:${pdfAddTextMode?'crosshair':'default'};`;
+            overlay.dataset.page = i;
+            overlay.onclick = (e) => pdfAddTextMode && e.target === overlay && addTextAnnotation(e, i, viewport);
+            pageWrap.appendChild(canvas);
+            pageWrap.appendChild(overlay);
+            container.appendChild(pageWrap);
+            pdfPageContainers.push({ wrap: pageWrap, canvas, overlay, viewport });
         }
-        
-        function removeTextBox(wrap) {
-            wrap.remove();
-            saveAnnotations();
-        }
-        
-        function createTextBox(overlay, pageNum, x, y, text = '', w = 150, h = 24) {
-            const wrap = document.createElement('div');
-            wrap.className = 'pdf-text-box-wrap';
-            wrap.style.cssText = `left:${x}px;top:${y}px;`;
-            
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'pdf-text-input';
-            input.placeholder = 'Type here...';
-            input.value = text;
-            input.style.cssText = `width:${w}px;height:${h}px;`;
-            input.dataset.pdfAnno = '1';
-            input.dataset.page = pageNum;
-            input.dataset.x = x;
-            input.dataset.y = y;
-            input.dataset.w = w;
-            input.dataset.h = h;
-            input.addEventListener('input', saveAnnotations);
-            input.addEventListener('blur', saveAnnotations);
-            
-            const delBtn = document.createElement('button');
-            delBtn.type = 'button';
-            delBtn.className = 'pdf-text-delete';
-            delBtn.title = 'Delete';
-            delBtn.innerHTML = '×';
-            delBtn.addEventListener('click', (e) => { e.stopPropagation(); removeTextBox(wrap); });
-            
-            wrap.appendChild(input);
-            wrap.appendChild(delBtn);
-            overlay.appendChild(wrap);
-            input.focus();
-        }
-        
-        function addTextAt(pageEl, pageNum, x, y) {
-            const overlay = pageEl.querySelector('.pdf-page-overlay');
-            if (!overlay) return;
-            const rect = overlay.getBoundingClientRect();
-            const relX = Math.max(0, Math.min(x - rect.left, rect.width - 160));
-            const relY = Math.max(0, Math.min(y - rect.top, rect.height - 30));
-            createTextBox(overlay, pageNum, relX, relY, '');
-            saveAnnotations();
-        }
-        
-        async function initPdfViewer() {
-            const container = document.getElementById('pdf-pages-container');
-            const loading = document.getElementById('pdf-loading');
-            if (!container || !loading) return;
-            
-            loadAnnotations();
-            
-            const pdfjsLib = window['pdfjs-dist/build/pdf'];
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            
-            try {
-                pdfDoc = await pdfjsLib.getDocument(fullUrl).promise;
-                const numPages = pdfDoc.numPages;
-                document.getElementById('pdf-page-info').textContent = `Page 1 / ${numPages}`;
-                loading.style.display = 'none';
-                
-                for (let i = 1; i <= numPages; i++) {
-                    const page = await pdfDoc.getPage(i);
-                    const viewport = page.getViewport({ scale: pdfScale });
-                    
-                    const pageWrap = document.createElement('div');
-                    pageWrap.className = 'pdf-page-wrap position-relative mb-3';
-                    pageWrap.style.width = viewport.width + 'px';
-                    pageWrap.style.height = viewport.height + 'px';
-                    
-                    const canvas = document.createElement('canvas');
-                    canvas.height = viewport.height;
-                    canvas.width = viewport.width;
-                    const ctx = canvas.getContext('2d');
-                    await page.render({ canvasContext: ctx, viewport }).promise;
-                    
-                    const overlay = document.createElement('div');
-                    overlay.className = 'pdf-page-overlay position-absolute top-0 start-0';
-                    overlay.style.width = viewport.width + 'px';
-                    overlay.style.height = viewport.height + 'px';
-                    overlay.style.pointerEvents = 'auto';
-                    overlay.style.cursor = 'crosshair';
-                    
-                    overlay.addEventListener('click', (e) => {
-                        if (addTextMode && e.target === overlay) {
-                            addTextAt(pageWrap, i, e.clientX, e.clientY);
-                        }
-                    });
-                    
-                    pageWrap.appendChild(canvas);
-                    pageWrap.appendChild(overlay);
-                    container.appendChild(pageWrap);
-                    
-                    (annotations[i] || []).forEach(a => {
-                        createTextBox(overlay, i, a.x, a.y, a.text || '', a.w || 150, a.h || 24);
-                    });
-                }
-            } catch (err) {
-                loading.innerHTML = '<p class="text-danger">Failed to load PDF. <a href="' + fullUrl + '" target="_blank" class="text-white">Open in new tab</a></p>';
-                console.error(err);
-            }
-        }
-        
-        function rerenderAll() {
-            saveAnnotations();
-            const container = document.getElementById('pdf-pages-container');
-            if (!container || !pdfDoc) return;
-            container.innerHTML = '';
-            document.getElementById('pdf-loading').style.display = 'none';
-            (async function render() {
-                const numPages = pdfDoc.numPages;
-                for (let i = 1; i <= numPages; i++) {
-                    const page = await pdfDoc.getPage(i);
-                    const viewport = page.getViewport({ scale: pdfScale });
-                    const pageWrap = document.createElement('div');
-                    pageWrap.className = 'pdf-page-wrap position-relative mb-3';
-                    pageWrap.style.width = viewport.width + 'px';
-                    pageWrap.style.height = viewport.height + 'px';
-                    const canvas = document.createElement('canvas');
-                    canvas.height = viewport.height;
-                    canvas.width = viewport.width;
-                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-                    const overlay = document.createElement('div');
-                    overlay.className = 'pdf-page-overlay position-absolute top-0 start-0';
-                    overlay.style.cssText = `width:${viewport.width}px;height:${viewport.height}px;pointer-events:auto;cursor:crosshair;`;
-                    overlay.addEventListener('click', (e) => {
-                        if (addTextMode && e.target === overlay) addTextAt(pageWrap, i, e.clientX, e.clientY);
-                    });
-                    pageWrap.appendChild(canvas);
-                    pageWrap.appendChild(overlay);
-                    (annotations[i] || []).forEach(a => {
-                        createTextBox(overlay, i, a.x, a.y, a.text || '', a.w || 150, a.h || 24);
-                    });
-                    container.appendChild(pageWrap);
-                }
-            })();
-        }
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            const addBtn = document.getElementById('pdf-add-text-btn');
-            const zoomIn = document.getElementById('pdf-zoom-in');
-            const zoomOut = document.getElementById('pdf-zoom-out');
-            const zoomVal = document.getElementById('pdf-zoom-val');
-            const saveBtn = document.getElementById('pdf-save-annotations');
-            
-            if (addBtn) {
-                addBtn.addEventListener('click', () => {
-                    addTextMode = !addTextMode;
-                    addBtn.classList.toggle('active', addTextMode);
-                    addBtn.title = addTextMode ? 'Click on the PDF to add a text box' : 'Click to enable add text mode';
+    }
+    
+    function addTextAnnotation(e, pageNum, viewport) {
+        const wrap = document.querySelector(`[data-page="${pageNum}"]`);
+        if (!wrap) return;
+        const overlay = wrap.querySelector('.pdf-page-overlay');
+        const rect = overlay.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const box = document.createElement('div');
+        box.className = 'pdf-text-annotation';
+        box.contentEditable = 'true';
+        box.style.cssText = `position:absolute;left:${x}px;top:${y}px;min-width:120px;min-height:24px;padding:2px 6px;border:1px solid #0d6efd;background:rgba(255,255,255,0.95);font-size:14px;outline:none;cursor:text;`;
+        box.dataset.page = pageNum;
+        box.dataset.x = x;
+        box.dataset.y = y;
+        box.textContent = 'Type here...';
+        box.onfocus = function() { if (this.textContent === 'Type here...') this.textContent = ''; };
+        box.onblur = function() {
+            if (!this.textContent.trim()) this.remove();
+            else if (this.textContent === 'Type here...') this.textContent = '';
+            savePdfAnnotations();
+        };
+        box.oninput = () => savePdfAnnotations();
+        box.addEventListener('mousedown', e => e.stopPropagation());
+        overlay.appendChild(box);
+        box.focus();
+        savePdfAnnotations();
+    }
+    
+    function savePdfAnnotations() {
+        const byPage = {};
+        document.querySelectorAll('.pdf-page-overlay').forEach(overlay => {
+            const page = parseInt(overlay.dataset.page);
+            const w = overlay.offsetWidth, h = overlay.offsetHeight;
+            byPage[page] = [];
+            overlay.querySelectorAll('.pdf-text-annotation').forEach(box => {
+                const text = (box.textContent === 'Type here...' ? '' : box.textContent).trim();
+                if (!text) return;
+                byPage[page].push({
+                    x: parseFloat(box.style.left) || 0,
+                    y: parseFloat(box.style.top) || 0,
+                    text: text,
+                    width: w,
+                    height: h
                 });
-            }
-            if (zoomIn) zoomIn.addEventListener('click', () => { pdfScale = Math.min(3, pdfScale + 0.25); if (zoomVal) zoomVal.textContent = Math.round(pdfScale * 100) + '%'; rerenderAll(); });
-            if (zoomOut) zoomOut.addEventListener('click', () => { pdfScale = Math.max(0.5, pdfScale - 0.25); if (zoomVal) zoomVal.textContent = Math.round(pdfScale * 100) + '%'; rerenderAll(); });
-            if (saveBtn) saveBtn.addEventListener('click', () => { saveAnnotations(); alert('Annotations saved locally.'); });
-            
-            initPdfViewer().then(() => {
-                if (zoomVal) zoomVal.textContent = Math.round(pdfScale * 100) + '%';
             });
         });
-    })();
-    {% endif %}
-    
-    // === QUESTION NOTES (localStorage) ===
-    const notesStorageKey = 'assignment_notes_{{ assignment.assignment_id }}';
-    document.addEventListener('DOMContentLoaded', function() {
-        const editor = document.getElementById('question-notes-editor');
-        if (editor) {
-            const saved = localStorage.getItem(notesStorageKey);
-            if (saved) editor.value = saved;
-            editor.addEventListener('input', () => localStorage.setItem(notesStorageKey, editor.value));
-        }
-    });
-    function saveQuestionNotes() {
-        const editor = document.getElementById('question-notes-editor');
-        if (editor) {
-            localStorage.setItem(notesStorageKey, editor.value);
-            alert('Notes saved locally.');
-        }
+        localStorage.setItem(pdfAnnotationsKey, JSON.stringify(byPage));
     }
     
-    // === DRAWING CANVAS ===
-    let drawMode = 'pen', drawColor = '#000000', isDrawing = false, startX = 0, startY = 0;
-    document.addEventListener('DOMContentLoaded', function() {
-        const canvas = document.getElementById('draw-canvas');
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = drawColor;
-        ctx.lineWidth = 2;
-        function getPos(e) {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+    function loadPdfAnnotations() {
+        try {
+            const saved = localStorage.getItem(pdfAnnotationsKey);
+            if (!saved) return;
+            const byPage = JSON.parse(saved);
+            Object.keys(byPage).forEach(pageNum => {
+                const overlay = document.querySelector(`.pdf-page-overlay[data-page="${pageNum}"]`);
+                if (!overlay) return;
+                const ow = overlay.offsetWidth, oh = overlay.offsetHeight;
+                (byPage[pageNum] || []).forEach(ann => {
+                    if (!ann.text) return;
+                    const scaleX = ann.width ? ow / ann.width : 1;
+                    const scaleY = ann.height ? oh / ann.height : 1;
+                    const x = (ann.x || 0) * scaleX;
+                    const y = (ann.y || 0) * scaleY;
+                    const box = document.createElement('div');
+                    box.className = 'pdf-text-annotation';
+                    box.contentEditable = 'true';
+                    box.style.cssText = `position:absolute;left:${x}px;top:${y}px;min-width:120px;min-height:24px;padding:2px 6px;border:1px solid #0d6efd;background:rgba(255,255,255,0.95);font-size:14px;outline:none;cursor:text;`;
+                    box.dataset.page = pageNum;
+                    box.textContent = ann.text || 'Type here...';
+                    if (ann.text) box.onfocus = function() { if (this.textContent === 'Type here...') this.textContent = ''; };
+                    box.onblur = function() { if (!this.textContent.trim()) this.textContent = 'Type here...'; savePdfAnnotations(); };
+                    box.oninput = () => savePdfAnnotations();
+                    box.addEventListener('mousedown', e => e.stopPropagation());
+                    overlay.appendChild(box);
+                });
+            });
+        } catch (e) {}
+    }
+    
+    function toggleAddTextMode() {
+        pdfAddTextMode = !pdfAddTextMode;
+        const btn = document.getElementById('pdf-add-text-btn');
+        if (btn) {
+            btn.classList.toggle('active', pdfAddTextMode);
+            btn.classList.toggle('btn-primary', pdfAddTextMode);
+            btn.classList.toggle('btn-light', !pdfAddTextMode);
         }
-        function startDraw(e) { e.preventDefault(); isDrawing = true; const pos = getPos(e); startX = pos.x; startY = pos.y; if (drawMode === 'pen') ctx.beginPath(); }
-        function doDraw(e) { e.preventDefault(); if (!isDrawing) return; const pos = getPos(e); if (drawMode === 'pen') { ctx.lineTo(pos.x, pos.y); ctx.stroke(); } }
-        function endDraw(e) {
-            e.preventDefault();
-            if (!isDrawing) return;
-            const pos = getPos(e);
-            if (drawMode === 'line') { ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(pos.x, pos.y); ctx.stroke(); }
-            else if (drawMode === 'rect') ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
-            isDrawing = false;
+        document.querySelectorAll('.pdf-page-overlay').forEach(o => {
+            o.style.cursor = pdfAddTextMode ? 'crosshair' : 'default';
+        });
+    }
+    
+    function pdfPrevPage() {
+        if (pdfCurrentPage > 1) {
+            pdfCurrentPage--;
+            const wrap = document.querySelector(`[data-page="${pdfCurrentPage}"]`);
+            if (wrap) wrap.scrollIntoView({ behavior: 'smooth' });
+            updatePdfPageIndicator();
         }
-        ['mousedown','touchstart'].forEach(ev => canvas.addEventListener(ev, startDraw));
-        ['mousemove','touchmove'].forEach(ev => canvas.addEventListener(ev, doDraw));
-        ['mouseup','touchend','mouseleave'].forEach(ev => canvas.addEventListener(ev, endDraw));
-    });
-    function setDrawMode(mode) {
-        drawMode = mode;
-        document.querySelectorAll('#draw-pen-btn, #draw-line-btn, #draw-rect-btn').forEach(b => b?.classList.remove('active'));
-        const btn = document.getElementById('draw-' + mode + '-btn');
-        if (btn) btn.classList.add('active');
     }
-    function updateDrawColor(color) {
-        drawColor = color;
-        const canvas = document.getElementById('draw-canvas');
-        if (canvas) canvas.getContext('2d').strokeStyle = color;
+    
+    function pdfNextPage() {
+        if (pdfCurrentPage < pdfTotalPages) {
+            pdfCurrentPage++;
+            const wrap = document.querySelector(`[data-page="${pdfCurrentPage}"]`);
+            if (wrap) wrap.scrollIntoView({ behavior: 'smooth' });
+            updatePdfPageIndicator();
+        }
     }
-    function clearDrawingCanvas() {
-        const canvas = document.getElementById('draw-canvas');
-        if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    
+    function setupPdfScrollListener() {
+        const wrap = document.getElementById('pdf-pages-wrap');
+        if (!wrap) return;
+        const scrollParent = wrap.closest('.overflow-auto') || wrap.parentElement;
+        if (!scrollParent) return;
+        scrollParent.addEventListener('scroll', () => {
+            const pages = document.querySelectorAll('.pdf-page-overlay');
+            let best = 1;
+            let maxVis = 0;
+            pages.forEach((p, i) => {
+                const rect = p.getBoundingClientRect();
+                const vis = Math.min(rect.height, window.innerHeight - rect.top, rect.bottom) * Math.min(rect.width, window.innerWidth - rect.left, rect.right);
+                if (vis > maxVis) { maxVis = vis; best = i + 1; }
+            });
+            pdfCurrentPage = best;
+            updatePdfPageIndicator();
+        });
     }
-    function downloadDrawing() {
-        const canvas = document.getElementById('draw-canvas');
-        if (!canvas) return;
-        const a = document.createElement('a');
-        a.download = 'drawing_{{ assignment.assignment_id }}.png';
-        a.href = canvas.toDataURL('image/png');
-        a.click();
+    
+    function updatePdfPageIndicator() {
+        const ind = document.getElementById('pdf-page-indicator');
+        if (ind) ind.textContent = pdfCurrentPage + ' / ' + pdfTotalPages;
+        const zi = document.getElementById('pdf-zoom-indicator');
+        if (zi) zi.textContent = Math.round(pdfScale * 100) + '%';
+    }
+    
+    function pdfZoomIn() {
+        pdfScale = Math.min(pdfScale + 0.25, 3);
+        renderAllPdfPages().then(() => requestAnimationFrame(() => loadPdfAnnotations()));
+        updatePdfPageIndicator();
+    }
+    
+    function pdfZoomOut() {
+        pdfScale = Math.max(pdfScale - 0.25, 0.5);
+        renderAllPdfPages().then(() => requestAnimationFrame(() => loadPdfAnnotations()));
+        updatePdfPageIndicator();
+    }
+    
+    async function downloadAnnotatedPdf() {
+        const container = document.getElementById('pdf-pages-wrap');
+        if (!container) return;
+        const pages = container.querySelectorAll('[data-page]');
+        if (pages.length === 0) return;
+        const pdfCanvas = document.createElement('canvas');
+        const ctx = pdfCanvas.getContext('2d');
+        const img = new Image();
+        const assignmentId = '{{ assignment.assignment_id }}';
+        for (let i = 0; i < pages.length; i++) {
+            const wrap = pages[i];
+            const canvas = wrap.querySelector('.pdf-page-canvas');
+            const overlay = wrap.querySelector('.pdf-page-overlay');
+            if (!canvas) continue;
+            pdfCanvas.width = canvas.width;
+            pdfCanvas.height = canvas.height;
+            ctx.drawImage(canvas, 0, 0);
+            ctx.font = '14px sans-serif';
+            ctx.fillStyle = '#000';
+            overlay.querySelectorAll('.pdf-text-annotation').forEach(box => {
+                const text = box.textContent === 'Type here...' ? '' : box.textContent;
+                if (!text) return;
+                const x = parseFloat(box.style.left) || 0;
+                const y = parseFloat(box.style.top) || 0;
+                ctx.fillText(text.replace(/\n/g, ' '), x + 4, y + 16);
+            });
+            const link = document.createElement('a');
+            link.download = `assignment_${assignmentId}_page_${i + 1}.png`;
+            link.href = pdfCanvas.toDataURL('image/png');
+            link.click();
+        }
+        alert('Downloaded ' + pages.length + ' page(s) as PNG images. You can combine them into a PDF using a tool like smallpdf.com or print to PDF.');
     }
     
     // === ASK AI FROM MODAL ===
