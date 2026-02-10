@@ -369,7 +369,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="change-password-cancel-btn">Cancel</button>
-                <button type="button" class="btn btn-primary" id="save-password-btn">
+                <button type="button" class="btn btn-primary" id="save-password-btn" onclick="typeof window.doChangePassword==='function'&&window.doChangePassword(); return false;">
                     <i class="bi bi-check-lg me-1"></i>Change Password
                 </button>
             </div>
@@ -581,7 +581,7 @@ if (window.mustChangePassword) {
 }
 
 // ============================================================================
-// Password Change (event delegation so button always works)
+// Password Change (expose globally for inline onclick; button always works)
 // ============================================================================
 function showPasswordResult(html) {
     const resultDiv = document.getElementById('password-change-result');
@@ -661,21 +661,14 @@ function doChangePassword() {
         showPasswordResult('<div class="alert alert-danger mb-0">Error changing password. Please try again.</div>');
     });
 }
+window.doChangePassword = doChangePassword;
 
 function initPasswordChange() {
-    document.addEventListener('click', function(e) {
-        var btn = e.target && (e.target.id === 'save-password-btn' || e.target.closest('#save-password-btn'));
-        if (btn) {
-            e.preventDefault();
-            e.stopPropagation();
-            doChangePassword();
-        }
-    });
     var form = document.getElementById('change-password-form');
     if (form) {
         form.addEventListener('submit', function(e) {
             e.preventDefault();
-            doChangePassword();
+            if (typeof window.doChangePassword === 'function') window.doChangePassword();
         });
     }
 }
