@@ -141,7 +141,13 @@
                 <div class="card-body p-0" style="height: calc(100vh - 350px); min-height: 320px; overflow: auto; background: #f0f0f0;" id="submission-body">
                     {% if submission.file_ids %}
                     <div id="submission-viewer-wrap" style="display: flex; justify-content: center; align-items: flex-start; padding: 10px;">
-                        {% if submission.file_type == 'pdf' %}
+                        {% set _page_count = submission.page_count or (submission.file_ids|length) or 1 %}
+                        {% if submission.file_type == 'pdf' and _page_count > 1 %}
+                        {# Single PDF with multiple pages: one page as image via backend #}
+                        <img id="submission-pdf-page-image" 
+                             src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}?as_image=1&amp;pdf_page=0"
+                             style="width: 100%; height: auto; transform-origin: top center; object-fit: contain;" class="submission-img">
+                        {% elif submission.file_type == 'pdf' %}
                         <iframe id="submission-pdf-viewer" 
                                 src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}"
                                 style="width: 100%; height: calc(100vh - 400px); min-height: 300px; border: none;"></iframe>
@@ -524,7 +530,10 @@
         if (prevBtn) prevBtn.disabled = currentPage === 0;
         if (nextBtn) nextBtn.disabled = currentPage >= pageCount - 1;
         var base = '/student/submission/' + submissionId + '/file/';
-        if (fileType === 'pdf') {
+        if (fileType === 'pdf' && pageCount > 1) {
+            var pdfImg = document.getElementById('submission-pdf-page-image');
+            if (pdfImg) pdfImg.src = base + '0?as_image=1&pdf_page=' + currentPage;
+        } else if (fileType === 'pdf') {
             var iframe = document.getElementById('submission-pdf-viewer');
             if (iframe) iframe.src = base + currentPage;
         } else {
@@ -550,7 +559,7 @@
         if (submissionZoom > submissionMinZoom) { submissionZoom -= submissionZoomStep; submissionApplyZoom(); }
     }
     function submissionApplyZoom() {
-        var img = document.getElementById('submission-page-image');
+        var img = document.getElementById('submission-page-image') || document.getElementById('submission-pdf-page-image');
         if (img) {
             img.style.transform = 'scale(' + submissionZoom + ')';
             img.style.transformOrigin = 'top center';
@@ -602,6 +611,13 @@
     document.addEventListener('fullscreenchange', function() {
         if (!document.fullscreenElement && submissionFullscreen) submissionRestoreView();
     });
+
+    // Expose to window so toolbar onclick handlers (e.g. next page, expand) can call them
+    window.submissionNextPage = submissionNextPage;
+    window.submissionPrevPage = submissionPrevPage;
+    window.submissionZoomIn = submissionZoomIn;
+    window.submissionZoomOut = submissionZoomOut;
+    window.submissionToggleFullscreen = submissionToggleFullscreen;
 })();
 </script>
 {% endif %}

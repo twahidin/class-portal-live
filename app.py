@@ -1669,6 +1669,32 @@ def view_student_submission_file(submission_id, file_index):
         content_type = file_data.content_type or 'application/octet-stream'
         data = file_data.read()
         
+        # Single multi-page PDF: serve one page as image (same as teacher review)
+        as_image = request.args.get('as_image')
+        is_pdf = content_type == 'application/pdf' or (file_data.filename and file_data.filename.lower().endswith('.pdf'))
+        if as_image and is_pdf:
+            import io
+            pdf_page = int(request.args.get('pdf_page', 0))
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(data))
+            page_count = len(pdf_reader.pages)
+            if pdf_page < 0 or pdf_page >= page_count:
+                return 'Page not found', 404
+            from pdf2image import convert_from_bytes
+            images = convert_from_bytes(
+                data,
+                first_page=pdf_page + 1,
+                last_page=pdf_page + 1,
+                dpi=200
+            )
+            img_buffer = io.BytesIO()
+            images[0].save(img_buffer, format='PNG')
+            png_bytes = img_buffer.getvalue()
+            return Response(
+                png_bytes,
+                mimetype='image/png',
+                headers={'Content-Disposition': 'inline', 'X-PDF-Page-Count': str(page_count)}
+            )
+        
         if rotate and content_type == 'application/pdf':
             try:
                 from PyPDF2 import PdfReader, PdfWriter
