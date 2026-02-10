@@ -11,6 +11,7 @@ and ANTHROPIC_API_KEY is set (better for scanned PDFs, images, tables).
 import base64
 import gc
 import json
+import multiprocessing
 import os
 import re
 import io
@@ -311,6 +312,60 @@ def _pgvector_not_available_message() -> str:
     )
 
 
+def _ingest_textbook_worker(module_id, pdf_bytes, title, append, result_dict):
+    """Run PDF extraction + ingest in a child process to isolate memory."""
+    try:
+        use_vision = os.getenv("USE_ANTHROPIC_VISION_FOR_PDF", "").strip().lower() in ("1", "true", "yes")
+        
+        if use_vision and _get_anthropic_client():
+            text = _extract_text_from_pdf_via_anthropic(pdf_bytes)
+            if not text or len(text.strip()) < 50:
+                text = _extract_text_from_pdf(pdf_bytes)
+        else:
+            text = _extract_text_from_pdf(pdf_bytes)
+        
+        del pdf_bytes
+        gc.collect()
+        
+        if not text or len(text.strip()) < 100:
+            result_dict["result"] = {"success": False, "error": "Could not extract enough text from the PDF (may be image-only or corrupted)."}
+            return
+
+        result_dict["result"] = _ingest_text_content_impl(module_id, text, title=title, append=append)
+    except Exception as e:
+        result_dict["result"] = {"success": False, "error": str(e)}
+
+
+def _ingest_text_worker(module_id, text, title, append, result_dict):
+    """Run text ingest in a child process to isolate memory."""
+    try:
+        result_dict["result"] = _ingest_text_content_impl(module_id, text, title=title, append=append)
+    except Exception as e:
+        result_dict["result"] = {"success": False, "error": str(e)}
+
+
+def _run_in_subprocess(target, args, timeout=600):
+    """Run a function in a subprocess using multiprocessing. Returns the result dict.
+    All memory allocated by the child is freed when it exits."""
+    manager = multiprocessing.Manager()
+    result_dict = manager.dict()
+    result_dict["result"] = {"success": False, "error": "Subprocess did not complete."}
+    
+    proc = multiprocessing.Process(target=target, args=(*args, result_dict))
+    proc.start()
+    proc.join(timeout=timeout)
+    
+    if proc.is_alive():
+        proc.kill()
+        proc.join()
+        return {"success": False, "error": "Ingestion timed out."}
+    
+    if proc.exitcode != 0:
+        return {"success": False, "error": f"Ingestion subprocess exited with code {proc.exitcode} (likely OOM — try a smaller file)."}
+    
+    return dict(result_dict.get("result", {"success": False, "error": "No result from subprocess."}))
+
+
 def ingest_textbook(
     module_id: str,
     pdf_bytes: bytes,
@@ -319,31 +374,15 @@ def ingest_textbook(
 ) -> Dict[str, Any]:
     """
     Ingest a textbook PDF for a module tree: extract text, chunk, embed, store in PGvector.
-    By default appends to existing content so you can upload chapters one at a time.
+    Runs in a subprocess so memory is fully reclaimed after ingestion.
     """
-    logger.info(f"=== Starting textbook ingest (PDF): {len(pdf_bytes)} bytes ===")
-    _log_memory_usage("Start of ingest")
-    
-    use_vision = os.getenv("USE_ANTHROPIC_VISION_FOR_PDF", "").strip().lower() in ("1", "true", "yes")
-    
-    if use_vision and _get_anthropic_client():
-        logger.info("PDF extraction: Using Anthropic Vision (USE_ANTHROPIC_VISION_FOR_PDF=true)")
-        text = _extract_text_from_pdf_via_anthropic(pdf_bytes)
-        if not text or len(text.strip()) < 50:
-            text = _extract_text_from_pdf(pdf_bytes)
-    else:
-        logger.info("PDF extraction: Using PyPDF2")
-        text = _extract_text_from_pdf(pdf_bytes)
-    
+    logger.info(f"=== Starting textbook ingest (PDF) in subprocess: {len(pdf_bytes)} bytes ===")
+    _log_memory_usage("Before subprocess")
+    result = _run_in_subprocess(_ingest_textbook_worker, (module_id, pdf_bytes, title, append))
     del pdf_bytes
     gc.collect()
-    _log_memory_usage("After PDF extraction")
-    logger.info(f"Extracted {len(text)} characters")
-    
-    if not text or len(text.strip()) < 100:
-        return {"success": False, "error": "Could not extract enough text from the PDF (may be image-only or corrupted)."}
-
-    return ingest_text_content(module_id, text, title=title, append=append)
+    _log_memory_usage("After subprocess")
+    return result
 
 
 def ingest_text_content(
@@ -353,10 +392,29 @@ def ingest_text_content(
     append: bool = True,
 ) -> Dict[str, Any]:
     """
-    Ingest raw text into RAG: chunk, embed, store in PGvector.
-    Used for TXT files or after PDF extraction.
+    Ingest raw text into RAG via subprocess. Memory is fully reclaimed after.
     """
-    logger.info(f"=== Ingesting text content: {len(text)} characters ===")
+    logger.info(f"=== Ingesting text content in subprocess: {len(text)} characters ===")
+    if not text or len(text.strip()) < 100:
+        return {"success": False, "error": "Text is too short (need at least 100 characters)."}
+    _log_memory_usage("Before text ingest subprocess")
+    result = _run_in_subprocess(_ingest_text_worker, (module_id, text, title, append))
+    del text
+    gc.collect()
+    _log_memory_usage("After text ingest subprocess")
+    return result
+
+
+def _ingest_text_content_impl(
+    module_id: str,
+    text: str,
+    title: Optional[str] = None,
+    append: bool = True,
+) -> Dict[str, Any]:
+    """
+    Actual ingest logic (runs inside subprocess).
+    Chunk, embed, store in PGvector.
+    """
     if not text or len(text.strip()) < 100:
         return {"success": False, "error": "Text is too short (need at least 100 characters)."}
 
