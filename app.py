@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file, Response
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from functools import wraps
@@ -18,7 +19,10 @@ from utils.module_ai import (
     analyze_writing_submission,
 )
 from utils import rag_service
+from utils.nanobanana import generate_pro as nanobanana_generate_pro, wait_for_result as nanobanana_wait_for_result
 import logging
+import random
+import string
 import math
 import uuid
 import json
@@ -79,6 +83,10 @@ app.config['MONGODB_URI'] = os.getenv('MONGODB_URI') or os.getenv('MONGO_URL')
 app.config['MONGODB_DB'] = os.getenv('MONGODB_DB', 'school_portal')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
 
+# Initialize Socket.IO for real-time collaboration
+# Using 'threading' mode for compatibility with anthropic/trio dependencies
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', logger=False, engineio_logger=False)
+
 # Initialize database
 db.init_app(app)
 
@@ -117,19 +125,23 @@ ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
 # ============================================================================
 
 def login_required(f):
-    """Require student login."""
+    """Require student login. For JSON/fetch requests return 401 JSON so client gets JSON, not redirect HTML."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'student_id' not in session:
+            if request.is_json or ('application/json' in (request.headers.get('Accept') or '')):
+                return jsonify({'error': 'Please log in again.', 'login_required': True}), 401
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
 
 def teacher_required(f):
-    """Require teacher login"""
+    """Require teacher login. For /teacher/api/* return JSON 401 so fetch() gets JSON, not redirect HTML."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'teacher_id' not in session:
+            if request.path.startswith('/teacher/api/') or request.is_json or ('application/json' in (request.headers.get('Accept') or '')):
+                return jsonify({'success': False, 'error': 'Session expired. Please refresh the page.'}), 401
             return redirect(url_for('teacher_login'))
         return f(*args, **kwargs)
     return decorated_function
@@ -1925,6 +1937,196 @@ def student_python_execute():
 # COLLAB SPACE - Teacher and student list/join pages (access controlled by admin)
 # ============================================================================
 
+DEFAULT_MAX_INFOGraphic_PER_SPACE = 5
+DEFAULT_MAX_GENERATION_PER_SPACE = 5  # combined limit for students (PDF + infographic)
+
+
+def _get_teacher_collab_settings(teacher_id):
+    """Return { nanobanana_api_key, max_infographic_per_space, max_generation_per_space }."""
+    doc = db.db.teacher_collab_settings.find_one({'teacher_id': teacher_id})
+    if not doc:
+        return {
+            'nanobanana_api_key': None,
+            'max_infographic_per_space': DEFAULT_MAX_INFOGraphic_PER_SPACE,
+            'max_generation_per_space': DEFAULT_MAX_GENERATION_PER_SPACE,
+        }
+    key = None
+    if doc.get('nanobanana_api_key_encrypted'):
+        try:
+            key = decrypt_api_key(doc['nanobanana_api_key_encrypted'])
+        except Exception:
+            pass
+    return {
+        'nanobanana_api_key': key,
+        'max_infographic_per_space': doc.get('max_infographic_per_space', DEFAULT_MAX_INFOGraphic_PER_SPACE),
+        'max_generation_per_space': doc.get('max_generation_per_space', DEFAULT_MAX_GENERATION_PER_SPACE),
+    }
+
+
+def _collab_space_render(space, user_role):
+    """Shared render for collab space mind-map view (teacher or student)."""
+    teacher_id = space.get('teacher_id')
+    settings = _get_teacher_collab_settings(teacher_id)
+    teacher = Teacher.find_one({'teacher_id': teacher_id})
+    # Build node tree from stored data or default
+    nodes_data = space.get('nodes_data')
+    if not nodes_data:
+        nodes_data = {
+            'central': {'id': 'central', 'type': 'central', 'label': space.get('central_topic') or 'Discussion',
+                        'content': '', 'studentColor': None, 'layer': 0, 'x': 0, 'y': 0, 'votes': 0, 'comments': []},
+            'layer1': [], 'layer2': [], 'layer3': [],
+        }
+    # Determine current user info
+    if user_role == 'teacher':
+        user_id = session['teacher_id']
+        user_name = (teacher.get('name') if teacher else session['teacher_id'])
+        back_url = url_for('teacher_collab_space')
+    else:
+        user_id = session['student_id']
+        student = Student.find_one({'student_id': session['student_id']})
+        user_name = (student.get('name') if student else session['student_id'])
+        back_url = url_for('student_collab_space')
+    space_json = json.dumps({
+        'space_id': space['space_id'],
+        'name': space.get('name', ''),
+        'central_topic': space.get('central_topic', 'Discussion'),
+        'join_code': space.get('join_code', ''),
+        'is_active': space.get('is_active', True),
+        'max_generation': space.get('max_generation', DEFAULT_MAX_GENERATION_PER_SPACE),
+        'generation_count': space.get('generation_count', 0),
+        'infographics': space.get('infographics', []),
+        'settings': space.get('collab_settings', {'maxLayer1': 6, 'maxTextNodes': 5, 'charLimit': 200}),
+    }, default=str)
+    nodes_json = json.dumps(nodes_data, default=str)
+    # For teachers: pass list of all spaces for the dropdown switcher
+    all_spaces_json = '[]'
+    if user_role == 'teacher':
+        all_spaces = list(db.db.collab_spaces.find(
+            {'teacher_id': teacher_id},
+            {'space_id': 1, 'name': 1, 'assigned_group_name': 1, '_id': 0}
+        ).sort('name', 1))
+        all_spaces_json = json.dumps(all_spaces, default=str)
+    return render_template('collab_space_view.html',
+                           space_json=space_json,
+                           nodes_json=nodes_json,
+                           user_role=user_role,
+                           user_id=user_id,
+                           user_name=user_name,
+                           back_url=back_url,
+                           has_api_key=bool(settings.get('nanobanana_api_key')),
+                           all_spaces_json=all_spaces_json)
+
+
+def _build_tree_summary(nodes_data):
+    """Build text summary from mind-map node tree for infographic/PDF prompt."""
+    if not nodes_data:
+        return ''
+    lines = []
+    central = nodes_data.get('central', {})
+    lines.append(f"Central Topic: {central.get('label', '')}")
+    if central.get('content'):
+        lines.append(f"  {central['content']}")
+    for n1 in nodes_data.get('layer1', []):
+        lines.append(f"\n## {n1.get('label', '')}")
+        if n1.get('content'):
+            lines.append(f"  {n1['content']}")
+        for n2 in nodes_data.get('layer2', []):
+            if n2.get('parentId') == n1.get('id'):
+                lines.append(f"  ### {n2.get('label', '')}")
+                if n2.get('content'):
+                    lines.append(f"    {n2['content']}")
+                for n3 in nodes_data.get('layer3', []):
+                    if n3.get('parentId') == n2.get('id'):
+                        lines.append(f"    - {n3.get('label', '')}")
+                        if n3.get('textContent'):
+                            lines.append(f"      {n3['textContent']}")
+    return '\n'.join(lines)
+
+
+def _build_report_payload(nodes_data, space):
+    """Build a full structured payload for the PDF report AI: topics, subtopics, all text, image markers, infographics."""
+    if not nodes_data:
+        return ''
+    sections = []
+    central = nodes_data.get('central', {})
+    sections.append("=== CENTRAL TOPIC ===")
+    sections.append(central.get('label', ''))
+    if central.get('content'):
+        sections.append(central['content'])
+    sections.append("")
+    layer1 = nodes_data.get('layer1', [])
+    layer2 = nodes_data.get('layer2', [])
+    layer3 = nodes_data.get('layer3', [])
+    for n1 in layer1:
+        sections.append(f"=== TOPIC: {n1.get('label', '')} ===")
+        if n1.get('content'):
+            sections.append(n1['content'])
+        if n1.get('hasImage'):
+            sections.append("[Includes image]")
+        for n2 in layer2:
+            if n2.get('parentId') != n1.get('id'):
+                continue
+            sections.append(f"  --- Subtopic: {n2.get('label', '')} ---")
+            if n2.get('content'):
+                sections.append(f"  {n2['content']}")
+            if n2.get('hasImage'):
+                sections.append("  [Includes image]")
+            for n3 in layer3:
+                if n3.get('parentId') != n2.get('id'):
+                    continue
+                lbl = n3.get('label', '')
+                txt = n3.get('textContent') or n3.get('content') or ''
+                img = " [Includes image]" if n3.get('hasImage') else ""
+                sections.append(f"  • {lbl}: {txt}{img}")
+        sections.append("")
+    infographics = space.get('infographics') or []
+    if infographics:
+        sections.append("=== GENERATED INFOGRAPHICS (from this space) ===")
+        for i, inf in enumerate(infographics, 1):
+            url = inf.get('url', '')
+            if url:
+                sections.append(f"  Infographic {i}: {url}")
+        sections.append("")
+    return '\n'.join(sections)
+
+
+def _get_collab_space_for_api(space_id):
+    """Return (space, error_response). Checks teacher or student access."""
+    space = db.db.collab_spaces.find_one({'space_id': space_id})
+    if not space:
+        return None, (jsonify({'error': 'Space not found'}), 404)
+    tid = session.get('teacher_id')
+    sid = session.get('student_id')
+    if tid and space.get('teacher_id') == tid:
+        return space, None
+    if sid and space.get('is_active'):
+        if _student_has_collab_space_access(sid):
+            return space, None
+    return None, (jsonify({'error': 'Access denied'}), 403)
+
+
+def _check_generation_limit(space, space_id):
+    """Check if the combined generation limit has been reached.
+    Teachers have unlimited; students share a pool of DEFAULT_MAX_GENERATION_PER_SPACE.
+    Returns (ok: bool, error_response_or_None)."""
+    is_teacher = bool(session.get('teacher_id') and session['teacher_id'] == space.get('teacher_id'))
+    if is_teacher:
+        return True, None   # teachers are unlimited
+    max_gen = space.get('max_generation', DEFAULT_MAX_GENERATION_PER_SPACE)
+    used = (space.get('generation_count') or 0)
+    if used >= max_gen:
+        return False, (jsonify({'error': f'Your group has used all {max_gen} generations for this space. Only the teacher can generate more.'}), 400)
+    return True, None
+
+
+def _increment_generation_count(space_id):
+    """Atomically increment the generation counter."""
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id},
+        {'$inc': {'generation_count': 1}, '$set': {'updated_at': datetime.utcnow()}}
+    )
+
+
 @app.route('/teacher/collab-space')
 @teacher_required
 def teacher_collab_space():
@@ -2038,19 +2240,13 @@ def teacher_collab_space_settings():
 @app.route('/teacher/collab-space/<space_id>')
 @teacher_required
 def teacher_collab_space_session(space_id):
-    """Open a Collab Space (teacher session view)."""
+    """Open a Collab Space (teacher session view — interactive mind-map)."""
     if not _teacher_has_collab_space_access(session['teacher_id']):
         return redirect(url_for('teacher_dashboard'))
     space = db.db.collab_spaces.find_one({'space_id': space_id, 'teacher_id': session['teacher_id']})
     if not space:
         return redirect(url_for('teacher_collab_space'))
-    settings_doc = db.db.teacher_collab_settings.find_one({'teacher_id': session['teacher_id']}) or {}
-    settings = {
-        'has_api_key': bool(settings_doc.get('nanobanana_api_key_encrypted')),
-        'max_infographic_per_space': settings_doc.get('max_infographic_per_space', 5),
-        'max_generation_per_space': settings_doc.get('max_generation_per_space', 5),
-    }
-    return render_template('teacher_collab_space_session.html', space=space, settings=settings)
+    return _collab_space_render(space, 'teacher')
 
 
 @app.route('/teacher/collab-space/<space_id>/delete', methods=['POST'])
@@ -2063,6 +2259,15 @@ def teacher_collab_space_delete(space_id):
     if result.deleted_count:
         return jsonify({'success': True})
     return jsonify({'error': 'Space not found'}), 404
+
+
+@app.route('/student/collab-space')
+@login_required
+def student_collab_space():
+    """Collab Space: join or list joined spaces."""
+    if not _student_has_collab_space_access(session['student_id']):
+        return redirect(url_for('dashboard'))
+    return render_template('student_collab_space.html')
 
 
 @app.route('/student/collab-space/join', methods=['POST'])
@@ -2090,13 +2295,468 @@ def student_collab_space_join():
 @limiter.limit("200 per hour")
 @login_required
 def student_collab_space_session(space_id):
-    """Open a Collab Space (student session view)."""
+    """Open a Collab Space (student session view — interactive mind-map)."""
     if not _student_has_collab_space_access(session['student_id']):
         return redirect(url_for('dashboard'))
     space = db.db.collab_spaces.find_one({'space_id': space_id, 'is_active': True})
     if not space:
-        return redirect(url_for('student_collab_space_join'))
-    return render_template('student_collab_space_session.html', space=space)
+        return redirect(url_for('student_collab_space'))
+    return _collab_space_render(space, 'student')
+
+
+# ============================================================================
+# COLLAB SPACE – API ENDPOINTS (save nodes, polling, infographic, PDF)
+# ============================================================================
+
+@app.route('/api/collab-space/<space_id>/save-nodes', methods=['POST'])
+@student_or_teacher_required
+def api_collab_space_save_nodes(space_id):
+    """Save the full node tree and optional settings."""
+    space, err = _get_collab_space_for_api(space_id)
+    if err:
+        return err
+    data = request.get_json() or {}
+    upd = {'updated_at': datetime.utcnow()}
+    if 'nodes_data' in data:
+        upd['nodes_data'] = data['nodes_data']
+    if 'settings' in data and session.get('teacher_id') == space.get('teacher_id'):
+        upd['collab_settings'] = data['settings']
+    db.db.collab_spaces.update_one({'space_id': space_id}, {'$set': upd})
+    return jsonify({'success': True})
+
+
+@app.route('/api/collab-space/<space_id>/nodes', methods=['GET'])
+@student_or_teacher_required
+def api_collab_space_get_nodes(space_id):
+    """Polling endpoint: return current node state and version for sync fallback."""
+    space, err = _get_collab_space_for_api(space_id)
+    if err:
+        return err
+    return jsonify({
+        'nodes_data': space.get('nodes_data'),
+        'version': str(space.get('updated_at', '')),
+        'collab_settings': space.get('collab_settings'),
+    })
+
+
+@app.route('/api/collab-space/<space_id>/generate-infographic', methods=['POST'])
+@student_or_teacher_required
+def api_collab_space_generate_infographic(space_id):
+    """Generate infographic from the mind-map node tree using Nanobanana Pro."""
+    space, err = _get_collab_space_for_api(space_id)
+    if err:
+        return err
+    # Check generation limit (students limited, teachers unlimited)
+    ok, limit_err = _check_generation_limit(space, space_id)
+    if not ok:
+        return limit_err
+    teacher_id = space.get('teacher_id')
+    settings = _get_teacher_collab_settings(teacher_id)
+    api_key = settings.get('nanobanana_api_key')
+    if not api_key:
+        return jsonify({'error': 'The teacher has not set a Nanobanana Pro API key yet.'}), 400
+    central_topic = space.get('central_topic') or 'Discussion'
+    nodes_data = space.get('nodes_data')
+    tree_summary = _build_tree_summary(nodes_data) if nodes_data else ''
+    prompt = f"""Create a professional educational infographic about:
+Topic: {central_topic}
+
+Key subtopics and content:
+{tree_summary or '(No content yet)'}
+
+Style: Clean, modern infographic with icons, sections for each subtopic,
+key facts highlighted, educational and visually engaging.
+Color scheme: Warm educational tones.
+Layout: Vertical infographic format suitable for printing."""
+    try:
+        resp = nanobanana_generate_pro(api_key, prompt, aspect_ratio="4:5")
+        if resp.get('code') != 200:
+            return jsonify({'error': resp.get('message', 'API error')}), 400
+        task_id = (resp.get('data') or {}).get('taskId')
+        if not task_id:
+            return jsonify({'error': 'No task ID returned'}), 500
+        result = nanobanana_wait_for_result(api_key, task_id)
+        if not result.get('success'):
+            return jsonify({'error': result.get('error', 'Generation failed')}), 500
+        image_url = result.get('result_image_url')
+        infographics = list(space.get('infographics') or [])
+        infographics.append({'url': image_url, 'created_at': datetime.utcnow().isoformat()})
+        db.db.collab_spaces.update_one(
+            {'space_id': space_id},
+            {'$set': {'infographics': infographics, 'updated_at': datetime.utcnow()}},
+        )
+        _increment_generation_count(space_id)
+        new_count = (space.get('generation_count') or 0) + 1
+        return jsonify({'success': True, 'image_url': image_url, 'generation_count': new_count})
+    except Exception as e:
+        logger.exception("Collab Space infographic generation error: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/collab-space/<space_id>/generate-pdf', methods=['POST'])
+@student_or_teacher_required
+def api_collab_space_generate_pdf(space_id):
+    """Generate AI-based study notes PDF from the mind-map tree."""
+    space, err = _get_collab_space_for_api(space_id)
+    if err:
+        return err
+    # Check generation limit
+    ok, limit_err = _check_generation_limit(space, space_id)
+    if not ok:
+        return limit_err
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    import re as _re
+
+    nodes_data = space.get('nodes_data') or {}
+    central_topic = space.get('central_topic') or 'Discussion'
+    report_payload = _build_report_payload(nodes_data, space) if nodes_data else ''
+
+    # AI: generate a complete PDF report from all topics, subtopics, text, images
+    ai_notes = None
+    teacher_id = space.get('teacher_id')
+    teacher = Teacher.find_one({'teacher_id': teacher_id})
+    client, model_name, provider = get_teacher_ai_service(teacher, 'anthropic')
+    if not client:
+        client, model_name, provider = get_teacher_ai_service(teacher, 'openai')
+    if client and report_payload.strip():
+        ai_prompt = f"""You are creating a complete PDF report for students from their Collab Space mind map. Your job is to capture ALL topics, subtopics, texts, and image references below and arrange them into a clear, professional report.
+
+Central topic: {central_topic}
+
+Full structured data from the mind map (topics, subtopics, bullet points; "[Includes image]" means that node has an image):
+{report_payload}
+
+Requirements:
+- Include every topic and subtopic and all text exactly as provided; do not omit any student content
+- Where you see "[Includes image]", note it in the report (e.g. "See image" or "[Image attached]") so the report reflects that visuals were contributed
+- If there are "GENERATED INFOGRAPHICS" listed, add a short "Generated infographics" section at the end that references them
+- Use a clear report structure: main sections for each topic, subheadings for subtopics, bullets for details
+- Use Markdown: headings with # / ## / ###, bullet points with -, bold with **
+- Add a brief "Key takeaways" section at the end summarising the main points
+- Do not invent content — only use what is in the data above"""
+        try:
+            if provider == 'anthropic':
+                resp = client.messages.create(model=model_name, max_tokens=3000,
+                    messages=[{'role': 'user', 'content': ai_prompt}])
+                ai_notes = resp.content[0].text
+            elif provider in ('openai', 'deepseek'):
+                resp = client.chat.completions.create(model=model_name, max_tokens=3000,
+                    messages=[{'role': 'user', 'content': ai_prompt}])
+                ai_notes = resp.choices[0].message.content
+        except Exception as e:
+            logger.warning("AI study notes generation failed, falling back to raw: %s", e)
+
+    # Build PDF
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('CTitle', parent=styles['Title'], fontSize=22, spaceAfter=8, textColor=colors.HexColor('#0f172a'))
+    subtitle_style = ParagraphStyle('CSub', parent=styles['Normal'], fontSize=11, textColor=colors.HexColor('#64748b'), spaceAfter=16)
+    h1 = ParagraphStyle('CH1', parent=styles['Heading1'], fontSize=16, spaceAfter=8, textColor=colors.HexColor('#1e40af'))
+    h2 = ParagraphStyle('CH2', parent=styles['Heading2'], fontSize=13, spaceAfter=6, leftIndent=0.5 * cm, textColor=colors.HexColor('#0f766e'))
+    h3 = ParagraphStyle('CH3', parent=styles['Heading3'], fontSize=11, spaceAfter=4, leftIndent=1 * cm)
+    body = ParagraphStyle('CBody', parent=styles['Normal'], fontSize=10, spaceAfter=4, leading=14)
+    body_indent = ParagraphStyle('CBodyI', parent=body, leftIndent=0.5 * cm)
+    bullet = ParagraphStyle('CBullet', parent=body, leftIndent=1 * cm, bulletIndent=0.5 * cm, spaceAfter=3)
+    key_style = ParagraphStyle('CKey', parent=styles['Normal'], fontSize=10, spaceAfter=4, leading=14,
+                               backColor=colors.HexColor('#f0f9ff'), borderPadding=8, leftIndent=0.3 * cm, rightIndent=0.3 * cm)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm)
+    story = []
+    story.append(Paragraph(f"Study Notes: {central_topic}", title_style))
+    story.append(Paragraph(f"Generated from Collab Space: {space.get('name', '')}", subtitle_style))
+    story.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=12))
+
+    if ai_notes:
+        for line in ai_notes.split('\n'):
+            stripped = line.strip()
+            if not stripped:
+                story.append(Spacer(1, 0.2 * cm))
+                continue
+            stripped = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', stripped)
+            stripped = _re.sub(r'\*(.+?)\*', r'<i>\1</i>', stripped)
+            if stripped.startswith('### '):
+                story.append(Paragraph(stripped[4:], h3))
+            elif stripped.startswith('## '):
+                story.append(Paragraph(stripped[3:], h2))
+            elif stripped.startswith('# '):
+                story.append(Paragraph(stripped[2:], h1))
+            elif stripped.startswith('- ') or stripped.startswith('* '):
+                story.append(Paragraph(f"• {stripped[2:]}", bullet))
+            elif stripped.startswith('> '):
+                story.append(Paragraph(stripped[2:], key_style))
+            else:
+                story.append(Paragraph(stripped, body))
+    else:
+        story.append(Paragraph("<i>AI study notes unavailable — showing raw contributions.</i>", body))
+        story.append(Spacer(1, 0.3 * cm))
+        central = nodes_data.get('central', {})
+        if central.get('label'):
+            story.append(Paragraph(f"Central Topic: {central['label']}", h1))
+        if central.get('content'):
+            story.append(Paragraph(central['content'], body))
+        story.append(Spacer(1, 0.3 * cm))
+        for n1 in nodes_data.get('layer1', []):
+            story.append(Paragraph(n1.get('label', ''), h1))
+            if n1.get('content'):
+                story.append(Paragraph(n1['content'], body_indent))
+            for n2 in nodes_data.get('layer2', []):
+                if n2.get('parentId') == n1.get('id'):
+                    story.append(Paragraph(n2.get('label', ''), h2))
+                    if n2.get('content'):
+                        story.append(Paragraph(n2['content'], body_indent))
+                    for n3 in nodes_data.get('layer3', []):
+                        if n3.get('parentId') == n2.get('id'):
+                            lbl = n3.get('label', '')
+                            txt = n3.get('textContent') or n3.get('content') or ''
+                            story.append(Paragraph(f"• {lbl}: {txt}" if txt else f"• {lbl}", bullet))
+            story.append(Spacer(1, 0.2 * cm))
+
+    try:
+        doc.build(story)
+    except Exception as e:
+        logger.exception("PDF build error: %s", e)
+        return jsonify({'error': 'Failed to generate PDF'}), 500
+    buf.seek(0)
+    _increment_generation_count(space_id)
+    return send_file(buf, mimetype='application/pdf', as_attachment=True,
+                     download_name=f"{space.get('name', 'study-notes')}.pdf")
+
+
+# ============================================================================
+# COLLAB SPACE – SOCKET.IO REAL-TIME EVENTS
+# ============================================================================
+
+# Server-side room presence tracking (color uniqueness + user list)
+_collab_rooms = {}   # { room: { sid: {user_id, user_name, color, user_role} } }
+_sid_to_room = {}    # { sid: room }
+
+
+@socketio.on('join_space')
+def handle_join_space(data):
+    """Client joins a space room for real-time updates."""
+    space_id = data.get('space_id')
+    user_id = data.get('user_id')
+    user_name = data.get('user_name')
+    user_role = data.get('user_role')
+    color = data.get('color')
+    if not space_id:
+        return
+    room = f'collab_{space_id}'
+    sid = request.sid
+    join_room(room)
+    if room not in _collab_rooms:
+        _collab_rooms[room] = {}
+    _collab_rooms[room][sid] = {
+        'user_id': user_id, 'user_name': user_name,
+        'user_role': user_role, 'color': color,
+    }
+    _sid_to_room[sid] = room
+    emit('room_users', {'users': list(_collab_rooms[room].values())})
+    emit('user_joined', {
+        'user_id': user_id, 'user_name': user_name,
+        'user_role': user_role, 'color': color,
+    }, to=room, include_self=False)
+    logger.info(f'[SocketIO] {user_name} ({user_id}) joined room {room}')
+
+
+@socketio.on('leave_space')
+def handle_leave_space(data):
+    space_id = data.get('space_id')
+    user_id = data.get('user_id')
+    user_name = data.get('user_name', '')
+    if not space_id:
+        return
+    room = f'collab_{space_id}'
+    sid = request.sid
+    leave_room(room)
+    if room in _collab_rooms:
+        _collab_rooms[room].pop(sid, None)
+        if not _collab_rooms[room]:
+            del _collab_rooms[room]
+    _sid_to_room.pop(sid, None)
+    emit('user_left', {'user_id': user_id, 'user_name': user_name}, to=room, include_self=False)
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Clean up room presence on unexpected disconnect."""
+    sid = request.sid
+    room = _sid_to_room.pop(sid, None)
+    if room and room in _collab_rooms:
+        user_info = _collab_rooms[room].pop(sid, None)
+        if not _collab_rooms[room]:
+            del _collab_rooms[room]
+        if user_info:
+            emit('user_left', {
+                'user_id': user_info.get('user_id'),
+                'user_name': user_info.get('user_name', ''),
+            }, to=room)
+
+
+@socketio.on('color_changed')
+def handle_color_changed(data):
+    """User changed their color – update tracking and broadcast."""
+    space_id = data.get('space_id')
+    user_id = data.get('user_id')
+    color = data.get('color')
+    if not space_id:
+        return
+    room = f'collab_{space_id}'
+    sid = request.sid
+    if room in _collab_rooms and sid in _collab_rooms[room]:
+        _collab_rooms[room][sid]['color'] = color
+    emit('color_changed', {'user_id': user_id, 'color': color}, to=room, include_self=False)
+
+
+@socketio.on('node_added')
+def handle_node_added(data):
+    """A user created a new node. Broadcast to others and persist atomically."""
+    space_id = data.get('space_id')
+    node = data.get('node')
+    layer_key = data.get('layer_key')
+    if not space_id or not node or not layer_key:
+        return
+    room = f'collab_{space_id}'
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id},
+        {'$push': {f'nodes_data.{layer_key}': node}, '$set': {'updated_at': datetime.utcnow()}}
+    )
+    emit('node_added', {'node': node, 'layer_key': layer_key, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('node_deleted')
+def handle_node_deleted(data):
+    """A user deleted a node (and its descendants). Broadcast & persist."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    deleted_ids = data.get('deleted_ids', [])
+    if not space_id or not node_id:
+        return
+    room = f'collab_{space_id}'
+    for lk in ('layer1', 'layer2', 'layer3'):
+        db.db.collab_spaces.update_one(
+            {'space_id': space_id},
+            {'$pull': {f'nodes_data.{lk}': {'id': {'$in': deleted_ids}}}},
+        )
+    db.db.collab_spaces.update_one({'space_id': space_id}, {'$set': {'updated_at': datetime.utcnow()}})
+    emit('node_deleted', {'node_id': node_id, 'deleted_ids': deleted_ids, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('node_voted')
+def handle_node_voted(data):
+    """A user voted on a node."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    layer_key = data.get('layer_key')
+    if not space_id or not node_id or not layer_key:
+        return
+    room = f'collab_{space_id}'
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id, f'nodes_data.{layer_key}.id': node_id},
+        {'$inc': {f'nodes_data.{layer_key}.$.votes': 1}, '$set': {'updated_at': datetime.utcnow()}}
+    )
+    emit('node_voted', {'node_id': node_id, 'layer_key': layer_key, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('comment_added')
+def handle_comment_added(data):
+    """A user added a comment to a node."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    layer_key = data.get('layer_key')
+    comment = data.get('comment')
+    if not space_id or not node_id or not layer_key or not comment:
+        return
+    room = f'collab_{space_id}'
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id, f'nodes_data.{layer_key}.id': node_id},
+        {'$push': {f'nodes_data.{layer_key}.$.comments': comment}, '$set': {'updated_at': datetime.utcnow()}}
+    )
+    emit('comment_added', {'node_id': node_id, 'layer_key': layer_key, 'comment': comment, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('node_moved')
+def handle_node_moved(data):
+    """A user dragged a node to a new position."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    layer_key = data.get('layer_key')
+    x = data.get('x')
+    y = data.get('y')
+    if not space_id or not node_id:
+        return
+    room = f'collab_{space_id}'
+    if layer_key == 'central':
+        db.db.collab_spaces.update_one(
+            {'space_id': space_id},
+            {'$set': {'nodes_data.central.x': x, 'nodes_data.central.y': y, 'updated_at': datetime.utcnow()}}
+        )
+    else:
+        db.db.collab_spaces.update_one(
+            {'space_id': space_id, f'nodes_data.{layer_key}.id': node_id},
+            {'$set': {f'nodes_data.{layer_key}.$.x': x, f'nodes_data.{layer_key}.$.y': y, 'updated_at': datetime.utcnow()}}
+        )
+    emit('node_moved', {'node_id': node_id, 'x': x, 'y': y, 'by': data.get('user_id')}, to=room, include_self=False)
+
+
+@socketio.on('node_edited')
+def handle_node_edited(data):
+    """A user edited the text of their node."""
+    space_id = data.get('space_id')
+    node_id = data.get('node_id')
+    layer_key = data.get('layer_key')
+    label = data.get('label')
+    content = data.get('content')
+    if not space_id or not node_id or not layer_key:
+        return
+    room = f'collab_{space_id}'
+    update_fields = {'updated_at': datetime.utcnow()}
+    if label is not None:
+        update_fields[f'nodes_data.{layer_key}.$.label'] = label
+    if content is not None:
+        update_fields[f'nodes_data.{layer_key}.$.content'] = content
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id, f'nodes_data.{layer_key}.id': node_id},
+        {'$set': update_fields}
+    )
+    emit('node_edited', {
+        'node_id': node_id, 'layer_key': layer_key,
+        'label': label, 'content': content, 'by': data.get('user_id'),
+    }, to=room, include_self=False)
+
+
+@socketio.on('cursor_move')
+def handle_cursor_move(data):
+    """Broadcast cursor/pointer position for live presence."""
+    space_id = data.get('space_id')
+    if not space_id:
+        return
+    room = f'collab_{space_id}'
+    emit('cursor_move', {
+        'user_id': data.get('user_id'),
+        'user_name': data.get('user_name'),
+        'color': data.get('color'),
+        'x': data.get('x'),
+        'y': data.get('y'),
+    }, to=room, include_self=False)
+
+
+@socketio.on('settings_changed')
+def handle_settings_changed(data):
+    """Teacher changed space settings – broadcast to all."""
+    space_id = data.get('space_id')
+    settings = data.get('settings')
+    if not space_id or not settings:
+        return
+    room = f'collab_{space_id}'
+    db.db.collab_spaces.update_one(
+        {'space_id': space_id},
+        {'$set': {'collab_settings': settings, 'updated_at': datetime.utcnow()}}
+    )
+    emit('settings_changed', {'settings': settings, 'by': data.get('user_id')}, to=room, include_self=False)
 
 
 @app.route('/api/learning/chat', methods=['POST'])
@@ -8515,4 +9175,4 @@ def rate_limit(e):
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    socketio.run(app, host='0.0.0.0', port=port, debug=debug)
