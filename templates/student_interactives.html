@@ -62,20 +62,6 @@
         <p class="text-muted text-center py-4">Select class and topic above, then click Apply to see interactives.</p>
     </div>
 
-    <!-- Preview Modal -->
-    <div class="modal fade" id="preview-modal" tabindex="-1">
-        <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="preview-modal-title">Interactive</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body p-0">
-                    <iframe id="preview-iframe" style="width:100%;height:70vh;border:none;"></iframe>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <script>
@@ -84,9 +70,6 @@
     const filterTopic = document.getElementById('filter-topic');
     const applyBtn = document.getElementById('apply-filter-btn');
     const container = document.getElementById('interactives-container');
-    const previewModal = document.getElementById('preview-modal');
-    const previewIframe = document.getElementById('preview-iframe');
-    const previewTitle = document.getElementById('preview-modal-title');
 
     const studentClasses = {{ student_classes | tojson }};
 
@@ -148,9 +131,8 @@
 
             container.querySelectorAll('.open-interactive-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    previewTitle.textContent = btn.dataset.title;
-                    previewIframe.src = '{{ url_for("serve_interactive", interactive_id="__ID__") }}'.replace('__ID__', btn.dataset.id);
-                    new bootstrap.Modal(previewModal).show();
+                    const url = '{{ url_for("serve_interactive", interactive_id="__ID__") }}'.replace('__ID__', btn.dataset.id);
+                    window.open(url, '_blank');
                 });
             });
         } catch (e) {
@@ -161,13 +143,11 @@
     filterClass.addEventListener('change', loadTopics);
     applyBtn.addEventListener('click', loadInteractives);
 
-    // Check for view= in URL (direct link from teacher preview)
+    // Check for view= in URL (direct link)
     const urlParams = new URLSearchParams(window.location.search);
     const viewId = urlParams.get('view');
     if (viewId) {
-        previewIframe.src = '{{ url_for("serve_interactive", interactive_id="__ID__") }}'.replace('__ID__', viewId);
-        previewTitle.textContent = 'Interactive';
-        new bootstrap.Modal(previewModal).show();
+        window.open('{{ url_for("serve_interactive", interactive_id="__ID__") }}'.replace('__ID__', viewId), '_blank');
     }
 
     // Load topics on init
