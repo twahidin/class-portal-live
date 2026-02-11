@@ -340,6 +340,21 @@
         </div>
     </div>
     
+    <!-- Complete Question Paper Online (above the line) -->
+    {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
+    <div class="card mb-4" id="editable-question-section">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Complete Question Paper Online</h5>
+            <button type="button" class="btn btn-light btn-sm" id="btn-open-question-paper-annotator" title="Open PDF editor to draw, add text, and submit your work">
+                <i class="bi bi-pencil-fill me-1"></i>Open PDF Editor
+            </button>
+        </div>
+        <div class="card-body">
+            <p class="text-muted mb-0 small">Draw, highlight, add text and shapes on the question paper. Export a PDF or submit your work directly for teacher/AI review.</p>
+        </div>
+    </div>
+    {% endif %}
+    
     <!-- Visible divider -->
     <hr class="my-4 border-2 border-secondary">
     
@@ -374,30 +389,29 @@
         </div>
     </div>
     
-    <!-- Visible divider -->
-    <hr class="my-4 border-2 border-secondary">
-    
-    <!-- Work on Question Paper - Fullscreen annotation editor -->
+    <!-- Read-only PDF view of question paper (below the 3 boxes) -->
     {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
-    <div class="card mb-4" id="editable-question-section">
-        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-            <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Work on Question Paper</h5>
-            <button type="button" class="btn btn-light btn-sm" id="btn-open-question-paper-annotator" title="Open annotator to draw, add text, and export PDF with your answers">
-                <i class="bi bi-pencil-fill me-1"></i>Open annotator
-            </button>
+    <div class="card mb-4">
+        <div class="card-header bg-light">
+            <h6 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Question Paper</h6>
         </div>
-        <div class="card-body">
-            <p class="text-muted mb-0 small">Draw, highlight, add text and shapes on the question paper. Export a PDF with your answers when done.</p>
+        <div class="card-body p-0" style="min-height: 60vh;">
+            <iframe src="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
+                    style="width: 100%; height: 70vh; border: none;" 
+                    title="Question paper"></iframe>
         </div>
     </div>
-    <!-- Question paper annotation modal (fullscreen, dark theme) -->
+    {% endif %}
+    
+    <!-- Question paper PDF editor modal (fullscreen, dark theme) -->
+    {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
     <div class="modal fade" id="questionPaperAnnotatorModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
         <div class="modal-dialog modal-fullscreen">
             <div class="modal-content annotator-modal-theme">
                 <div class="annotator-top-bar">
                     <div class="annotator-brand">
                         <i class="bi bi-mortarboard-fill"></i>
-                        <span>Work on Question Paper</span>
+                        <span>Complete Question Paper Online</span>
                     </div>
                     <div class="annotator-page-nav">
                         <button type="button" class="annotator-page-btn" id="qp-prev-page" disabled><i class="bi bi-chevron-left"></i></button>
@@ -409,6 +423,7 @@
                         <button type="button" class="annotator-btn outline" id="qp-redo" title="Redo"><i class="bi bi-arrow-clockwise"></i></button>
                         <button type="button" class="annotator-btn outline" id="qp-clear-page"><i class="bi bi-trash3 me-1"></i>Clear</button>
                         <button type="button" class="annotator-btn success" id="qp-download-pdf"><i class="bi bi-download me-1"></i>Download with answers</button>
+                        <button type="button" class="annotator-btn success" id="qp-submit-assignment" title="Submit your work as PDF for review"><i class="bi bi-send me-1"></i>Submit assignment</button>
                         <button type="button" class="annotator-btn outline" data-bs-dismiss="modal">Close</button>
                     </div>
                 </div>
@@ -858,7 +873,11 @@
         const askTeacherBox = document.getElementById('ask-teacher-box');
         const editableSection = document.getElementById('editable-question-section');
         if (submitOnlineBox && editableSection) {
-            submitOnlineBox.addEventListener('click', () => editableSection.scrollIntoView({ behavior: 'smooth' }));
+            submitOnlineBox.addEventListener('click', () => {
+                editableSection.scrollIntoView({ behavior: 'smooth' });
+                const openEditorBtn = document.getElementById('btn-open-question-paper-annotator');
+                if (openEditorBtn) openEditorBtn.click();
+            });
         }
         if (askAiBox) {
             askAiBox.addEventListener('click', () => {
@@ -1109,6 +1128,60 @@
                 URL.revokeObjectURL(url);
                 bootstrap.Modal.getInstance(document.getElementById('questionPaperAnnotatorModal')).hide();
             }).catch(function(err) { alert(err.message || 'Export failed.'); }).finally(function() { btn.disabled = false; btn.innerHTML = '<i class="bi bi-download me-1"></i>Download with answers'; });
+        });
+        document.getElementById('qp-submit-assignment').addEventListener('click', function() {
+            var submitBtn = this;
+            if (submitBtn.disabled) return;
+            if (!confirm('Submit your work as PDF? You cannot change your answers after submission.')) return;
+            pageAnnotations[currentPage] = canvas.toJSON(['data']);
+            saveToStorage();
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Submitting...';
+            var pageImages = {};
+            function collectPage(i) {
+                if (i >= totalPages) return Promise.resolve(pageImages);
+                return new Promise(function(resolve) {
+                    loadPageBackground(i, function() {
+                        var d = pageAnnotations[i] || pageAnnotations[String(i)];
+                        if (d) canvas.loadFromJSON(d, function() {
+                            pageImages[i] = canvas.toDataURL({ format: 'png', quality: 1 });
+                            canvas.renderAll();
+                            resolve(collectPage(i + 1));
+                        });
+                        else {
+                            canvas.getObjects().forEach(function(o) { canvas.remove(o); });
+                            canvas.renderAll();
+                            pageImages[i] = canvas.toDataURL({ format: 'png', quality: 1 });
+                            resolve(collectPage(i + 1));
+                        }
+                    });
+                });
+            }
+            collectPage(0).then(function(images) {
+                return fetch('/student/assignment/' + assignmentId + '/export-annotated-question-paper', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page_images: images }) }).then(function(r) { return r.blob(); });
+            }).then(function(blob) {
+                if (!blob || blob.size === 0) throw new Error('Export failed');
+                var formData = new FormData();
+                formData.append('assignment_id', assignmentId);
+                formData.append('files', new File([blob], 'question_paper_with_answers.pdf', { type: 'application/pdf' }));
+                formData.append('file_type', 'pdf');
+                return fetch('/student/submit', { method: 'POST', body: formData }).then(function(r) { return r.json(); });
+            }).then(function(result) {
+                bootstrap.Modal.getInstance(document.getElementById('questionPaperAnnotatorModal')).hide();
+                var loadingModalEl = document.getElementById('loading-modal');
+                if (loadingModalEl && result.success) {
+                    alert('Assignment submitted successfully! AI is generating feedback...');
+                    window.location.href = result.redirect || '/student/submissions';
+                } else if (!result.success) {
+                    alert(result.error || 'Submission failed. Please try again.');
+                }
+            }).catch(function(err) {
+                alert(err.message || 'Submission failed. Please try again.');
+                console.error(err);
+            }).finally(function() {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="bi bi-send me-1"></i>Submit assignment';
+            });
         });
         document.addEventListener('keydown', function(e) {
             if (!canvas || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
