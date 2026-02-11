@@ -718,6 +718,7 @@
 #questionPaperAnnotatorModal .color-grid-annotator .color-swatch:hover { transform: scale(1.1); }
 #questionPaperAnnotatorModal .color-grid-annotator .color-swatch.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.3); }
 @media (max-width: 768px) { #questionPaperAnnotatorModal .annotator-shortcut-hint { display: none; } }
+.help-btn[data-help-type].active { font-weight: 600; box-shadow: 0 0 0 2px currentColor; }
 </style>
 
 <!-- Ask AI for Help Modal -->
@@ -729,19 +730,17 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small mb-3">Get AI assistance for one question at a time. Type, upload a photo, or capture a region from the question paper.</p>
+                <p class="text-muted small mb-3">Get AI assistance for one question at a time. Capture a region from the question paper or type your query below.</p>
                 <div class="mb-3">
-                    <label class="form-label fw-semibold">Question</label>
-                    <textarea class="form-control mb-2" id="modal-help-question" rows="3" placeholder="Type or paste the question you need help with..."></textarea>
+                    <label class="form-label fw-semibold">My Query</label>
                     <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-                        <label class="btn btn-sm btn-outline-secondary mb-0" for="modal-question-image-input"><i class="bi bi-camera me-1"></i>Upload Photo</label>
-                        <input type="file" id="modal-question-image-input" accept="image/*" class="d-none">
                         {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
                         <button type="button" class="btn btn-sm btn-outline-primary mb-0" id="btn-capture-from-pdf" title="Select a region from the question paper PDF">
                             <i class="bi bi-crop me-1"></i>Capture from PDF
                         </button>
                         {% endif %}
                     </div>
+                    <textarea class="form-control mb-2" id="modal-help-question" rows="3" placeholder="Type your question or click a prompt below to get started..."></textarea>
                     <div id="modal-help-question-preview" class="mt-2" style="display: none;">
                         <small class="text-muted">Question image:</small>
                         <div class="d-flex align-items-center gap-2 mt-1">
@@ -783,13 +782,19 @@
                         <input type="file" id="modal-answer-image-input" accept="image/*" class="d-none">
                     </div>
                 </div>
-                <div class="d-flex flex-wrap gap-2">
-                    <button type="button" class="btn btn-outline-danger btn-sm help-btn" onclick="askForHelpFromModal('stuck')">Help me! I am stuck</button>
-                    <button type="button" class="btn btn-outline-warning btn-sm help-btn" onclick="askForHelpFromModal('wrong')">Where did I go wrong?</button>
-                    <button type="button" class="btn btn-outline-success btn-sm help-btn" onclick="askForHelpFromModal('improve')">How to improve</button>
-                    <button type="button" class="btn btn-outline-info btn-sm help-btn" onclick="askForHelpFromModal('explain')">Explain concept</button>
-                    <button type="button" class="btn btn-outline-primary btn-sm help-btn" onclick="askForHelpFromModal('breakdown')">Break down question</button>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small text-muted">Click a prompt to add to your query:</label>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-outline-danger btn-sm help-btn" data-help-type="stuck" data-prompt="I'm stuck and don't know how to start. Can you give me hints to get started?">Help me! I am stuck</button>
+                        <button type="button" class="btn btn-outline-warning btn-sm help-btn" data-help-type="wrong" data-prompt="I think I got this wrong. Can you help me understand where I went wrong?">Where did I go wrong?</button>
+                        <button type="button" class="btn btn-outline-success btn-sm help-btn" data-help-type="improve" data-prompt="How can I improve my answer?">How to improve</button>
+                        <button type="button" class="btn btn-outline-info btn-sm help-btn" data-help-type="explain" data-prompt="Can you explain the concept behind this question?">Explain concept</button>
+                        <button type="button" class="btn btn-outline-primary btn-sm help-btn" data-help-type="breakdown" data-prompt="Can you help me understand what this question is asking?">Break down question</button>
+                    </div>
                 </div>
+                <button type="button" class="btn btn-info text-white help-btn" id="modal-get-help-btn">
+                    <i class="bi bi-robot me-1"></i>Get AI Help
+                </button>
                 <div id="modal-help-result" class="mt-3" style="display: none;">
                     <div class="card border-info">
                         <div class="card-body" id="modal-help-content"></div>
@@ -1271,21 +1276,30 @@
     let modalQuestionImageData = null;
     let modalAnswerImageData = null;
     let modalQuestionImageFromCapture = false;
+    let modalSelectedHelpType = 'stuck';
+    const helpPromptTexts = { stuck: "I'm stuck and don't know how to start. Can you give me hints to get started?", wrong: "I think I got this wrong. Can you help me understand where I went wrong?", improve: "How can I improve my answer?", explain: "Can you explain the concept behind this question?", breakdown: "Can you help me understand what this question is asking?" };
     document.addEventListener('DOMContentLoaded', function() {
         const qImg = document.getElementById('modal-question-image-input');
         const aImg = document.getElementById('modal-answer-image-input');
         if (qImg) qImg.onchange = function() {
             const f = this.files?.[0];
-            if (f) {
-                const r = new FileReader();
-                r.onload = e => { modalQuestionImageData = e.target.result; modalQuestionImageFromCapture = false; updateModalQuestionPreview(); };
-                r.readAsDataURL(f);
-            }
+            if (f) { const r = new FileReader(); r.onload = e => { modalQuestionImageData = e.target.result; modalQuestionImageFromCapture = false; updateModalQuestionPreview(); }; r.readAsDataURL(f); }
         };
         if (aImg) aImg.onchange = function() {
             const f = this.files?.[0];
             if (f) { const r = new FileReader(); r.onload = e => modalAnswerImageData = e.target.result; r.readAsDataURL(f); }
         };
+        document.querySelectorAll('.help-btn[data-help-type]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                modalSelectedHelpType = this.getAttribute('data-help-type');
+                const prompt = this.getAttribute('data-prompt') || helpPromptTexts[modalSelectedHelpType];
+                const ta = document.getElementById('modal-help-question');
+                if (ta) ta.value = prompt;
+                document.querySelectorAll('.help-btn[data-help-type]').forEach(function(b) { b.classList.remove('active'); });
+                this.classList.add('active');
+            });
+        });
+        document.getElementById('modal-get-help-btn')?.addEventListener('click', function() { askForHelpFromModal(modalSelectedHelpType); });
     });
     function updateModalQuestionPreview() {
         const wrap = document.getElementById('modal-help-question-preview');
