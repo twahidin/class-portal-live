@@ -86,6 +86,8 @@ class Database:
         self.db.interactives.create_index([('subject', 1), ('topic', 1)])
         # Interactives access (admin: which teachers/classes/teaching groups can use)
         self.db.interactives_access.create_index('config_id', unique=True)
+        # Assessments access (admin: which teachers/classes/teaching groups can create and use Assessments)
+        self.db.assessments_access.create_index('config_id', unique=True)
 
 db = Database()
 

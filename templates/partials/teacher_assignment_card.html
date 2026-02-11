@@ -3,6 +3,9 @@
         <div class="d-flex justify-content-between align-items-start">
             <div>
                 <span class="badge bg-primary mb-2">{{ assignment.subject }}</span>
+                {% if assignment.assignment_type == 'assessment' %}
+                <span class="badge bg-success mb-2">Assessment</span>
+                {% endif %}
                 {% if assignment.status == 'draft' %}
                 <span class="badge bg-secondary">Draft</span>
                 {% endif %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Create Assignment - Teacher Portal{% endblock %}
+{% block title %}{% if is_assessment %}Create Assessment{% else %}Create Assignment{% endif %} - Teacher Portal{% endblock %}
 
 {% block navbar %}
 {% set active_nav = 'assignments' %}
@@ -12,13 +12,13 @@
     <nav aria-label="breadcrumb" class="mb-3">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{{ url_for('teacher_assignments') }}">Assignments</a></li>
-            <li class="breadcrumb-item active">Create New</li>
+            <li class="breadcrumb-item active">{% if is_assessment %}Create Assessment{% else %}Create New{% endif %}</li>
         </ol>
     </nav>
     
     <div class="page-header mb-4">
-        <h1><i class="bi bi-plus-circle me-2"></i>Create Assignment</h1>
-        <p class="text-muted">Upload your question paper and answer key PDFs</p>
+        <h1><i class="bi bi-{% if is_assessment %}clipboard-check{% else %}plus-circle{% endif %} me-2"></i>{% if is_assessment %}Create Assessment{% else %}Create Assignment{% endif %}</h1>
+        <p class="text-muted">{% if is_assessment %}Upload question paper and answer key. Students hand in physical papers; you upload unmarked → AI feedback → mark hard copy → upload marked copy.{% else %}Upload your question paper and answer key PDFs{% endif %}</p>
     </div>
     
     {% if error %}
@@ -34,6 +34,7 @@
     {% endif %}
     
     <form method="POST" enctype="multipart/form-data" id="create-assignment-form">
+        {% if is_assessment %}<input type="hidden" name="type" value="assessment">{% endif %}
         <div class="row">
             <div class="col-lg-8">
                 <!-- Basic Info -->
@@ -547,7 +548,7 @@
                         
                         <div class="d-grid gap-2">
                             <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">
-                                <i class="bi bi-save me-2"></i>Save Assignment
+                                <i class="bi bi-save me-2"></i>Save {% if is_assessment %}Assessment{% else %}Assignment{% endif %}
                             </button>
                             <a href="{{ url_for('teacher_assignments') }}" class="btn btn-outline-secondary">
                                 Cancel

@@ -583,6 +583,8 @@ def assignments_list():
     
     # Filter assignments based on target class/teaching group
     assignments = [a for a in all_assignments if can_student_access_assignment(student, a)]
+    # Filter out assessments for students without assessment access
+    assignments = [a for a in assignments if a.get('assignment_type') != 'assessment' or _student_has_assessments_access(session['student_id'])]
     
     # Group by subject
     subjects = {}
@@ -637,6 +639,8 @@ def assignments_by_subject(subject):
     
     # Filter assignments based on target class/teaching group
     assignments = [a for a in all_assignments if can_student_access_assignment(student, a)]
+    # Filter out assessments for students without assessment access
+    assignments = [a for a in assignments if a.get('assignment_type') != 'assessment' or _student_has_assessments_access(session['student_id'])]
     
     # Count submitted assignments
     submitted_count = 0
@@ -702,6 +706,9 @@ def view_assignment(assignment_id):
     
     # Check if student can access this assignment based on target class/teaching group
     if not can_student_access_assignment(student, assignment):
+        return redirect(url_for('assignments_list'))
+    # Assessments require student_has_assessments_access
+    if assignment.get('assignment_type') == 'assessment' and not _student_has_assessments_access(session['student_id']):
         return redirect(url_for('assignments_list'))
     
     # Get existing submission (submitted, ai_reviewed, or reviewed)
@@ -1011,6 +1018,8 @@ def submit_assignment(assignment_id):
         assignment = Assignment.find_one({'assignment_id': assignment_id})
         if not assignment:
             return jsonify({'error': 'Assignment not found'}), 404
+        if assignment.get('assignment_type') == 'assessment' or assignment.get('submission_mode') == 'manual_only':
+            return jsonify({'error': 'This is an assessment. Hand in your physical paper to your teacher.'}), 400
         
         student = Student.find_one({'student_id': session['student_id']})
         teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
@@ -1657,7 +1666,12 @@ def view_student_submission_file(submission_id, file_index):
     if not submission:
         return 'Not found', 404
     
-    file_ids = submission.get('file_ids', [])
+    # Support marked copy (for assessments)
+    variant = request.args.get('variant')
+    if variant == 'marked_copy':
+        file_ids = submission.get('marked_copy_file_ids', [])
+    else:
+        file_ids = submission.get('file_ids', [])
     if file_index >= len(file_ids):
         return 'File not found', 404
     
@@ -2065,6 +2079,24 @@ def download_annotated_answer_key(submission_id):
         return 'File not found', 404
 
 
+def _get_marked_copy_files(submission: dict):
+    """Fetch marked copy files from GridFS for assessment submissions. Returns list of (content_type, bytes)."""
+    file_ids = submission.get('marked_copy_file_ids', [])
+    if not file_ids:
+        return None
+    from gridfs import GridFS
+    from bson import ObjectId
+    fs = GridFS(db.db)
+    files = []
+    for fid in file_ids:
+        try:
+            f = fs.get(ObjectId(fid))
+            files.append((f.content_type or 'application/octet-stream', f.read()))
+        except Exception as e:
+            logger.warning(f"Could not read marked copy file {fid}: {e}")
+    return files if files else None
+
+
 @app.route('/student/feedback/<submission_id>/pdf')
 @login_required
 def download_student_feedback_pdf(submission_id):
@@ -2084,11 +2116,12 @@ def download_student_feedback_pdf(submission_id):
     teacher = Teacher.find_one({'teacher_id': submission.get('teacher_id')})
     
     try:
+        marked_copy_files = _get_marked_copy_files(submission)
         # Use rubric PDF when assignment is rubric-based so student gets same criteria + detailed corrections
         if assignment.get('marking_type') == 'rubric' or (submission.get('ai_feedback') or {}).get('criteria'):
-            pdf_content = generate_rubric_review_pdf(submission, assignment, student, teacher)
+            pdf_content = generate_rubric_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
         else:
-            pdf_content = generate_review_pdf(submission, assignment, student, teacher)
+            pdf_content = generate_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
         
         filename = f"feedback_{assignment['title']}_{student['student_id']}.pdf"
         
@@ -4919,6 +4952,9 @@ def download_assignment_report(assignment_id):
 @teacher_required
 def create_assignment():
     """Create a new assignment"""
+    is_assessment = request.args.get('type') == 'assessment' or request.form.get('type') == 'assessment'
+    if is_assessment and not _teacher_has_assessments_access(session['teacher_id']):
+        return redirect(url_for('teacher_assignments'))  # No access to assessments
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
     
     # Get classes for the teacher - use comprehensive detection like dashboard
@@ -5008,6 +5044,7 @@ def create_assignment():
                                          classes=classes,
                                          teaching_groups=teaching_groups,
                                          teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
                                          error='Question paper PDF is required')
                 if not rubrics_drive_id and (not rubrics or not rubrics.filename):
                     return render_template('teacher_create_assignment.html',
@@ -5015,6 +5052,7 @@ def create_assignment():
                                          classes=classes,
                                          teaching_groups=teaching_groups,
                                          teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
                                          error='Rubrics PDF is required for rubric-based marking')
             else:
                 # For standard: question paper and answer key are required
@@ -5024,6 +5062,7 @@ def create_assignment():
                                          classes=classes,
                                          teaching_groups=teaching_groups,
                                          teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
                                          error='Question paper PDF is required')
                 if not answer_key_drive_id and (not answer_key or not answer_key.filename):
                     return render_template('teacher_create_assignment.html',
@@ -5031,6 +5070,7 @@ def create_assignment():
                                          classes=classes,
                                          teaching_groups=teaching_groups,
                                          teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
                                          error='Answer key PDF is required')
             
             assignment_id = generate_assignment_id()
@@ -5051,6 +5091,7 @@ def create_assignment():
                                      classes=classes,
                                      teaching_groups=teaching_groups,
                                      teacher_modules=teacher_modules,
+                                     is_assessment=is_assessment,
                                      error=str(e))
             
             # Extract text from PDFs for cost-effective AI processing
@@ -5197,6 +5238,9 @@ def create_assignment():
                 'created_at': datetime.utcnow(),
                 'updated_at': datetime.utcnow()
             }
+            if is_assessment:
+                assignment_doc['assignment_type'] = 'assessment'
+                assignment_doc['submission_mode'] = 'manual_only'  # Students hand in physical papers; teacher uploads
             
             # Add Google Drive folder IDs if created (for submissions)
             if drive_folders:
@@ -5232,13 +5276,15 @@ def create_assignment():
                                  classes=classes,
                                  teaching_groups=teaching_groups,
                                  teacher_modules=teacher_modules,
+                                 is_assessment=is_assessment,
                                  error=f'Failed to create assignment: {str(e)}')
     
     return render_template('teacher_create_assignment.html',
                          teacher=teacher,
                          classes=classes,
                          teaching_groups=teaching_groups,
-                         teacher_modules=teacher_modules)
+                         teacher_modules=teacher_modules,
+                         is_assessment=is_assessment)
 
 @app.route('/teacher/assignments/<assignment_id>/edit', methods=['GET', 'POST'])
 @teacher_required
@@ -5807,7 +5853,12 @@ def view_submission_file(submission_id, file_index):
     if not assignment or assignment['teacher_id'] != session['teacher_id']:
         return 'Unauthorized', 403
     
-    file_ids = submission.get('file_ids', [])
+    # Support marked copy (for assessments)
+    variant = request.args.get('variant')
+    if variant == 'marked_copy':
+        file_ids = submission.get('marked_copy_file_ids', [])
+    else:
+        file_ids = submission.get('file_ids', [])
     if file_index >= len(file_ids):
         return 'File not found', 404
     
@@ -5916,7 +5967,8 @@ def save_review_feedback(submission_id):
                 from utils.google_drive import upload_student_submission
                 
                 # Generate PDF with student work and feedback
-                pdf_content = generate_review_pdf(submission, assignment, student, teacher)
+                marked_copy_files = _get_marked_copy_files(submission)
+                pdf_content = generate_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
                 if pdf_content:
                     # Upload to submissions folder
                     drive_result = upload_student_submission(
@@ -5941,6 +5993,73 @@ def save_review_feedback(submission_id):
     except Exception as e:
         logger.error(f"Error saving feedback: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/teacher/review/<submission_id>/upload-marked-copy', methods=['POST'])
+@teacher_required
+def upload_marked_copy(submission_id):
+    """Upload marked copy for assessment submissions. Teacher marks hard copy, then uploads scanned/photographed copy."""
+    from gridfs import GridFS
+    from bson import ObjectId
+
+    submission = Submission.find_one({'submission_id': submission_id})
+    if not submission:
+        return jsonify({'success': False, 'error': 'Submission not found'}), 404
+
+    assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+    if not assignment or assignment['teacher_id'] != session['teacher_id']:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+    if assignment.get('assignment_type') != 'assessment':
+        return jsonify({'success': False, 'error': 'Marked copy upload is only for assessments'}), 400
+
+    files = request.files.getlist('files')
+    if not files or not any(f.filename for f in files):
+        return jsonify({'success': False, 'error': 'Please upload at least one file (PDF or images)'}), 400
+
+    fs = GridFS(db.db)
+
+    # Delete old marked copy files if resubmitting
+    for old_fid in submission.get('marked_copy_file_ids', []):
+        try:
+            fs.delete(ObjectId(old_fid))
+        except Exception as e:
+            logger.warning(f"Error deleting old marked copy file {old_fid}: {e}")
+
+    file_ids = []
+    for i, file in enumerate(files):
+        if not file.filename:
+            continue
+        file_data = file.read()
+        if not file_data:
+            continue
+        ext = file.filename.lower().split('.')[-1]
+        content_type = 'application/pdf' if ext == 'pdf' else 'image/jpeg'
+        file_id = fs.put(
+            file_data,
+            filename=f"{submission_id}_marked_{i+1}.{ext}",
+            content_type=content_type,
+            submission_id=submission_id,
+            file_type='marked_copy',
+            page_num=i + 1
+        )
+        file_ids.append(str(file_id))
+
+    if not file_ids:
+        return jsonify({'success': False, 'error': 'No valid files could be read'}), 400
+
+    Submission.update_one(
+        {'submission_id': submission_id},
+        {'$set': {
+            'marked_copy_file_ids': file_ids,
+            'marked_copy_page_count': len(file_ids),
+            'marked_copy_uploaded_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
+        }}
+    )
+
+    return jsonify({'success': True, 'message': 'Marked copy uploaded', 'page_count': len(file_ids)})
+
 
 @app.route('/teacher/api/available-ai-models')
 @teacher_required
@@ -6517,7 +6636,8 @@ def save_rubric_feedback(submission_id):
                 from utils.google_drive import upload_student_submission
                 
                 # Generate PDF with student work and feedback
-                pdf_content = generate_rubric_review_pdf(submission, assignment, student, teacher)
+                marked_copy_files = _get_marked_copy_files(submission)
+                pdf_content = generate_rubric_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
                 if pdf_content:
                     # Upload to submissions folder
                     drive_result = upload_student_submission(
@@ -6687,7 +6807,8 @@ def download_rubric_feedback_pdf(submission_id):
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
     
     try:
-        pdf_content = generate_rubric_review_pdf(submission, assignment, student, teacher)
+        marked_copy_files = _get_marked_copy_files(submission)
+        pdf_content = generate_rubric_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
         
         filename = f"essay_feedback_{student['student_id']}_{assignment['assignment_id']}.pdf"
         
@@ -6720,7 +6841,8 @@ def download_feedback_pdf(submission_id):
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
     
     try:
-        pdf_content = generate_review_pdf(submission, assignment, student, teacher)
+        marked_copy_files = _get_marked_copy_files(submission)
+        pdf_content = generate_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
         
         filename = f"feedback_{student['student_id']}_{assignment['assignment_id']}.pdf"
         
@@ -7479,9 +7601,63 @@ def _student_has_interactives_access(student_id):
     return False
 
 
+# ============================================================================
+# ASSESSMENTS ACCESS - Which teachers/classes/teaching groups can use Assessments (admin-set)
+# ============================================================================
+
+ASSESSMENTS_ACCESS_CONFIG_ID = 'default'
+
+def _get_assessments_access_config():
+    """Return { teacher_ids: [], class_ids: [], teaching_group_ids: [] } from admin allocation."""
+    doc = db.db.assessments_access.find_one({'config_id': ASSESSMENTS_ACCESS_CONFIG_ID})
+    if not doc:
+        return {'teacher_ids': [], 'class_ids': [], 'teaching_group_ids': []}
+    return {
+        'teacher_ids': list(doc.get('teacher_ids') or []),
+        'class_ids': list(doc.get('class_ids') or []),
+        'teaching_group_ids': list(doc.get('teaching_group_ids') or []),
+    }
+
+def _save_assessments_access_config(teacher_ids, class_ids, teaching_group_ids):
+    """Save which teachers, classes and teaching groups have access to Assessments."""
+    db.db.assessments_access.update_one(
+        {'config_id': ASSESSMENTS_ACCESS_CONFIG_ID},
+        {'$set': {
+            'config_id': ASSESSMENTS_ACCESS_CONFIG_ID,
+            'teacher_ids': list(teacher_ids or []),
+            'class_ids': list(class_ids or []),
+            'teaching_group_ids': list(teaching_group_ids or []),
+            'updated_at': datetime.utcnow(),
+        }},
+        upsert=True,
+    )
+
+def _teacher_has_assessments_access(teacher_id):
+    """True if this teacher is allocated access to create/manage Assessments (admin-set)."""
+    config = _get_assessments_access_config()
+    return teacher_id in (config.get('teacher_ids') or [])
+
+def _student_has_assessments_access(student_id):
+    """True if this student is in an allowed class OR in an allowed teaching group."""
+    config = _get_assessments_access_config()
+    student = Student.find_one({'student_id': student_id})
+    if not student:
+        return False
+    student_classes = student.get('classes', [])
+    if not student_classes and student.get('class'):
+        student_classes = [student.get('class')]
+    if config.get('class_ids') and set(student_classes) & set(config['class_ids']):
+        return True
+    for gid in (config.get('teaching_group_ids') or []):
+        group = TeachingGroup.find_one({'group_id': gid})
+        if group and student_id in group.get('student_ids', []):
+            return True
+    return False
+
+
 @app.context_processor
 def inject_module_access():
-    """Make teacher_has_module_access, student_has_module_access, student_has_python_lab_access, teacher_has_python_lab_access, teacher_has_collab_space_access, student_has_collab_space_access, teacher_has_interactives_access, student_has_interactives_access available in all templates."""
+    """Make teacher_has_module_access, student_has_module_access, student_has_python_lab_access, teacher_has_python_lab_access, teacher_has_collab_space_access, student_has_collab_space_access, teacher_has_interactives_access, student_has_interactives_access, teacher_has_assessments_access, student_has_assessments_access available in all templates."""
     out = {
         'teacher_has_module_access': False,
         'student_has_module_access': False,
@@ -7491,17 +7667,21 @@ def inject_module_access():
         'student_has_collab_space_access': False,
         'teacher_has_interactives_access': False,
         'student_has_interactives_access': False,
+        'teacher_has_assessments_access': False,
+        'student_has_assessments_access': False,
     }
     if session.get('teacher_id'):
         out['teacher_has_module_access'] = _teacher_has_module_access(session['teacher_id'])
         out['teacher_has_python_lab_access'] = _teacher_has_python_lab_access(session['teacher_id'])
         out['teacher_has_collab_space_access'] = _teacher_has_collab_space_access(session['teacher_id'])
         out['teacher_has_interactives_access'] = _teacher_has_interactives_access(session['teacher_id'])
+        out['teacher_has_assessments_access'] = _teacher_has_assessments_access(session['teacher_id'])
     if session.get('student_id'):
         out['student_has_module_access'] = _student_has_module_access(session['student_id'])
         out['student_has_python_lab_access'] = _student_has_python_lab_access(session['student_id'])
         out['student_has_collab_space_access'] = _student_has_collab_space_access(session['student_id'])
         out['student_has_interactives_access'] = _student_has_interactives_access(session['student_id'])
+        out['student_has_assessments_access'] = _student_has_assessments_access(session['student_id'])
     return out
 
 
@@ -8709,6 +8889,8 @@ def admin_dashboard():
     collab_space_access = _get_collab_space_access_config()
     # Interactives access (which teachers/classes/teaching groups can use Interactives)
     interactives_access = _get_interactives_access_config()
+    # Assessments access (which teachers/classes/teaching groups can use Assessments)
+    assessments_access = _get_assessments_access_config()
     teaching_groups = list(TeachingGroup.find({}))
     for g in teaching_groups:
         g['student_count'] = len(g.get('student_ids') or [])
@@ -8728,7 +8910,10 @@ def admin_dashboard():
                          collab_space_teaching_group_ids=collab_space_access['teaching_group_ids'],
                          interactives_teacher_ids=interactives_access['teacher_ids'],
                          interactives_class_ids=interactives_access['class_ids'],
-                         interactives_teaching_group_ids=interactives_access['teaching_group_ids'])
+                         interactives_teaching_group_ids=interactives_access['teaching_group_ids'],
+                         assessments_teacher_ids=assessments_access['teacher_ids'],
+                         assessments_class_ids=assessments_access['class_ids'],
+                         assessments_teaching_group_ids=assessments_access['teaching_group_ids'])
 
 
 @app.route('/admin/module-access', methods=['POST'])
@@ -8791,6 +8976,22 @@ def admin_save_interactives_access():
         return jsonify({'success': True, 'message': 'Interactives access updated.'})
     except Exception as e:
         logger.error("Error saving Interactives access: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/assessments-access', methods=['POST'])
+@admin_required
+def admin_save_assessments_access():
+    """Save which teachers, classes and teaching groups have access to Assessments."""
+    try:
+        data = request.get_json()
+        teacher_ids = list(data.get('teacher_ids') or [])
+        class_ids = list(data.get('class_ids') or [])
+        teaching_group_ids = list(data.get('teaching_group_ids') or [])
+        _save_assessments_access_config(teacher_ids, class_ids, teaching_group_ids)
+        return jsonify({'success': True, 'message': 'Assessments access updated.'})
+    except Exception as e:
+        logger.error("Error saving Assessments access: %s", e)
         return jsonify({'error': str(e)}), 500
 
 

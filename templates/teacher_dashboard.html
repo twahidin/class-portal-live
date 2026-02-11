@@ -82,6 +82,19 @@
                 </div>
             </a>
         </div>
+        {% if teacher_has_assessments_access %}
+        <div class="col-md-4">
+            <a href="{{ url_for('create_assignment', type='assessment') }}" class="action-card">
+                <div class="action-icon" style="background: rgba(25, 135, 84, 0.1); color: #198754;">
+                    <i class="bi bi-clipboard-check"></i>
+                </div>
+                <div class="action-info">
+                    <h5>Create Assessment</h5>
+                    <p>Create a graded test for students to hand in</p>
+                </div>
+            </a>
+        </div>
+        {% endif %}
         <div class="col-md-4">
             <a href="{{ url_for('teacher_assignments') }}" class="action-card">
                 <div class="action-icon" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">

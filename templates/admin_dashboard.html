@@ -106,6 +106,11 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="assessment-tab" data-bs-toggle="tab" data-bs-target="#assessment" type="button">
+                <i class="bi bi-clipboard-check me-1"></i>Assessment
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="reports-tab" data-bs-toggle="tab" data-bs-target="#reports" type="button">
                 <i class="bi bi-file-earmark-pdf me-1"></i>Reports & Tools
             </button>
@@ -807,6 +812,70 @@
                             <i class="bi bi-check2-circle me-1"></i><span id="save-tool-access-btn-text">Save Python Lab access</span>
                         </button>
                         <span id="tool-access-status" class="ms-3 text-muted small"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Assessment Tab -->
+        <div class="tab-pane fade" id="assessment" role="tabpanel">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Assessment Access</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-4">
+                        Choose which <strong>teachers</strong>, <strong>classes</strong>, and <strong>teaching groups</strong> can use Assessments. Assessments are graded tests where students hand in physical papers. Teachers upload unmarked papers → AI generates feedback → teacher marks hard copy → uploads marked copy. Only selected teachers will see "Create Assessment" and the assessment workflow. Students in at least one selected class or teaching group will see assessments in their assignments list.
+                    </p>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6 class="mb-2">Teachers allowed to create Assessments</h6>
+                            <div class="border rounded p-3 mb-3" style="max-height: 280px; overflow-y: auto;">
+                                {% for t in teachers %}
+                                <div class="form-check">
+                                    <input class="form-check-input assessment-access-teacher" type="checkbox" value="{{ t.teacher_id }}" id="asa-t-{{ t.teacher_id }}"
+                                        {% if t.teacher_id in assessments_teacher_ids %}checked{% endif %}>
+                                    <label class="form-check-label" for="asa-t-{{ t.teacher_id }}">{{ t.name }} ({{ t.teacher_id }})</label>
+                                </div>
+                                {% else %}
+                                <p class="text-muted small mb-0">No teachers yet</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6 class="mb-2">Classes allowed to use Assessments</h6>
+                            <div class="border rounded p-3 mb-3" style="max-height: 280px; overflow-y: auto;">
+                                {% for c in classes %}
+                                <div class="form-check">
+                                    <input class="form-check-input assessment-access-class" type="checkbox" value="{{ c.class_id }}" id="asa-c-{{ c.class_id }}"
+                                        {% if c.class_id in assessments_class_ids %}checked{% endif %}>
+                                    <label class="form-check-label" for="asa-c-{{ c.class_id }}">{{ c.class_id }}{% if c.name and c.name != c.class_id %} ({{ c.name }}){% endif %} — {{ c.student_count or 0 }} students</label>
+                                </div>
+                                {% else %}
+                                <p class="text-muted small mb-0">No classes yet</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6 class="mb-2">Teaching groups allowed to use Assessments</h6>
+                            <div class="border rounded p-3 mb-3" style="max-height: 280px; overflow-y: auto;">
+                                {% for g in teaching_groups %}
+                                <div class="form-check">
+                                    <input class="form-check-input assessment-access-group" type="checkbox" value="{{ g.group_id }}" id="asa-g-{{ g.group_id }}"
+                                        {% if g.group_id in assessments_teaching_group_ids %}checked{% endif %}>
+                                    <label class="form-check-label" for="asa-g-{{ g.group_id }}">{{ g.name or g.group_id }} — {{ g.student_count or 0 }} students</label>
+                                </div>
+                                {% else %}
+                                <p class="text-muted small mb-0">No teaching groups yet</p>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button type="button" class="btn btn-primary" id="save-assessment-access-btn">
+                            <i class="bi bi-check2-circle me-1"></i>Save Assessment access
+                        </button>
+                        <span id="assessment-access-status" class="ms-3 text-muted small"></span>
                     </div>
                 </div>
             </div>
@@ -2998,6 +3067,39 @@
                 toolAccessStatus.className = 'ms-3 text-danger small';
             }
             saveToolAccessBtn.disabled = false;
+        });
+    }
+
+    // Save Assessment access
+    const saveAssessmentAccessBtn = document.getElementById('save-assessment-access-btn');
+    const assessmentAccessStatus = document.getElementById('assessment-access-status');
+    if (saveAssessmentAccessBtn && assessmentAccessStatus) {
+        saveAssessmentAccessBtn.addEventListener('click', async () => {
+            saveAssessmentAccessBtn.disabled = true;
+            assessmentAccessStatus.textContent = 'Saving...';
+            assessmentAccessStatus.className = 'ms-3 text-muted small';
+            try {
+                const teacherIds = [...document.querySelectorAll('.assessment-access-teacher:checked')].map(cb => cb.value);
+                const classIds = [...document.querySelectorAll('.assessment-access-class:checked')].map(cb => cb.value);
+                const teachingGroupIds = [...document.querySelectorAll('.assessment-access-group:checked')].map(cb => cb.value);
+                const response = await fetch('{{ url_for("admin_save_assessments_access") }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ teacher_ids: teacherIds, class_ids: classIds, teaching_group_ids: teachingGroupIds })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    assessmentAccessStatus.textContent = 'Saved.';
+                    assessmentAccessStatus.className = 'ms-3 text-success small';
+                } else {
+                    assessmentAccessStatus.textContent = data.error || 'Failed to save';
+                    assessmentAccessStatus.className = 'ms-3 text-danger small';
+                }
+            } catch (e) {
+                assessmentAccessStatus.textContent = 'Error saving';
+                assessmentAccessStatus.className = 'ms-3 text-danger small';
+            }
+            saveAssessmentAccessBtn.disabled = false;
         });
     }
 

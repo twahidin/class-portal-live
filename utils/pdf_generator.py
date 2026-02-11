@@ -5,10 +5,56 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch, cm
 from reportlab.lib.colors import HexColor, black, white
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, PageBreak, Image
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY, TA_RIGHT
 
 logger = logging.getLogger(__name__)
+
+
+def _image_bytes_to_pdf_page(image_bytes: bytes) -> bytes:
+    """Convert image bytes to a single-page PDF."""
+    from reportlab.lib.utils import ImageReader
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=0, leftMargin=0, topMargin=0, bottomMargin=0)
+    try:
+        img = Image(ImageReader(io.BytesIO(image_bytes)))
+        # Scale to fit A4 while preserving aspect ratio
+        a4_w, a4_h = A4
+        if img.imageWidth and img.imageHeight:
+            scale = min(a4_w / img.imageWidth, a4_h / img.imageHeight)
+            img.drawWidth = img.imageWidth * scale
+            img.drawHeight = img.imageHeight * scale
+        doc.build([img])
+        buf.seek(0)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"Could not convert image to PDF: {e}")
+        return b""
+
+
+def _merge_pdf_with_marked_copy(feedback_pdf_bytes: bytes, marked_copy_files: list) -> bytes:
+    """Merge feedback PDF with marked copy files (PDF or image bytes)."""
+    try:
+        from PyPDF2 import PdfMerger
+        merger = PdfMerger()
+        merger.append(io.BytesIO(feedback_pdf_bytes))
+
+        for content_type, data in marked_copy_files:
+            if not data:
+                continue
+            if content_type == 'application/pdf' or (len(data) >= 4 and data[:4] == b'%PDF'):
+                merger.append(io.BytesIO(data))
+            elif content_type and content_type.startswith('image/'):
+                page_pdf = _image_bytes_to_pdf_page(data)
+                if page_pdf:
+                    merger.append(io.BytesIO(page_pdf))
+
+        out = io.BytesIO()
+        merger.write(out)
+        return out.getvalue()
+    except Exception as e:
+        logger.warning(f"Could not merge marked copy into PDF: {e}")
+        return feedback_pdf_bytes
 
 # Colors
 PRIMARY_COLOR = HexColor('#667eea')
@@ -91,7 +137,8 @@ def get_styles():
     
     return styles
 
-def generate_review_pdf(submission: dict, assignment: dict, student: dict, teacher: dict = None) -> bytes:
+def generate_review_pdf(submission: dict, assignment: dict, student: dict, teacher: dict = None,
+                       marked_copy_files: list = None) -> bytes:
     """
     Generate a comprehensive PDF feedback report with feedback table
     
@@ -100,6 +147,7 @@ def generate_review_pdf(submission: dict, assignment: dict, student: dict, teach
         assignment: The assignment document
         student: The student document
         teacher: Optional teacher document
+        marked_copy_files: Optional list of (content_type, bytes) for assessment marked copy pages
     
     Returns:
         PDF content as bytes
@@ -299,7 +347,13 @@ def generate_review_pdf(submission: dict, assignment: dict, student: dict, teach
     try:
         doc.build(story)
         buffer.seek(0)
-        return buffer.getvalue()
+        pdf_bytes = buffer.getvalue()
+
+        # Append marked copy pages for assessments
+        if marked_copy_files and len(marked_copy_files) > 0:
+            pdf_bytes = _merge_pdf_with_marked_copy(pdf_bytes, marked_copy_files)
+
+        return pdf_bytes
     except Exception as e:
         logger.error(f"Error generating PDF: {e}")
         raise
@@ -308,7 +362,8 @@ def generate_feedback_pdf(submission: dict, assignment: dict, student: dict) -> 
     """Legacy function - redirects to generate_review_pdf"""
     return generate_review_pdf(submission, assignment, student)
 
-def generate_rubric_review_pdf(submission: dict, assignment: dict, student: dict, teacher: dict = None) -> bytes:
+def generate_rubric_review_pdf(submission: dict, assignment: dict, student: dict, teacher: dict = None,
+                              marked_copy_files: list = None) -> bytes:
     """
     Generate a comprehensive PDF feedback report for rubric-based essay marking
     
@@ -317,6 +372,7 @@ def generate_rubric_review_pdf(submission: dict, assignment: dict, student: dict
         assignment: The assignment document
         student: The student document
         teacher: Optional teacher document
+        marked_copy_files: Optional list of (content_type, bytes) for assessment marked copy pages
     
     Returns:
         PDF content as bytes
@@ -505,7 +561,13 @@ def generate_rubric_review_pdf(submission: dict, assignment: dict, student: dict
     try:
         doc.build(story)
         buffer.seek(0)
-        return buffer.getvalue()
+        pdf_bytes = buffer.getvalue()
+
+        # Append marked copy pages for assessments
+        if marked_copy_files and len(marked_copy_files) > 0:
+            pdf_bytes = _merge_pdf_with_marked_copy(pdf_bytes, marked_copy_files)
+
+        return pdf_bytes
     except Exception as e:
         logger.error(f"Error generating rubric PDF: {e}")
         raise

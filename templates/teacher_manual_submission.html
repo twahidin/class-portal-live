@@ -25,7 +25,11 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-4">
+                        {% if assignment.assignment_type == 'assessment' %}
+                        For assessments: upload the student's <strong>unmarked</strong> test paper. After AI feedback is generated, you will mark the physical copy and then upload the marked copy in the review step.
+                        {% else %}
                         Use this when a student handed in their work on paper. Select the student and upload a PDF or photos of their assignment. The submission will appear in your inbox for marking.
+                        {% endif %}
                     </p>
 
                     {% if error %}

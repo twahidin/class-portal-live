@@ -81,6 +81,9 @@
             
             <div class="assignment-actions">
                 <div class="d-flex align-items-center gap-2">
+                    {% if assignment.assignment_type == 'assessment' %}
+                    <span class="badge bg-success">Assessment</span>
+                    {% endif %}
                     <span class="badge bg-{{ assignment.status_class }}">{{ assignment.status_display }}</span>
                     <a href="{{ url_for('view_assignment', assignment_id=assignment.assignment_id) }}" class="btn btn-success">
                         <i class="bi bi-pencil-square me-1"></i>Feedback and Submission

@@ -39,6 +39,11 @@
             <a href="{{ url_for('create_assignment') }}" class="btn btn-primary btn-lg">
                 <i class="bi bi-plus-circle me-2"></i>Create Assignment
             </a>
+            {% if teacher_has_assessments_access %}
+            <a href="{{ url_for('create_assignment', type='assessment') }}" class="btn btn-success btn-lg">
+                <i class="bi bi-clipboard-check me-2"></i>Create Assessment
+            </a>
+            {% endif %}
         </div>
     </div>
     

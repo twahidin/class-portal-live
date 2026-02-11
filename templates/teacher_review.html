@@ -132,6 +132,35 @@
                     </div>
                 </div>
             </div>
+
+            {% if assignment.assignment_type == 'assessment' %}
+            <!-- Upload Marked Copy (assessments only) -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Marked Copy</h6>
+                </div>
+                <div class="card-body">
+                    {% if submission.marked_copy_file_ids %}
+                    <p class="text-success small mb-2"><i class="bi bi-check-circle me-1"></i>Marked copy uploaded {{ (submission.marked_copy_uploaded_at|sgt).strftime('%d %b %Y, %H:%M') if submission.marked_copy_uploaded_at else '' }} SGT</p>
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        <a href="{{ url_for('view_submission_file', submission_id=submission.submission_id, file_index=0, variant='marked_copy') }}" class="btn btn-outline-success btn-sm" target="_blank" download>
+                            <i class="bi bi-download me-1"></i>View/Download marked copy
+                        </a>
+                    </div>
+                    <hr class="my-2">
+                    <p class="text-muted small mb-2">Replace marked copy:</p>
+                    {% endif %}
+                    <form id="upload-marked-copy-form" enctype="multipart/form-data">
+                        <input type="file" class="form-control form-control-sm mb-2" id="marked-copy-files" name="files" accept=".pdf,image/*" multiple>
+                        <button type="submit" class="btn btn-success btn-sm" id="btn-upload-marked-copy">
+                            <i class="bi bi-upload me-1"></i>{% if submission.marked_copy_file_ids %}Replace{% else %}Upload{% endif %} marked copy
+                        </button>
+                        <span id="marked-copy-status" class="ms-2 small text-muted"></span>
+                    </form>
+                    <p class="text-muted small mt-2 mb-0">After marking the hard copy, upload the scanned or photographed marked paper. Students will be able to view and download it.</p>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Right Panel: Feedback Table -->
@@ -1970,5 +1999,45 @@
             }
         });
     })();
+
+    // Upload marked copy (assessments only)
+    const uploadMarkedCopyForm = document.getElementById('upload-marked-copy-form');
+    if (uploadMarkedCopyForm) {
+        uploadMarkedCopyForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('marked-copy-files');
+            const btn = document.getElementById('btn-upload-marked-copy');
+            const status = document.getElementById('marked-copy-status');
+            if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+                if (status) status.textContent = 'Please select at least one file.';
+                return;
+            }
+            btn.disabled = true;
+            if (status) status.textContent = 'Uploading...';
+            const formData = new FormData();
+            for (let i = 0; i < fileInput.files.length; i++) {
+                formData.append('files', fileInput.files[i]);
+            }
+            try {
+                const response = await fetch(`/teacher/review/${submissionId}/upload-marked-copy`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (result.success) {
+                    if (status) status.textContent = 'Uploaded!';
+                    if (typeof showToast === 'function') showToast('Success', 'Marked copy uploaded. Students can view it.');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    if (status) status.textContent = result.error || 'Upload failed';
+                    if (typeof showToast === 'function') showToast('Error', result.error || 'Upload failed');
+                }
+            } catch (err) {
+                if (status) status.textContent = 'Error';
+                if (typeof showToast === 'function') showToast('Error', 'Upload failed');
+            }
+            btn.disabled = false;
+        });
+    }
 </script>
 {% endblock %}

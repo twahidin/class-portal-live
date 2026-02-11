@@ -167,6 +167,21 @@
                     {% endif %}
                 </div>
             </div>
+
+            {% if submission.marked_copy_file_ids and assignment.assignment_type == 'assessment' %}
+            <!-- Marked Copy (assessments only) -->
+            <div class="card mt-3 h-100">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Your Marked Paper</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">Your teacher has uploaded the marked copy of your test paper.</p>
+                    <a href="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0, variant='marked_copy') }}" class="btn btn-success btn-sm" target="_blank" download>
+                        <i class="bi bi-download me-1"></i>View/Download marked copy
+                    </a>
+                </div>
+            </div>
+            {% endif %}
         </div>
         
         <!-- Right: Feedback + Your correction/challenge column -->
