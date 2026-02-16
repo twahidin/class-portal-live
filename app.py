@@ -5111,6 +5111,7 @@ def create_assignment():
                 spreadsheet_question_paper = request.files.get('spreadsheet_question_paper')
                 spreadsheet_student_template = request.files.get('spreadsheet_student_template')
                 spreadsheet_answer_key = request.files.get('spreadsheet_answer_key')
+                reference_materials = request.files.get('reference_materials')
                 question_paper_content = spreadsheet_question_paper.read()
                 spreadsheet_question_paper.seek(0)
                 question_paper_name = spreadsheet_question_paper.filename
