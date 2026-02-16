@@ -4525,9 +4525,9 @@ def _submission_display_marks(submission, total_possible):
             return m, pct
         except (ValueError, TypeError):
             pass
-    total = sum(c.get('marks_awarded', 0) for c in af.get('criteria', []))
+    total = sum((c.get('marks_awarded') or 0) for c in af.get('criteria', []))
     if total == 0:
-        total = sum(q.get('marks_awarded', 0) for q in af.get('questions', []))
+        total = sum((q.get('marks_awarded') or 0) for q in af.get('questions', []))
     try:
         m = float(total)
         pct = (m / total_possible * 100) if total_possible > 0 else 0
