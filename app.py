@@ -5054,6 +5054,35 @@ def create_assignment():
                                          teacher_modules=teacher_modules,
                                          is_assessment=is_assessment,
                                          error='Rubrics PDF is required for rubric-based marking')
+            elif marking_type == 'spreadsheet':
+                # For spreadsheet: question paper PDF, Excel template, and Excel answer key are required
+                spreadsheet_question_paper = request.files.get('spreadsheet_question_paper')
+                spreadsheet_student_template = request.files.get('spreadsheet_student_template')
+                spreadsheet_answer_key = request.files.get('spreadsheet_answer_key')
+                if not spreadsheet_question_paper or not spreadsheet_question_paper.filename or not spreadsheet_question_paper.filename.lower().endswith('.pdf'):
+                    return render_template('teacher_create_assignment.html',
+                                         teacher=teacher,
+                                         classes=classes,
+                                         teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
+                                         error='Question paper PDF is required')
+                if not spreadsheet_student_template or not spreadsheet_student_template.filename:
+                    return render_template('teacher_create_assignment.html',
+                                         teacher=teacher,
+                                         classes=classes,
+                                         teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
+                                         error='Excel student template is required')
+                if not spreadsheet_answer_key or not spreadsheet_answer_key.filename:
+                    return render_template('teacher_create_assignment.html',
+                                         teacher=teacher,
+                                         classes=classes,
+                                         teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
+                                         error='Excel answer key is required')
             else:
                 # For standard: question paper and answer key are required
                 if not question_paper_drive_id and (not question_paper or not question_paper.filename):
@@ -5077,28 +5106,52 @@ def create_assignment():
             total_marks = int(data.get('total_marks', 100))
             assignment_title = data.get('title', 'Untitled')
             
-            # Get file contents from Drive or uploads
-            # For Drive files, we download temporarily only for text extraction
-            try:
-                question_paper_content, question_paper_name = get_file_content(question_paper, question_paper_drive_id, 'question paper')
-                answer_key_content, answer_key_name = get_file_content(answer_key, answer_key_drive_id, 'answer key')
-                reference_materials = request.files.get('reference_materials')
-                reference_materials_content, reference_materials_name = get_file_content(reference_materials, reference_materials_drive_id, 'reference materials')
-                rubrics_content, rubrics_name = get_file_content(rubrics, rubrics_drive_id, 'rubrics')
-            except Exception as e:
-                return render_template('teacher_create_assignment.html',
-                                     teacher=teacher,
-                                     classes=classes,
-                                     teaching_groups=teaching_groups,
-                                     teacher_modules=teacher_modules,
-                                     is_assessment=is_assessment,
-                                     error=str(e))
+            # Get file contents from Drive or uploads (or from spreadsheet-specific fields)
+            if marking_type == 'spreadsheet':
+                spreadsheet_question_paper = request.files.get('spreadsheet_question_paper')
+                spreadsheet_student_template = request.files.get('spreadsheet_student_template')
+                spreadsheet_answer_key = request.files.get('spreadsheet_answer_key')
+                question_paper_content = spreadsheet_question_paper.read()
+                spreadsheet_question_paper.seek(0)
+                question_paper_name = spreadsheet_question_paper.filename
+                question_paper_text = extract_text_from_pdf(question_paper_content) if question_paper_content else ""
+                answer_key_content, answer_key_name = None, None
+                answer_key_text = ""
+                reference_materials_content, reference_materials_name = None, None
+                reference_materials_text = ""
+                rubrics_content, rubrics_name = None, None
+                rubrics_text = ""
+                template_content = spreadsheet_student_template.read()
+                spreadsheet_answer_key_content = spreadsheet_answer_key.read()
+                spreadsheet_student_template_name = spreadsheet_student_template.filename
+                spreadsheet_answer_key_name = spreadsheet_answer_key.filename
+            else:
+                # For Drive files, we download temporarily only for text extraction
+                try:
+                    question_paper_content, question_paper_name = get_file_content(question_paper, question_paper_drive_id, 'question paper')
+                    answer_key_content, answer_key_name = get_file_content(answer_key, answer_key_drive_id, 'answer key')
+                    reference_materials = request.files.get('reference_materials')
+                    reference_materials_content, reference_materials_name = get_file_content(reference_materials, reference_materials_drive_id, 'reference materials')
+                    rubrics_content, rubrics_name = get_file_content(rubrics, rubrics_drive_id, 'rubrics')
+                except Exception as e:
+                    return render_template('teacher_create_assignment.html',
+                                         teacher=teacher,
+                                         classes=classes,
+                                         teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
+                                         error=str(e))
+                template_content = None
+                spreadsheet_answer_key_content = None
+                spreadsheet_student_template_name = None
+                spreadsheet_answer_key_name = None
             
-            # Extract text from PDFs for cost-effective AI processing
-            question_paper_text = extract_text_from_pdf(question_paper_content) if question_paper_content else ""
-            answer_key_text = extract_text_from_pdf(answer_key_content) if answer_key_content else ""
-            reference_materials_text = extract_text_from_pdf(reference_materials_content) if reference_materials_content else ""
-            rubrics_text = extract_text_from_pdf(rubrics_content) if rubrics_content else ""
+            # Extract text from PDFs for cost-effective AI processing (spreadsheet branch already set these above)
+            if marking_type != 'spreadsheet':
+                question_paper_text = extract_text_from_pdf(question_paper_content) if question_paper_content else ""
+                answer_key_text = extract_text_from_pdf(answer_key_content) if answer_key_content else ""
+                reference_materials_text = extract_text_from_pdf(reference_materials_content) if reference_materials_content else ""
+                rubrics_text = extract_text_from_pdf(rubrics_content) if rubrics_content else ""
             
             # Store files in GridFS (only for uploaded files, not Drive files)
             from gridfs import GridFS
@@ -5106,7 +5159,7 @@ def create_assignment():
             
             # Save question paper (only if uploaded, not from Drive)
             question_paper_id = None
-            if question_paper_content and not question_paper_name.startswith('DRIVE:'):
+            if question_paper_content and not (question_paper_name or '').startswith('DRIVE:'):
                 question_paper_id = fs.put(
                     question_paper_content,
                     filename=f"{assignment_id}_question.pdf",
@@ -5117,7 +5170,7 @@ def create_assignment():
             
             # Save answer key (only if uploaded, not from Drive)
             answer_key_id = None
-            if answer_key_content and not answer_key_name.startswith('DRIVE:'):
+            if answer_key_content and not (answer_key_name or '').startswith('DRIVE:'):
                 answer_key_id = fs.put(
                     answer_key_content,
                     filename=f"{assignment_id}_answer.pdf",
@@ -5146,6 +5199,25 @@ def create_assignment():
                     content_type='application/pdf',
                     assignment_id=assignment_id,
                     file_type='rubrics'
+                )
+            
+            # Save spreadsheet Excel files when marking type is spreadsheet
+            spreadsheet_student_template_id = None
+            spreadsheet_answer_key_id = None
+            if marking_type == 'spreadsheet' and template_content and spreadsheet_answer_key_content:
+                spreadsheet_student_template_id = fs.put(
+                    template_content,
+                    filename=spreadsheet_student_template_name or f"{assignment_id}_template.xlsx",
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    assignment_id=assignment_id,
+                    file_type='spreadsheet_student_template'
+                )
+                spreadsheet_answer_key_id = fs.put(
+                    spreadsheet_answer_key_content,
+                    filename=spreadsheet_answer_key_name or f"{assignment_id}_answer_key.xlsx",
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    assignment_id=assignment_id,
+                    file_type='spreadsheet_answer_key'
                 )
             
             # Initialize Google Drive folder IDs and file references
@@ -5208,13 +5280,18 @@ def create_assignment():
                 'send_ai_feedback_immediately': send_ai_feedback_immediately,  # True = student sees AI feedback right after submit; False = teacher reviews first
                 'question_paper_id': question_paper_id,
                 'answer_key_id': answer_key_id,
-                'question_paper_name': question_paper.filename if question_paper and question_paper.filename else (question_paper_name.replace('DRIVE:', '') if question_paper_name and question_paper_name.startswith('DRIVE:') else None),
-                'answer_key_name': answer_key.filename if answer_key and answer_key.filename else (answer_key_name.replace('DRIVE:', '') if answer_key_name and answer_key_name.startswith('DRIVE:') else None),
+                'question_paper_name': question_paper_name if marking_type == 'spreadsheet' else (question_paper.filename if question_paper and question_paper.filename else (question_paper_name.replace('DRIVE:', '') if question_paper_name and question_paper_name.startswith('DRIVE:') else None)),
+                'answer_key_name': None if marking_type == 'spreadsheet' else (answer_key.filename if answer_key and answer_key.filename else (answer_key_name.replace('DRIVE:', '') if answer_key_name and answer_key_name.startswith('DRIVE:') else None)),
                 # New optional document fields
                 'reference_materials_id': reference_materials_id,
                 'reference_materials_name': reference_materials.filename if reference_materials and reference_materials.filename else (reference_materials_name.replace('DRIVE:', '') if reference_materials_name and reference_materials_name.startswith('DRIVE:') else None),
                 'rubrics_id': rubrics_id,
                 'rubrics_name': rubrics.filename if rubrics and rubrics.filename else (rubrics_name.replace('DRIVE:', '') if rubrics_name and rubrics_name.startswith('DRIVE:') else None),
+                # Spreadsheet assignment Excel files (when marking_type == 'spreadsheet')
+                'spreadsheet_student_template_id': spreadsheet_student_template_id if marking_type == 'spreadsheet' else None,
+                'spreadsheet_student_template_name': spreadsheet_student_template_name if marking_type == 'spreadsheet' else None,
+                'spreadsheet_answer_key_id': spreadsheet_answer_key_id if marking_type == 'spreadsheet' else None,
+                'spreadsheet_answer_key_name': spreadsheet_answer_key_name if marking_type == 'spreadsheet' else None,
                 # Extracted text for cost-effective AI processing
                 'question_paper_text': question_paper_text,
                 'answer_key_text': answer_key_text,
