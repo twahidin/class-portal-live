@@ -244,7 +244,7 @@ Respond with valid JSON only (no markdown, no text outside the JSON). Escape any
         }
 
         create_kwargs = {
-            "model": "claude-opus-4-5",
+            "model": "claude-opus-4-6",
             "max_tokens": 20000,
             "system": system_prompt,
             "messages": [{"role": "user", "content": content}],

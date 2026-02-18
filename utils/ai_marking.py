@@ -101,7 +101,7 @@ def resize_image_for_ai(image_bytes: bytes, max_dimension: int = 1200, quality: 
 
 # Model mappings for each provider
 MODEL_MAPPINGS = {
-    'anthropic': 'claude-sonnet-4-5-20250929',
+    'anthropic': 'claude-sonnet-4-6',
     'openai': 'gpt-5.2-2025-12-11',  # GPT-5.2 with vision support
     'deepseek': 'deepseek-reasoner',  # DeepSeek-V3.2 thinking mode (best for complex reasoning tasks like marking)
     'google': 'gemini-3-flash-preview'  # Gemini 3 Flash Preview with vision support

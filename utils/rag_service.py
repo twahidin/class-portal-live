@@ -224,7 +224,7 @@ def _extract_text_from_pdf_via_anthropic(pdf_bytes: bytes) -> str:
         del buf
         try:
             resp = client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model="claude-sonnet-4-6",
                 max_tokens=4096,
                 messages=[{
                     "role": "user",
