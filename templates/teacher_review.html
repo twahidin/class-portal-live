@@ -104,7 +104,7 @@
                 </div>
                 <div class="card-body p-0" style="height: calc(100vh - 180px); overflow: auto; background: #f0f0f0;" id="submission-body">
                     <div id="submission-viewer" style="display: flex; justify-content: center; align-items: flex-start; padding: 10px;">
-                        {% if submission.file_type == 'excel' %}
+                        {% if submission.file_type == 'excel' or assignment.marking_type == 'spreadsheet' %}
                         <div class="p-4 text-center w-100">
                             <i class="bi bi-file-earmark-excel text-success" style="font-size: 4rem;"></i>
                             <p class="mt-2 mb-3">Excel spreadsheet submission</p>
