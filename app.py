@@ -5848,7 +5848,8 @@ def teacher_submissions():
     selected_assignment = None
     assignments_for_dropdown = []
     student_rows = []
-    
+    recent_submissions = []
+
     if assignment_filter:
         selected_assignment = Assignment.find_one({
             'assignment_id': assignment_filter,
@@ -5937,7 +5938,50 @@ def teacher_submissions():
             ]
         else:
             assignments_for_dropdown = all_teacher_assignments
-    
+
+        # Populate submissions list when no assignment is selected
+        _src_assignments = assignments_for_dropdown  # respect TG/class filter if set
+        _src_aid_list = [a['assignment_id'] for a in _src_assignments]
+        _src_assignment_map = {a['assignment_id']: a for a in _src_assignments}
+        if _src_aid_list:
+            _sub_query = {'assignment_id': {'$in': _src_aid_list}}
+            if status_filter == 'pending':
+                _sub_query['status'] = {'$in': ['submitted', 'ai_reviewed']}
+                _sub_query['feedback_sent'] = {'$ne': True}
+            _recent_raw = list(Submission.find(_sub_query).sort('submitted_at', -1).limit(100))
+            for _sub in _recent_raw:
+                _asgn = _src_assignment_map.get(_sub['assignment_id'])
+                if not _asgn:
+                    continue
+                _sub_status = _sub.get('status', 'submitted')
+                _feedback_sent = _sub.get('feedback_sent', False)
+                if _sub.get('submitted_via') == 'manual' and _sub_status == 'rejected':
+                    _sub_status = 'ai_reviewed'
+                if _sub_status == 'ai_reviewed' and _feedback_sent:
+                    _display_status = 'ai_feedback_sent'
+                elif _sub_status in ('submitted', 'ai_reviewed'):
+                    _display_status = 'pending'
+                else:
+                    _display_status = _sub_status
+                # Apply status filter
+                if status_filter == 'pending' and _display_status != 'pending':
+                    continue
+                elif status_filter == 'ai_feedback_sent' and _display_status != 'ai_feedback_sent':
+                    continue
+                elif status_filter in ('approved', 'reviewed') and _sub_status not in ('reviewed', 'approved'):
+                    continue
+                elif status_filter == 'rejected' and _sub_status != 'rejected':
+                    continue
+                _stu = Student.find_one({'student_id': _sub['student_id']}) or {'name': _sub.get('student_id', ''), 'student_id': _sub.get('student_id', '')}
+                recent_submissions.append({
+                    'submission': _sub,
+                    'assignment': _asgn,
+                    'student': _stu,
+                    'display_status': _display_status,
+                })
+                if len(recent_submissions) >= 25:
+                    break
+
     # When an assignment is selected, pre-fill TG/Class filters from that assignment for display
     if selected_assignment and not teaching_group_filter and not class_filter:
         if selected_assignment.get('target_type') == 'teaching_group':
@@ -5955,7 +5999,8 @@ def teacher_submissions():
                          teaching_groups=teaching_groups,
                          classes_for_dropdown=classes_for_dropdown,
                          teaching_group_filter=teaching_group_filter,
-                         class_filter=class_filter)
+                         class_filter=class_filter,
+                         recent_submissions=recent_submissions)
 
 @app.route('/teacher/submissions/<submission_id>/review', methods=['GET'])
 @app.route('/teacher/review/<submission_id>', methods=['GET'])
@@ -7840,6 +7885,7 @@ def inject_module_access():
         'student_has_interactives_access': False,
         'teacher_has_assessments_access': False,
         'student_has_assessments_access': False,
+        'pending_count': 0,
     }
     if session.get('teacher_id'):
         out['teacher_has_module_access'] = _teacher_has_module_access(session['teacher_id'])
@@ -7847,6 +7893,18 @@ def inject_module_access():
         out['teacher_has_collab_space_access'] = _teacher_has_collab_space_access(session['teacher_id'])
         out['teacher_has_interactives_access'] = _teacher_has_interactives_access(session['teacher_id'])
         out['teacher_has_assessments_access'] = _teacher_has_assessments_access(session['teacher_id'])
+        # Count pending submissions for navbar badge (all teacher pages)
+        _cp_assignments = list(Assignment.find({'teacher_id': session['teacher_id']}))
+        _cp_aid_list = [a['assignment_id'] for a in _cp_assignments]
+        if _cp_aid_list:
+            _cp_pending = Submission.find({
+                'assignment_id': {'$in': _cp_aid_list},
+                'status': {'$in': ['submitted', 'ai_reviewed']},
+                'feedback_sent': {'$ne': True},
+            })
+            out['pending_count'] = sum(1 for _ in _cp_pending)
+        else:
+            out['pending_count'] = 0
     if session.get('student_id'):
         out['student_has_module_access'] = _student_has_module_access(session['student_id'])
         out['student_has_python_lab_access'] = _student_has_python_lab_access(session['student_id'])

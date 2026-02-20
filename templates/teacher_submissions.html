@@ -21,12 +21,17 @@
         {% endif %}
     </div>
     
-    <!-- Recent submissions across all assignments (quick find) -->
+    <!-- Recent/pending submissions across all assignments (quick find) -->
     {% if recent_submissions %}
     <div class="card mb-4 border-primary">
         <div class="card-header bg-light">
+            {% if status_filter == ‘pending’ and not selected_assignment %}
+            <i class="bi bi-clock me-2"></i><strong>Pending submissions</strong>
+            <span class="text-muted small ms-2">— {{ recent_submissions|length }} submission(s) awaiting your review across all assignments.</span>
+            {% else %}
             <i class="bi bi-clock-history me-2"></i><strong>Recent submissions</strong>
             <span class="text-muted small ms-2">— last 25 across all assignments. Use this to find yesterday’s AI-marked work if you’re not sure which assignment.</span>
+            {% endif %}
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -110,12 +115,13 @@
                         {% endfor %}
                     </select>
                 </div>
-                {% if selected_assignment %}
                 <div class="col-md-2">
                     <label class="form-label">Status</label>
                     <select name="status" class="form-select" onchange="this.form.submit()">
                         <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                        {% if selected_assignment %}
                         <option value="not_submitted" {% if status_filter == 'not_submitted' %}selected{% endif %}>Not submitted</option>
+                        {% endif %}
                         <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending Review</option>
                         <option value="ai_feedback_sent" {% if status_filter == 'ai_feedback_sent' %}selected{% endif %}>AI Feedback Sent</option>
                         <option value="approved" {% if status_filter == 'approved' %}selected{% endif %}>Reviewed</option>
@@ -127,7 +133,6 @@
                         <i class="bi bi-funnel me-1"></i>Apply
                     </button>
                 </div>
-                {% endif %}
             </form>
         </div>
     </div>
@@ -221,11 +226,19 @@
     {% else %}
     <div class="empty-state">
         <i class="bi bi-journal-text"></i>
+        {% if status_filter == 'pending' and recent_submissions %}
+        <h4>All pending submissions shown above</h4>
+        <p>Select a specific assignment from the dropdown to see the full class list, including students who haven't submitted yet.</p>
+        {% elif status_filter == 'pending' %}
+        <h4>No pending submissions</h4>
+        <p>Great — there are no submissions waiting for your review right now.</p>
+        {% else %}
         <h4>Select an assignment</h4>
         <p>Choose an assignment from the dropdown above to see all students in that teaching group or class and their submission status.</p>
         <a href="{{ url_for('teacher_assignments') }}" class="btn btn-primary">
             <i class="bi bi-journal-text me-1"></i>My Assignments
         </a>
+        {% endif %}
     </div>
     {% endif %}
 </div>

@@ -20,10 +20,11 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ 'active' if active_nav == 'submissions' else '' }}" href="{{ url_for('teacher_submissions') }}">
+                    <a class="nav-link {{ 'active' if active_nav == 'submissions' else '' }}" href="{{ url_for('teacher_submissions', status='pending') }}">
                         <i class="bi bi-inbox me-1"></i>Submissions
-                        {% if stats is defined and (stats.pending_submissions|default(0)) > 0 %}
-                        <span class="badge bg-danger">{{ stats.pending_submissions }}</span>
+                        {% set _pending_badge = pending_count if pending_count is defined else (stats.pending_submissions if stats is defined else 0) %}
+                        {% if _pending_badge > 0 %}
+                        <span class="badge bg-danger">{{ _pending_badge }}</span>
                         {% endif %}
                     </a>
                 </li>
