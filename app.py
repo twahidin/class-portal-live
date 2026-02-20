@@ -3874,7 +3874,22 @@ def view_class(class_id):
     
     title = class_id
     subtitle = class_info.get('name') if class_info.get('name') and class_info.get('name') != class_id else None
-    
+
+    # Handle assignment filter (GET param)
+    selected_assignment_id = request.args.get('assignment_id', '')
+    student_statuses = {}
+    if selected_assignment_id and selected_assignment_id in assignment_ids:
+        for student in students:
+            sid = student['student_id']
+            submission = Submission.find_one(
+                {'assignment_id': selected_assignment_id, 'student_id': sid},
+                sort=[('submitted_at', -1), ('created_at', -1)]
+            )
+            if submission:
+                student_statuses[sid] = _build_student_status_for_submission(submission)
+            else:
+                student_statuses[sid] = {'status': 'none', 'label': 'No Submission', 'class': 'light text-muted', 'submission_id': None}
+
     return render_template('teacher_class_view.html',
                          teacher=teacher,
                          title=title,
@@ -3882,7 +3897,9 @@ def view_class(class_id):
                          students=students,
                          assignments=assignments,
                          teaching_groups=teaching_groups,
-                         is_teaching_group=False)
+                         is_teaching_group=False,
+                         selected_assignment_id=selected_assignment_id,
+                         student_statuses=student_statuses)
 
 @app.route('/teacher/group/<group_id>')
 @teacher_required
@@ -3914,7 +3931,23 @@ def view_teaching_group(group_id):
     
     title = group.get('name', group_id)
     subtitle = f"Teaching Group from {group.get('class_id', 'Unknown Class')}"
-    
+
+    # Handle assignment filter (GET param)
+    assignment_ids = [a['assignment_id'] for a in assignments]
+    selected_assignment_id = request.args.get('assignment_id', '')
+    student_statuses = {}
+    if selected_assignment_id and selected_assignment_id in assignment_ids:
+        for student in students:
+            sid = student['student_id']
+            submission = Submission.find_one(
+                {'assignment_id': selected_assignment_id, 'student_id': sid},
+                sort=[('submitted_at', -1), ('created_at', -1)]
+            )
+            if submission:
+                student_statuses[sid] = _build_student_status_for_submission(submission)
+            else:
+                student_statuses[sid] = {'status': 'none', 'label': 'No Submission', 'class': 'light text-muted', 'submission_id': None}
+
     return render_template('teacher_class_view.html',
                          teacher=teacher,
                          title=title,
@@ -3922,7 +3955,9 @@ def view_teaching_group(group_id):
                          students=students,
                          assignments=assignments,
                          teaching_groups=[],
-                         is_teaching_group=True)
+                         is_teaching_group=True,
+                         selected_assignment_id=selected_assignment_id,
+                         student_statuses=student_statuses)
 
 @app.route('/teacher/api/my-groups', methods=['POST'])
 @teacher_required
