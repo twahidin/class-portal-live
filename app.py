@@ -5510,6 +5510,44 @@ def edit_assignment(assignment_id):
                     update_data['answer_key_name'] = answer_key.filename
                     update_data['answer_key_text'] = answer_key_text
             
+            # Handle spreadsheet Excel files (only for spreadsheet assignments)
+            if assignment.get('marking_type') == 'spreadsheet':
+                spreadsheet_student_template = request.files.get('spreadsheet_student_template')
+                if spreadsheet_student_template and spreadsheet_student_template.filename:
+                    if assignment.get('spreadsheet_student_template_id'):
+                        try:
+                            fs.delete(assignment['spreadsheet_student_template_id'])
+                        except:
+                            pass
+                    template_content = spreadsheet_student_template.read()
+                    spreadsheet_student_template_id = fs.put(
+                        template_content,
+                        filename=spreadsheet_student_template.filename,
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        assignment_id=assignment_id,
+                        file_type='spreadsheet_student_template'
+                    )
+                    update_data['spreadsheet_student_template_id'] = spreadsheet_student_template_id
+                    update_data['spreadsheet_student_template_name'] = spreadsheet_student_template.filename
+
+                spreadsheet_answer_key_file = request.files.get('spreadsheet_answer_key')
+                if spreadsheet_answer_key_file and spreadsheet_answer_key_file.filename:
+                    if assignment.get('spreadsheet_answer_key_id'):
+                        try:
+                            fs.delete(assignment['spreadsheet_answer_key_id'])
+                        except:
+                            pass
+                    answer_key_xlsx_content = spreadsheet_answer_key_file.read()
+                    spreadsheet_answer_key_id = fs.put(
+                        answer_key_xlsx_content,
+                        filename=spreadsheet_answer_key_file.filename,
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        assignment_id=assignment_id,
+                        file_type='spreadsheet_answer_key'
+                    )
+                    update_data['spreadsheet_answer_key_id'] = spreadsheet_answer_key_id
+                    update_data['spreadsheet_answer_key_name'] = spreadsheet_answer_key_file.filename
+
             # Handle reference materials upload
             reference_materials = request.files.get('reference_materials')
             if reference_materials and reference_materials.filename:
@@ -5631,18 +5669,26 @@ def download_assignment_file(assignment_id, file_type):
     # Otherwise, get from GridFS (uploaded file)
     if file_id_field not in assignment or not assignment[file_id_field]:
         return 'File not found', 404
-    
+
     fs = GridFS(db.db)
     try:
         file_id = assignment[file_id_field]
         if isinstance(file_id, str):
             file_id = ObjectId(file_id)
         file_data = fs.get(file_id)
+        file_name = assignment.get(file_name_field, 'document')
+        # Determine mime type from filename
+        if file_name and (file_name.endswith('.xlsx') or file_name.endswith('.xls')):
+            mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            disposition = 'attachment'
+        else:
+            mimetype = 'application/pdf'
+            disposition = 'inline'
         return Response(
             file_data.read(),
-            mimetype='application/pdf',
+            mimetype=mimetype,
             headers={
-                'Content-Disposition': f'inline; filename="{assignment.get(file_name_field, "document.pdf")}"'
+                'Content-Disposition': f'{disposition}; filename="{file_name}"'
             }
         )
     except Exception as e:
