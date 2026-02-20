@@ -292,14 +292,17 @@ class ExcelEvaluator:
                 if hasattr(rule, 'dxf') and rule.dxf and rule.dxf.fill:
                     fill = rule.dxf.fill
                     if hasattr(fill, 'bgColor') and fill.bgColor:
-                        color = str(fill.bgColor.rgb).upper() if fill.bgColor.rgb else ""
-                        if color and len(color) >= 6:
-                            if len(color) == 8:
-                                r, g, b = int(color[2:4], 16), int(color[4:6], 16), int(color[6:8], 16)
-                            else:
-                                r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
-                            if r > 200 and g < 150 and b < 150:
-                                found_red_fill = True
+                        try:
+                            color = str(fill.bgColor.rgb).upper() if fill.bgColor.rgb else ""
+                            if color and len(color) >= 6:
+                                if len(color) == 8:
+                                    r, g, b = int(color[2:4], 16), int(color[4:6], 16), int(color[6:8], 16)
+                                else:
+                                    r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+                                if r > 200 and g < 150 and b < 150:
+                                    found_red_fill = True
+                        except (ValueError, TypeError):
+                            pass  # Non-RGB color (theme/indexed); skip red-fill check
 
         if found_correct_range:
             marks += 1

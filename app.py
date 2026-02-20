@@ -6354,17 +6354,26 @@ def regenerate_ai_feedback(submission_id):
                 'total_marks': result_dict.get('total_marks'),
                 'percentage': result_dict.get('percentage'),
             }
+            regen_update = {
+                'ai_feedback': ai_result,
+                'status': 'ai_reviewed',
+                'final_marks': result_dict.get('marks_awarded'),
+                'spreadsheet_feedback_pdf_id': str(pdf_id),
+                'spreadsheet_feedback_excel_id': str(excel_id),
+                'updated_at': datetime.utcnow(),
+            }
+            if assignment.get('send_ai_feedback_immediately'):
+                regen_update['feedback_sent'] = True
+                regen_update['status'] = 'reviewed'
+                regen_update['reviewed_at'] = datetime.utcnow()
             Submission.update_one(
                 {'submission_id': submission_id},
-                {'$set': {
-                    'ai_feedback': ai_result,
-                    'status': 'ai_reviewed',
-                    'final_marks': result_dict.get('marks_awarded'),
-                    'spreadsheet_feedback_pdf_id': str(pdf_id),
-                    'spreadsheet_feedback_excel_id': str(excel_id),
-                    'updated_at': datetime.utcnow(),
-                }}
+                {'$set': regen_update}
             )
+            if assignment.get('send_ai_feedback_immediately'):
+                submission_after = Submission.find_one({'submission_id': submission_id})
+                if submission_after:
+                    _update_profile_and_mastery_from_assignment(submission['student_id'], assignment, submission_after)
             return jsonify({'success': True, 'message': 'Spreadsheet evaluated successfully. View feedback via "View spreadsheet feedback".'})
         
         if marking_type == 'rubric':
