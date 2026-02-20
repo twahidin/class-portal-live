@@ -142,20 +142,32 @@
                     {% endif %}
                 </div>
                 <div class="card-body p-0" style="height: calc(100vh - 350px); min-height: 320px; overflow: auto; background: #f0f0f0;" id="submission-body">
-                    {% if submission.file_ids %}
+                    {% if assignment.marking_type == 'spreadsheet' %}
+                    <div class="text-center py-5">
+                        <i class="bi bi-file-earmark-excel" style="font-size: 3.5rem; color: #217346;"></i>
+                        <p class="mt-2 fw-bold">Excel Submission</p>
+                        <p class="text-muted small">Your submitted spreadsheet cannot be previewed here.</p>
+                        {% if submission.file_ids %}
+                        <a href="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}"
+                           class="btn btn-outline-success btn-sm" download>
+                            <i class="bi bi-download me-1"></i>Download submitted file
+                        </a>
+                        {% endif %}
+                    </div>
+                    {% elif submission.file_ids %}
                     <div id="submission-viewer-wrap" style="display: flex; justify-content: center; align-items: flex-start; padding: 10px;">
                         {% set _page_count = submission.page_count or (submission.file_ids|length) or 1 %}
                         {% if submission.file_type == 'pdf' and _page_count > 1 %}
                         {# Single PDF with multiple pages: one page as image via backend #}
-                        <img id="submission-pdf-page-image" 
+                        <img id="submission-pdf-page-image"
                              src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}?as_image=1&amp;pdf_page=0"
                              style="width: 100%; height: auto; transform-origin: top center; object-fit: contain;" class="submission-img">
                         {% elif submission.file_type == 'pdf' %}
-                        <iframe id="submission-pdf-viewer" 
+                        <iframe id="submission-pdf-viewer"
                                 src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}"
                                 style="width: 100%; height: calc(100vh - 400px); min-height: 300px; border: none;"></iframe>
                         {% else %}
-                        <img id="submission-page-image" src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}" 
+                        <img id="submission-page-image" src="{{ url_for('view_student_submission_file', submission_id=submission.submission_id, file_index=0) }}"
                              style="width: 100%; height: auto; transform-origin: top center; object-fit: contain;" class="submission-img">
                         {% endif %}
                     </div>
@@ -202,8 +214,62 @@
                         {% set questions = ai_feedback.get('questions', []) %}
                         {% set criteria = ai_feedback.get('criteria', []) %}
                         {% set is_rubric = assignment.marking_type == 'rubric' or (criteria and not questions) %}
-                        
-                        {% if questions %}
+
+                        {% if assignment.marking_type == 'spreadsheet' %}
+                        {# Spreadsheet assignment: show PDF report + commented Excel download links #}
+                        {% set spreadsheet_fb = ai_feedback.get('spreadsheet_feedback', {}) %}
+                        <div class="mb-3">
+                            <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+                                {% if submission.get('spreadsheet_feedback_pdf_id') %}
+                                <a href="{{ url_for('download_student_feedback_pdf', submission_id=submission.submission_id) }}"
+                                   class="btn btn-primary btn-sm">
+                                    <i class="bi bi-file-earmark-pdf me-1"></i>Download Feedback Report (PDF)
+                                </a>
+                                {% endif %}
+                                {% if submission.get('spreadsheet_feedback_excel_id') %}
+                                <a href="{{ url_for('download_submission_feedback_excel', submission_id=submission.submission_id) }}"
+                                   class="btn btn-success btn-sm">
+                                    <i class="bi bi-file-earmark-excel me-1"></i>Download Commented Excel
+                                </a>
+                                {% endif %}
+                                <a href="{{ url_for('view_excel_feedback', submission_id=submission.submission_id) }}"
+                                   class="btn btn-outline-primary btn-sm">
+                                    <i class="bi bi-table me-1"></i>View Detailed Feedback
+                                </a>
+                            </div>
+                            {% if spreadsheet_fb %}
+                            {% set fb_marks = spreadsheet_fb.get('marks_awarded') %}
+                            {% set fb_total = spreadsheet_fb.get('total_marks') %}
+                            {% set fb_pct = spreadsheet_fb.get('percentage') %}
+                            {% if fb_marks is not none %}
+                            <div class="alert alert-info py-2">
+                                <strong>Score:</strong> {{ fb_marks }}/{{ fb_total or assignment.total_marks }}
+                                {% if fb_pct is not none %} ({{ "%.1f"|format(fb_pct) }}%){% endif %}
+                            </div>
+                            {% endif %}
+                            {% set summary = spreadsheet_fb.get('summary') or spreadsheet_fb.get('overall_feedback') %}
+                            {% if summary %}
+                            <div class="alert alert-secondary">
+                                <h6 class="mb-1"><i class="bi bi-chat-quote me-1"></i>Summary</h6>
+                                {{ summary }}
+                            </div>
+                            {% endif %}
+                            {% endif %}
+                        </div>
+                        <div class="teacher-section mt-2 p-3 bg-light rounded">
+                            <h6 class="text-success"><i class="bi bi-person-check me-2"></i>Reviewed by Teacher</h6>
+                            <small class="text-muted">
+                                {% if submission.reviewed_at %}
+                                Reviewed on {{ submission.reviewed_at.strftime('%d %B %Y') }}
+                                {% endif %}
+                            </small>
+                            {% set teacher_overall = teacher_feedback.get('overall_feedback') %}
+                            {% if teacher_overall %}
+                            <p class="mt-2 mb-0 small">{{ teacher_overall }}</p>
+                            {% endif %}
+                        </div>
+
+                        {% elif questions %}
                         {% set include_answer_key = submission.get('include_answer_key', False) %}
                         {% set show_marks_column = assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
                         <!-- Standard: Feedback Table by Question -->
@@ -413,7 +479,8 @@
                         </div>
                         {% endif %}
                         
-                        <!-- Teacher Notes -->
+                        <!-- Teacher Notes (standard/rubric only; spreadsheet has its own block above) -->
+                        {% if assignment.marking_type != 'spreadsheet' %}
                         <div class="teacher-section mt-4 p-3 bg-light rounded">
                             <h6 class="text-success"><i class="bi bi-person-check me-2"></i>Reviewed by Teacher</h6>
                             <small class="text-muted">
@@ -422,6 +489,7 @@
                                 {% endif %}
                             </small>
                         </div>
+                        {% endif %}
                     {% else %}
                         {# Feedback not yet sent by teacher #}
                         <div class="text-center py-5">
@@ -438,15 +506,30 @@
                 <!-- Download Button -->
                 {% if submission.get('feedback_sent', False) %}
                 <div class="card-footer">
-                    <a href="{{ url_for('download_student_feedback_pdf', submission_id=submission.submission_id) }}" 
+                    {% if assignment.marking_type == 'spreadsheet' %}
+                    {% if submission.get('spreadsheet_feedback_pdf_id') %}
+                    <a href="{{ url_for('download_student_feedback_pdf', submission_id=submission.submission_id) }}"
+                       class="btn btn-primary w-100 mb-2">
+                        <i class="bi bi-file-earmark-pdf me-1"></i>Download Feedback Report (PDF)
+                    </a>
+                    {% endif %}
+                    {% if submission.get('spreadsheet_feedback_excel_id') %}
+                    <a href="{{ url_for('download_submission_feedback_excel', submission_id=submission.submission_id) }}"
+                       class="btn btn-success w-100 mb-2">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Download Commented Excel
+                    </a>
+                    {% endif %}
+                    {% else %}
+                    <a href="{{ url_for('download_student_feedback_pdf', submission_id=submission.submission_id) }}"
                        class="btn btn-primary w-100 mb-2">
                         <i class="bi bi-download me-1"></i>Download Feedback PDF
                     </a>
                     {% if submission.get('teacher_annotated_answer_key_id') %}
-                    <a href="{{ url_for('download_annotated_answer_key', submission_id=submission.submission_id) }}" 
+                    <a href="{{ url_for('download_annotated_answer_key', submission_id=submission.submission_id) }}"
                        class="btn btn-outline-primary w-100" download>
                         <i class="bi bi-key me-1"></i>Download annotated answer key
                     </a>
+                    {% endif %}
                     {% endif %}
                 </div>
                 {% endif %}

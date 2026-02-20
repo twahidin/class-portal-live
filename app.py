@@ -1333,6 +1333,9 @@ def student_submit_files():
             if file.filename.lower().endswith('.pdf'):
                 content_type = 'application/pdf'
                 page_type = 'pdf'
+            elif file.filename.lower().endswith(('.xlsx', '.xls')):
+                content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                page_type = 'excel'
             else:
                 content_type = 'image/jpeg'
                 page_type = 'image'
@@ -1359,7 +1362,7 @@ def student_submit_files():
             'student_id': session['student_id'],
             'teacher_id': assignment['teacher_id'],
             'file_ids': file_ids,
-            'file_type': 'pdf' if file_type == 'pdf' else 'image',
+            'file_type': 'pdf' if file_type == 'pdf' else ('excel' if file_type == 'excel' else 'image'),
             'page_count': len(files),
             'status': 'submitted',
             'submitted_at': datetime.utcnow(),
