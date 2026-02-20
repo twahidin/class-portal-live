@@ -237,16 +237,16 @@
                                     <i class="bi bi-table me-1"></i>View Detailed Feedback
                                 </a>
                             </div>
-                            {% if spreadsheet_fb %}
-                            {% set fb_marks = spreadsheet_fb.get('marks_awarded') %}
-                            {% set fb_total = spreadsheet_fb.get('total_marks') %}
-                            {% set fb_pct = spreadsheet_fb.get('percentage') %}
-                            {% if fb_marks is not none %}
+                            {% set display_marks = submission.get('final_marks') if submission.get('final_marks') is not none else (spreadsheet_fb.get('marks_awarded') if spreadsheet_fb else none) %}
+                            {% set display_total = assignment.total_marks or 100 %}
+                            {% set display_pct = (display_marks|float / display_total|float * 100) if (display_marks is not none and display_total and display_total|float > 0) else none %}
+                            {% if display_marks is not none %}
                             <div class="alert alert-info py-2">
-                                <strong>Score:</strong> {{ fb_marks }}/{{ fb_total or assignment.total_marks }}
-                                {% if fb_pct is not none %} ({{ "%.1f"|format(fb_pct) }}%){% endif %}
+                                <strong>Score:</strong> {{ display_marks }}/{{ display_total }}
+                                {% if display_pct is not none %} ({{ "%.1f"|format(display_pct) }}%){% endif %}
                             </div>
                             {% endif %}
+                            {% if spreadsheet_fb %}
                             {% set summary = spreadsheet_fb.get('summary') or spreadsheet_fb.get('overall_feedback') %}
                             {% if summary %}
                             <div class="alert alert-secondary">

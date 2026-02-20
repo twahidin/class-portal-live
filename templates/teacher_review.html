@@ -339,18 +339,18 @@
                                     <td>
                                         {% if show_marks_column %}
                                         <div class="input-group input-group-sm">
-                                            <input type="number" class="form-control fw-bold" id="total-marks" 
+                                            <input type="number" class="form-control fw-bold" id="total-marks"
                                                    name="total_marks"
-                                                   value="{{ ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '' }}"
+                                                   value="{{ submission.get('final_marks') if submission.get('final_marks') is not none else (ai_feedback.marks_awarded if (assignment.marking_type == 'spreadsheet' and ai_feedback and ai_feedback.marks_awarded is not none) else (ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '')) }}"
                                                    min="0">
                                             <span class="input-group-text">/</span>
-                                            <input type="number" class="form-control fw-bold" id="total-marks-max" 
+                                            <input type="number" class="form-control fw-bold" id="total-marks-max"
                                                    name="total_marks_max"
                                                    value="{{ assignment.total_marks or 100 }}"
                                                    min="0">
                                         </div>
                                         {% else %}
-                                        <input type="hidden" id="total-marks" name="total_marks" value="{{ ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '' }}">
+                                        <input type="hidden" id="total-marks" name="total_marks" value="{{ submission.get('final_marks') if submission.get('final_marks') is not none else (ai_feedback.marks_awarded if (assignment.marking_type == 'spreadsheet' and ai_feedback and ai_feedback.marks_awarded is not none) else (ai_feedback.total_marks if ai_feedback and ai_feedback.total_marks else '')) }}">
                                         <input type="hidden" id="total-marks-max" name="total_marks_max" value="{{ assignment.total_marks or 100 }}">
                                         <span class="text-muted">—</span>
                                         {% endif %}
