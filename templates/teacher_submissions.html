@@ -25,12 +25,12 @@
     {% if recent_submissions %}
     <div class="card mb-4 border-primary">
         <div class="card-header bg-light">
-            {% if status_filter == ‘pending’ and not selected_assignment %}
+            {% if status_filter == 'pending' and not selected_assignment %}
             <i class="bi bi-clock me-2"></i><strong>Pending submissions</strong>
             <span class="text-muted small ms-2">— {{ recent_submissions|length }} submission(s) awaiting your review across all assignments.</span>
             {% else %}
             <i class="bi bi-clock-history me-2"></i><strong>Recent submissions</strong>
-            <span class="text-muted small ms-2">— last 25 across all assignments. Use this to find yesterday’s AI-marked work if you’re not sure which assignment.</span>
+            <span class="text-muted small ms-2">— last 25 across all assignments. Use this to find yesterday's AI-marked work if you're not sure which assignment.</span>
             {% endif %}
         </div>
         <div class="card-body p-0">
