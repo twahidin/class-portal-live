@@ -232,7 +232,7 @@ def get_teacher_ai_service(teacher, model_type='anthropic'):
         logger.error(f"Unknown model type: {model_type}")
         return None, None, None
 
-def make_ai_api_call(client, model_name, provider, system_prompt, messages_content, max_tokens=16000, assignment=None):
+def make_ai_api_call(client, model_name, provider, system_prompt, messages_content, max_tokens=32000, assignment=None):
     """
     Unified API call function that handles different provider formats
     
@@ -260,6 +260,8 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
                 messages=[{"role": "user", "content": messages_content}],
                 system=system_prompt
             )
+            if message.stop_reason == 'max_tokens':
+                logger.warning(f"Anthropic response truncated (hit max_tokens={max_tokens}, output {message.usage.output_tokens} tokens)")
             return message.content[0].text
         
         elif provider in ['openai', 'deepseek']:
@@ -368,6 +370,8 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
                 messages=openai_messages,
                 max_tokens=max_tokens
             )
+            if response.choices[0].finish_reason == 'length':
+                logger.warning(f"OpenAI/DeepSeek response truncated (hit max_tokens={max_tokens})")
             return response.choices[0].message.content
         
         elif provider == 'google':
@@ -620,12 +624,17 @@ def _try_repair_truncated_json(text: str):
     Returns parsed dict on success, None on failure."""
     if not text or '{' not in text:
         return None
-    # Strip trailing incomplete string values or keys
     cleaned = text.rstrip()
+    # If truncated mid-string, close the string first
+    # Count unescaped quotes to see if we're inside a string
+    quote_count = len(re.findall(r'(?<!\\)"', cleaned))
+    if quote_count % 2 != 0:
+        # Inside an unclosed string — close it
+        cleaned += '"'
     # Remove trailing comma or colon with incomplete value
     cleaned = re.sub(r',\s*"[^"]*"\s*:\s*"?[^"{}[\]]*$', '', cleaned)
     cleaned = re.sub(r',\s*$', '', cleaned)
-    # Close unclosed brackets and braces
+    # Close unclosed brackets and braces (order matters: ] before })
     open_braces = cleaned.count('{') - cleaned.count('}')
     open_brackets = cleaned.count('[') - cleaned.count(']')
     if open_braces <= 0 and open_brackets <= 0:
@@ -648,14 +657,24 @@ def parse_ai_response(response_text: str) -> dict:
         text = re.sub(r'\s*```\s*$', '', text)
     json_match = re.search(r'\{[\s\S]*\}', text)
     if not json_match:
+        logger.warning(f"parse_ai_response: no JSON object found in response (length={len(text)}). First 300 chars: {text[:300]}")
         return {'error': 'Could not parse response', 'raw': response_text}
     json_str = json_match.group()
     try:
         return json.loads(json_str)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.warning(f"parse_ai_response: JSON decode failed: {e}. Response length={len(text)}, json_str length={len(json_str)}")
+        logger.warning(f"parse_ai_response: Last 200 chars of json_str: ...{json_str[-200:]}")
         # Try to repair truncated JSON by closing unclosed braces/brackets
         repaired = _try_repair_truncated_json(json_str)
         if repaired is not None:
+            logger.info("parse_ai_response: Successfully repaired truncated JSON")
+            repaired['_repaired'] = True
+            return repaired
+        # Also try repairing the full text (regex match may have cut off valid content)
+        repaired = _try_repair_truncated_json(text[text.index('{'):])
+        if repaired is not None:
+            logger.info("parse_ai_response: Successfully repaired truncated JSON from full text")
             repaired['_repaired'] = True
             return repaired
         # Likely truncated when assignment is large (model hit max_tokens)
