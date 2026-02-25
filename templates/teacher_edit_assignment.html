@@ -276,7 +276,7 @@
 
                             <!-- Answer Key -->
                             <div class="col-md-6 mb-3">
-                                <label class="form-label fw-bold">Answer Key *</label>
+                                <label class="form-label fw-bold">Answer Key {% if assignment.marking_type != 'rubric' %}*{% endif %}</label>
                                 {% if assignment.answer_key_id %}
                                 <div class="current-file mb-2">
                                     <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='answer_key') }}"
@@ -293,7 +293,7 @@
                                         <div class="upload-icon answer">
                                             <i class="bi bi-file-earmark-check"></i>
                                         </div>
-                                        <p class="mb-0 small">{% if assignment.answer_key_id %}Replace file{% else %}Upload PDF{% endif %}</p>
+                                        <p class="mb-0 small">{% if assignment.answer_key_id %}Replace file{% elif assignment.marking_type == 'rubric' %}Upload PDF (optional){% else %}Upload PDF{% endif %}</p>
                                         <span class="file-name" id="answer-filename">
                                             {% if assignment.answer_key_id %}Click to replace{% else %}Click to upload{% endif %}
                                         </span>
@@ -334,7 +334,7 @@
                             
                             <!-- Rubrics -->
                             <div class="col-md-6 mb-3">
-                                <label class="form-label fw-bold">Rubrics</label>
+                                <label class="form-label fw-bold">Rubrics {% if assignment.marking_type == 'rubric' %}*{% endif %}</label>
                                 {% if assignment.rubrics_id %}
                                 <div class="current-file mb-2">
                                     <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='rubrics') }}" 
@@ -351,7 +351,7 @@
                                         <div class="upload-icon rubrics">
                                             <i class="bi bi-list-check"></i>
                                         </div>
-                                        <p class="mb-0 small">{% if assignment.rubrics_id %}Replace file{% else %}Upload PDF (optional){% endif %}</p>
+                                        <p class="mb-0 small">{% if assignment.rubrics_id %}Replace file{% elif assignment.marking_type == 'rubric' %}Upload PDF{% else %}Upload PDF (optional){% endif %}</p>
                                         <span class="file-name" id="rubrics-filename">
                                             {% if assignment.rubrics_id %}Click to replace{% else %}Click to upload{% endif %}
                                         </span>
@@ -557,6 +557,8 @@
                             <strong id="summary-answer">
                                 {% if assignment.answer_key_id %}
                                 <span class="text-success"><i class="bi bi-check-circle"></i></span>
+                                {% elif assignment.marking_type == 'rubric' %}
+                                <span class="text-muted">Optional</span>
                                 {% else %}
                                 <span class="text-danger">Missing</span>
                                 {% endif %}
@@ -578,6 +580,8 @@
                             <strong id="summary-rubrics">
                                 {% if assignment.rubrics_id %}
                                 <span class="text-success"><i class="bi bi-check-circle"></i></span>
+                                {% elif assignment.marking_type == 'rubric' %}
+                                <span class="text-danger">Missing</span>
                                 {% else %}
                                 <span class="text-muted">Optional</span>
                                 {% endif %}
