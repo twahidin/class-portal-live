@@ -479,7 +479,22 @@ def send_message():
         # Check assignment
         if teacher_id not in student.get('teachers', []):
             return jsonify({'error': 'Not assigned to this teacher'}), 403
-        
+
+        # Deduplicate: reject if identical message from same student within 5 seconds
+        recent_cutoff = datetime.utcnow() - timedelta(seconds=5)
+        duplicate = Message.find_one({
+            'student_id': session['student_id'],
+            'teacher_id': teacher_id,
+            'message': message_text,
+            'from_student': True,
+            'timestamp': {'$gte': recent_cutoff}
+        })
+        if duplicate:
+            return jsonify({'success': True, 'message': {
+                'text': message_text, 'from_student': True,
+                'timestamp': duplicate['timestamp'].isoformat()
+            }})
+
         # Save message
         message_doc = {
             'student_id': session['student_id'],
@@ -8786,7 +8801,22 @@ def teacher_send_message():
         student = Student.find_one({'student_id': student_id})
         if not student:
             return jsonify({'error': 'Student not found'}), 404
-        
+
+        # Deduplicate: reject if identical message within 5 seconds
+        recent_cutoff = datetime.utcnow() - timedelta(seconds=5)
+        duplicate = Message.find_one({
+            'student_id': student_id,
+            'teacher_id': session['teacher_id'],
+            'message': message_text,
+            'from_student': False,
+            'timestamp': {'$gte': recent_cutoff}
+        })
+        if duplicate:
+            return jsonify({'success': True, 'message': {
+                'text': message_text, 'from_student': False,
+                'timestamp': duplicate['timestamp'].isoformat()
+            }})
+
         # Save message
         Message.insert_one({
             'student_id': student_id,

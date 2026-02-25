@@ -46,14 +46,22 @@ function initChat(teacherId, lastTime) {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
     
     // Handle send message
+    let isSending = false;
+    const sendBtn = messageForm.querySelector('button[type="submit"]');
+
     messageForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        
+
+        if (isSending) return;
+
         const input = document.getElementById('message-input');
         const message = input.value.trim();
-        
+
         if (!message) return;
-        
+
+        isSending = true;
+        if (sendBtn) sendBtn.disabled = true;
+
         try {
             const response = await fetch('/api/send_message', {
                 method: 'POST',
@@ -63,14 +71,14 @@ function initChat(teacherId, lastTime) {
                     message: message
                 })
             });
-            
+
             const data = await response.json();
-            
+
             if (data.success) {
                 // Add message to UI
                 addMessage(message, true);
                 input.value = '';
-                
+
                 // Remove empty state if present
                 const emptyState = document.getElementById('empty-state');
                 if (emptyState) emptyState.remove();
@@ -79,6 +87,9 @@ function initChat(teacherId, lastTime) {
             }
         } catch (error) {
             showToast('Error', 'Failed to send message', 'danger');
+        } finally {
+            isSending = false;
+            if (sendBtn) sendBtn.disabled = false;
         }
     });
     

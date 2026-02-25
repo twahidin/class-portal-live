@@ -93,14 +93,23 @@
         return `${hours}:${minutes}`;
     }
     
-    document.getElementById('teacher-message-form').addEventListener('submit', async (e) => {
+    let isSending = false;
+    const teacherForm = document.getElementById('teacher-message-form');
+    const sendBtn = teacherForm.querySelector('button[type="submit"]');
+
+    teacherForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        
+
+        if (isSending) return;
+
         const input = document.getElementById('message-input');
         const message = input.value.trim();
-        
+
         if (!message) return;
-        
+
+        isSending = true;
+        if (sendBtn) sendBtn.disabled = true;
+
         try {
             const response = await fetch('/api/teacher/send_message', {
                 method: 'POST',
@@ -110,15 +119,15 @@
                     message: message
                 })
             });
-            
+
             const data = await response.json();
-            
+
             if (data.success) {
                 // Add message to UI
                 const container = document.getElementById('messages-container');
                 const emptyState = document.getElementById('empty-state');
                 if (emptyState) emptyState.remove();
-                
+
                 const msgDiv = document.createElement('div');
                 msgDiv.className = 'message sent';
                 msgDiv.innerHTML = `
@@ -127,13 +136,16 @@
                 `;
                 container.appendChild(msgDiv);
                 container.scrollTop = container.scrollHeight;
-                
+
                 input.value = '';
             } else {
                 showToast('Error', data.error || 'Failed to send message', 'danger');
             }
         } catch (error) {
             showToast('Error', 'Failed to send message', 'danger');
+        } finally {
+            isSending = false;
+            if (sendBtn) sendBtn.disabled = false;
         }
     });
     
