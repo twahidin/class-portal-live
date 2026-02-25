@@ -232,7 +232,7 @@ def get_teacher_ai_service(teacher, model_type='anthropic'):
         logger.error(f"Unknown model type: {model_type}")
         return None, None, None
 
-def make_ai_api_call(client, model_name, provider, system_prompt, messages_content, max_tokens=4000, assignment=None):
+def make_ai_api_call(client, model_name, provider, system_prompt, messages_content, max_tokens=16000, assignment=None):
     """
     Unified API call function that handles different provider formats
     
@@ -615,6 +615,28 @@ Respond ONLY with valid JSON in this exact format:
             )
         }
 
+def _try_repair_truncated_json(text: str):
+    """Attempt to repair truncated JSON by closing unclosed braces/brackets.
+    Returns parsed dict on success, None on failure."""
+    if not text or '{' not in text:
+        return None
+    # Strip trailing incomplete string values or keys
+    cleaned = text.rstrip()
+    # Remove trailing comma or colon with incomplete value
+    cleaned = re.sub(r',\s*"[^"]*"\s*:\s*"?[^"{}[\]]*$', '', cleaned)
+    cleaned = re.sub(r',\s*$', '', cleaned)
+    # Close unclosed brackets and braces
+    open_braces = cleaned.count('{') - cleaned.count('}')
+    open_brackets = cleaned.count('[') - cleaned.count(']')
+    if open_braces <= 0 and open_brackets <= 0:
+        return None
+    cleaned += ']' * max(0, open_brackets) + '}' * max(0, open_braces)
+    try:
+        return json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 def parse_ai_response(response_text: str) -> dict:
     """Parse AI response into structured format. Strips markdown code fences and handles truncated JSON."""
     if not response_text or not response_text.strip():
@@ -624,18 +646,26 @@ def parse_ai_response(response_text: str) -> dict:
     if text.startswith('```'):
         text = re.sub(r'^```(?:json)?\s*', '', text)
         text = re.sub(r'\s*```\s*$', '', text)
-    try:
-        json_match = re.search(r'\{[\s\S]*\}', text)
-        if json_match:
-            json_str = json_match.group()
-            return json.loads(json_str)
+    json_match = re.search(r'\{[\s\S]*\}', text)
+    if not json_match:
         return {'error': 'Could not parse response', 'raw': response_text}
+    json_str = json_match.group()
+    try:
+        return json.loads(json_str)
     except json.JSONDecodeError:
+        # Try to repair truncated JSON by closing unclosed braces/brackets
+        repaired = _try_repair_truncated_json(json_str)
+        if repaired is not None:
+            repaired['_repaired'] = True
+            return repaired
         # Likely truncated when assignment is large (model hit max_tokens)
+        is_truncated = len(text) > 300 and any(
+            k in text for k in ('"questions"', '"question_num"', '"criteria"', '"errors"')
+        )
         truncated_hint = (
-            ' Response may have been cut off; this assignment might have too many questions or long feedback. '
-            'Try "Remark" again or use fewer pages.'
-            if len(text) > 300 and ('"questions"' in text or '"question_num"' in text) else ''
+            ' Response may have been cut off due to length. '
+            'Try "Remark with another model" or "Generate AI Feedback" again.'
+            if is_truncated else ''
         )
         return {
             'error': f'Invalid JSON{truncated_hint}'.strip(),
@@ -1461,7 +1491,7 @@ Respond ONLY with valid JSON in this exact format:
             provider=provider,
             system_prompt="",
             messages_content=content,
-            max_tokens=4000,
+            max_tokens=16000,
             assignment=assignment
         )
         
@@ -1738,10 +1768,10 @@ Respond with JSON:"""
             provider=provider,
             system_prompt=system_prompt,
             messages_content=content,
-            max_tokens=6000,
+            max_tokens=16000,
             assignment=assignment
         )
-        
+
         # Parse JSON response
         result = parse_ai_response(response_text)
         result['generated_at'] = datetime.utcnow().isoformat()
@@ -1980,7 +2010,7 @@ The new_corrections array is optional. If you spot additional errors in the sele
             provider=provider,
             system_prompt=system_prompt,
             messages_content=content,
-            max_tokens=4000,
+            max_tokens=16000,
             assignment=assignment,
         )
 
