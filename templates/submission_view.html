@@ -503,6 +503,16 @@
                     {% endif %}
                 </div>
                 
+                <!-- Answer Key Download (available immediately after submission) -->
+                {% if assignment.get('release_answer_key_pdf') and (assignment.get('answer_key_id') or assignment.get('drive_file_refs', {}).get('answer_key_drive_id')) %}
+                <div class="card-footer bg-light">
+                    <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='answer_key') }}"
+                       class="btn btn-outline-secondary w-100" download>
+                        <i class="bi bi-file-pdf me-1"></i>Download Answer Key PDF
+                    </a>
+                </div>
+                {% endif %}
+
                 <!-- Download Button -->
                 {% if submission.get('feedback_sent', False) %}
                 <div class="card-footer">
