@@ -2364,12 +2364,14 @@ def student_python_execute():
         data = request.get_json() or {}
         code = (data.get('code') or '').strip()
         stdin_text = data.get('inputs') or ''
+        if stdin_text and not stdin_text.endswith('\n'):
+            stdin_text += '\n'
         if not code:
             return jsonify({'error': 'No code provided'}), 400
         with tempfile.TemporaryDirectory() as tmpdir:
             result = subprocess.run(
                 [os.environ.get('PYTHON_EXECUTABLE', 'python3'), '-c', code],
-                input=stdin_text.encode('utf-8') if stdin_text else None,
+                input=stdin_text.encode('utf-8'),
                 capture_output=True,
                 timeout=PYTHON_EXECUTE_TIMEOUT,
                 cwd=tmpdir,
