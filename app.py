@@ -2339,16 +2339,15 @@ _PYLAB_INPUT_MARKER = '\x00__PYLAB_INPUT__:'
 
 _PYLAB_INPUT_WRAPPER = r'''
 import builtins as _b, sys as _s
-_orig_input = _b.input
-def _pylab_input(prompt=''):
-    _s.stdout.write('\x00__PYLAB_INPUT__:' + str(prompt) + '\n')
-    _s.stdout.flush()
-    line = _s.stdin.readline()
+def _pylab_input(prompt='', _stdout=_s.stdout, _stdin=_s.stdin):
+    _stdout.write('\x00__PYLAB_INPUT__:' + str(prompt) + '\n')
+    _stdout.flush()
+    line = _stdin.readline()
     if not line:
         raise EOFError
     return line.rstrip('\n')
 _b.input = _pylab_input
-del _orig_input, _pylab_input, _b, _s
+del _pylab_input, _b, _s
 '''
 
 
