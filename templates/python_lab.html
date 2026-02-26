@@ -66,11 +66,12 @@
         { name: 'List operations', code: '# List operations\nnumbers = [5, 2, 8, 1, 9, 3]\nminimum = numbers[0]\nmaximum = numbers[0]\nfor num in numbers:\n    if num < minimum: minimum = num\n    if num > maximum: maximum = num\nprint(f"List: {numbers}")\nprint(f"Min: {minimum}, Max: {maximum}")' },
         { name: 'String manipulation', code: '# String manipulation\ntext = "Hello, Computing!"\nprint(f"Length: {len(text)}")\nprint(f"Upper: {text.upper()}")\nprint(f"Lower: {text.lower()}")\nprint(f"First 5: {text[:5]}")' },
         { name: 'User-defined function', code: '# User-defined function\ndef average(nums):\n    total = 0\n    for n in nums:\n        total += n\n    return total / len(nums)\nscores = [75, 82, 90, 68, 95]\nprint(f"Average: {average(scores):.2f}")' },
+        { name: 'User input', code: 'name = input("What is your name? ")\nage = input("How old are you? ")\nprint(f"Hello {name}, you are {age} years old!")' },
     ];
 
     const container = document.getElementById('cells-container');
     let cellId = 0;
-    let cells = [{ id: String(++cellId), type: 'code', content: '# Write your Python code here\nprint("Hello!")', output: '', running: false }];
+    let cells = [{ id: String(++cellId), type: 'code', content: '# Write your Python code here\nprint("Hello!")', inputs: '', output: '', running: false }];
 
     function renderCells() {
         container.innerHTML = cells.map(function(c) {
@@ -87,6 +88,7 @@
                 '</div></div>' +
                 '<div class="card-body p-2">' +
                 '<textarea class="form-control font-monospace small" rows="6" data-id="' + c.id + '" placeholder="# Python code...">' + escapeHtml(c.content) + '</textarea>' +
+                '<textarea class="form-control font-monospace small mt-1 stdin-input" rows="2" data-stdin-id="' + c.id + '" placeholder="Stdin inputs \u2014 one value per line (for input() calls)" style="font-size:0.8rem;color:#6c757d;border-color:#dee2e6;">' + escapeHtml(c.inputs) + '</textarea>' +
                 (c.running ? '<p class="text-muted small mt-2 mb-0"><i class="bi bi-hourglass-split me-1"></i>' + running + '</p>' : '') +
                 out +
                 '</div></div>';
@@ -115,6 +117,13 @@
                 if (c) c.content = this.value;
             });
         });
+        container.querySelectorAll('textarea[data-stdin-id]').forEach(function(ta) {
+            ta.addEventListener('input', function() {
+                const id = this.getAttribute('data-stdin-id');
+                const c = cells.find(function(x) { return x.id === id; });
+                if (c) c.inputs = this.value;
+            });
+        });
     }
 
     function escapeHtml(s) {
@@ -133,7 +142,7 @@
         fetch('{{ url_for("student_python_execute") }}', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: c.content }),
+            body: JSON.stringify({ code: c.content, inputs: c.inputs }),
         })
         .then(function(r) {
             return r.json().then(function(data) {
@@ -154,7 +163,7 @@
     }
 
     document.getElementById('add-code-cell').addEventListener('click', function() {
-        cells.push({ id: String(++cellId), type: 'code', content: '# New cell\n', output: '', running: false });
+        cells.push({ id: String(++cellId), type: 'code', content: '# New cell\n', inputs: '', output: '', running: false });
         renderCells();
     });
 
@@ -166,7 +175,7 @@
         if (!btn) return;
         const t = templates[parseInt(btn.getAttribute('data-index'), 10)];
         if (t) {
-            cells.push({ id: String(++cellId), type: 'code', content: t.code, output: '', running: false });
+            cells.push({ id: String(++cellId), type: 'code', content: t.code, inputs: '', output: '', running: false });
             renderCells();
         }
     });
