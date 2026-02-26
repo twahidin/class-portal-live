@@ -47,26 +47,27 @@ def send_notification(telegram_id: int, notification_type: str, data: dict):
             student_display = data.get('student_name', 'Unknown')
             if data.get('student_class'):
                 student_display = f"{student_display} ({data.get('student_class')})"
-            message = f"""📚 *New Assignment Submission*
+            review_url = f"{web_url}/teacher/submissions/{data.get('submission_id', '')}/review"
+            message = f"""📚 <b>New Assignment Submission</b>
 
 👤 Student: {student_display}
 📝 Assignment: {data.get('assignment_title', 'Untitled')}
 📖 Subject: {data.get('subject', 'N/A')}
 🕐 Submitted: {data.get('submitted_at', 'Just now')}
 
-🔗 [Review Submission]({web_url}/teacher/submissions/{data.get('submission_id', '')}/review)"""
-        
+🔗 <a href="{review_url}">Review Submission</a>"""
+
         elif notification_type == 'new_message':
             student_display = data.get('student_name', 'Unknown')
             if data.get('student_class'):
                 student_display = f"{student_display} ({data.get('student_class')})"
-            message = f"""💬 *New Message*
+            message = f"""💬 <b>New Message</b>
 
 👤 From: {student_display}
 📝 Message: {data.get('message', '')}"""
-        
+
         elif notification_type == 'assignment_reminder':
-            message = f"""⏰ *Assignment Reminder*
+            message = f"""⏰ <b>Assignment Reminder</b>
 
 📝 Assignment: {data.get('assignment_title', 'Untitled')}
 📅 Due: {data.get('due_date', 'N/A')}
@@ -77,7 +78,8 @@ def send_notification(telegram_id: int, notification_type: str, data: dict):
             student_display = data.get('student_name', 'Unknown')
             if data.get('student_class'):
                 student_display = f"{student_display} ({data.get('student_class')})"
-            message = f"""📩 *Correction/Challenge Received*
+            review_url = f"{web_url}/teacher/submissions/{data.get('submission_id', '')}/review"
+            message = f"""📩 <b>Correction/Challenge Received</b>
 
 👤 Student: {student_display}
 📝 Assignment: {data.get('assignment_title', 'Untitled')}
@@ -85,18 +87,18 @@ def send_notification(telegram_id: int, notification_type: str, data: dict):
 
 The student has sent corrections or challenged the feedback.
 
-🔗 [View submission & student response]({web_url}/teacher/submissions/{data.get('submission_id', '')}/review)"""
-        
+🔗 <a href="{review_url}">View submission &amp; student response</a>"""
+
         else:
             message = f"📢 Notification: {notification_type}\n{str(data)}"
-        
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(
             bot.send_message(
-                chat_id=telegram_id, 
-                text=message, 
-                parse_mode='Markdown',
+                chat_id=telegram_id,
+                text=message,
+                parse_mode='HTML',
                 disable_web_page_preview=True
             )
         )

@@ -1058,6 +1058,10 @@ async def handle_teacher_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     match = re.search(r'📱\s*([^:]+):', original_text)
     if match:
         student_name = match.group(1).strip()
+        # Remove class suffix like "(S4C1)" from the name
+        class_match = re.match(r'(.+?)\s*\([^)]+\)\s*$', student_name)
+        if class_match:
+            student_name = class_match.group(1).strip()
         student = db.students.find_one({'name': {'$regex': f'^{re.escape(student_name)}', '$options': 'i'}})
     
     if not student:
