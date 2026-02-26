@@ -5365,6 +5365,7 @@ def create_assignment():
                 'enable_question_help': data.get('enable_question_help') == 'on',
                 'question_help_limit': int(data.get('question_help_limit', 5)),
                 'notify_student_telegram': data.get('notify_student_telegram') == 'on',
+                'release_answer_key_pdf': data.get('release_answer_key_pdf') == 'on',
                 'linked_module_id': (data.get('linked_module_id') or '').strip() or None,  # Link to module tree for profile/mastery
                 'created_at': datetime.utcnow(),
                 'updated_at': datetime.utcnow()
@@ -5503,6 +5504,7 @@ def edit_assignment(assignment_id):
                 'enable_question_help': data.get('enable_question_help') == 'on',
                 'question_help_limit': int(data.get('question_help_limit', 5)),
                 'notify_student_telegram': data.get('notify_student_telegram') == 'on',
+                'release_answer_key_pdf': data.get('release_answer_key_pdf') == 'on',
                 'linked_module_id': (data.get('linked_module_id') or '').strip() or None,
                 'updated_at': datetime.utcnow()
             }
