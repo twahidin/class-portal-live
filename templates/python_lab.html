@@ -50,6 +50,9 @@
                 <ul class="dropdown-menu" id="templates-menu"></ul>
             </div>
             <button type="button" class="btn btn-outline-primary" id="add-code-cell"><i class="bi bi-plus-lg me-1"></i>Add code cell</button>
+            <button type="button" class="btn btn-outline-secondary" id="save-cells" title="Save as .py file"><i class="bi bi-download me-1"></i>Save</button>
+            <button type="button" class="btn btn-outline-secondary" id="open-cells" title="Open .py file"><i class="bi bi-upload me-1"></i>Open</button>
+            <input type="file" id="file-input" accept=".py,.txt" style="display:none">
         </div>
     </div>
 
@@ -261,6 +264,62 @@
         if (t) {
             cells.push({ id: String(++cellId), type: 'code', content: t.code, output: '', running: false });
             renderCells();
+        }
+    });
+
+    // --- Save / Open .py files ---
+
+    function downloadCells() {
+        // Sync textarea contents before saving
+        container.querySelectorAll('textarea[data-id]').forEach(function(ta) {
+            var c = cells.find(function(x) { return x.id === ta.getAttribute('data-id'); });
+            if (c) c.content = ta.value;
+        });
+        var parts = cells.map(function(c, i) {
+            return '# %% Cell ' + (i + 1) + '\n' + c.content;
+        });
+        var text = parts.join('\n\n');
+        var blob = new Blob([text], { type: 'text/plain' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'python_lab.py';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function uploadCells(file) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var text = e.target.result;
+            var segments = text.split(/^# %% Cell.*$/m);
+            var newCells = [];
+            segments.forEach(function(seg) {
+                var trimmed = seg.trim();
+                if (trimmed) {
+                    newCells.push({ id: String(++cellId), type: 'code', content: trimmed, output: '', running: false });
+                }
+            });
+            if (newCells.length === 0) {
+                newCells.push({ id: String(++cellId), type: 'code', content: text.trim() || '# Empty file\n', output: '', running: false });
+            }
+            cells = newCells;
+            runningCellId = null;
+            renderCells();
+        };
+        reader.readAsText(file);
+    }
+
+    document.getElementById('save-cells').addEventListener('click', downloadCells);
+    document.getElementById('open-cells').addEventListener('click', function() {
+        document.getElementById('file-input').click();
+    });
+    document.getElementById('file-input').addEventListener('change', function() {
+        if (this.files.length > 0) {
+            uploadCells(this.files[0]);
+            this.value = '';
         }
     });
 
