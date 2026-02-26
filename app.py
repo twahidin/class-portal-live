@@ -29,6 +29,8 @@ import json
 import base64
 import subprocess
 import tempfile
+import queue
+import threading
 import PyPDF2
 
 # Load environment variables
@@ -2329,6 +2331,108 @@ def serve_module_resource_file(resource_id):
 
 PYTHON_EXECUTE_TIMEOUT = 5
 PYTHON_OUTPUT_MAX_BYTES = 100000
+PYTHON_INTERACTIVE_TIMEOUT = 30  # overall wall-clock timeout for interactive execution
+PYTHON_INPUT_WAIT_TIMEOUT = 120  # max seconds to wait for a single input() response
+
+_python_sessions = {}  # {sid: {proc, tmpdir, input_queue, cell_id}}
+_PYLAB_INPUT_MARKER = '\x00__PYLAB_INPUT__:'
+
+_PYLAB_INPUT_WRAPPER = r'''
+import builtins as _b, sys as _s
+_orig_input = _b.input
+def _pylab_input(prompt=''):
+    _s.stdout.write('\x00__PYLAB_INPUT__:' + str(prompt) + '\n')
+    _s.stdout.flush()
+    line = _s.stdin.readline()
+    if not line:
+        raise EOFError
+    return line.rstrip('\n')
+_b.input = _pylab_input
+del _orig_input, _pylab_input, _b, _s
+'''
+
+
+def _cleanup_python_session(sid):
+    """Kill process, clean up temp dir, remove from _python_sessions."""
+    info = _python_sessions.pop(sid, None)
+    if not info:
+        return
+    proc = info.get('proc')
+    if proc and proc.poll() is None:
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+    tmpdir = info.get('tmpdir')
+    if tmpdir:
+        try:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def _python_output_reader(sid, proc, input_q, socketio_ref, timeout):
+    """Read process stdout line-by-line, handle input markers, emit events."""
+    import time
+    start = time.monotonic()
+    total_bytes = 0
+    try:
+        while proc.poll() is None:
+            if time.monotonic() - start > timeout:
+                proc.kill()
+                socketio_ref.emit('python_output', {'cell_id': _python_sessions.get(sid, {}).get('cell_id', ''),
+                    'text': '\nExecution timed out (max %ss).\n' % timeout}, to=sid)
+                break
+            line = proc.stdout.readline()
+            if not line:
+                break
+            text = line.decode('utf-8', errors='replace')
+            cell_id = _python_sessions.get(sid, {}).get('cell_id', '')
+
+            if text.startswith('\x00__PYLAB_INPUT__:'):
+                prompt = text[len('\x00__PYLAB_INPUT__:'):].rstrip('\n')
+                socketio_ref.emit('python_input_request', {'cell_id': cell_id, 'prompt': prompt}, to=sid)
+                try:
+                    value = input_q.get(timeout=PYTHON_INPUT_WAIT_TIMEOUT)
+                except queue.Empty:
+                    proc.kill()
+                    socketio_ref.emit('python_output', {'cell_id': cell_id,
+                        'text': '\nInput timed out.\n'}, to=sid)
+                    break
+                try:
+                    proc.stdin.write((value + '\n').encode('utf-8'))
+                    proc.stdin.flush()
+                except (BrokenPipeError, OSError):
+                    break
+            else:
+                total_bytes += len(text)
+                if total_bytes > PYTHON_OUTPUT_MAX_BYTES:
+                    socketio_ref.emit('python_output', {'cell_id': cell_id,
+                        'text': '\n... (output truncated)\n'}, to=sid)
+                    proc.kill()
+                    break
+                socketio_ref.emit('python_output', {'cell_id': cell_id, 'text': text}, to=sid)
+        # Drain any remaining output
+        remaining = proc.stdout.read()
+        if remaining:
+            text = remaining.decode('utf-8', errors='replace')
+            cell_id = _python_sessions.get(sid, {}).get('cell_id', '')
+            if total_bytes + len(text) > PYTHON_OUTPUT_MAX_BYTES:
+                text = text[:PYTHON_OUTPUT_MAX_BYTES - total_bytes] + '\n... (output truncated)\n'
+            socketio_ref.emit('python_output', {'cell_id': cell_id, 'text': text}, to=sid)
+    except Exception as e:
+        logger.exception("Python output reader error")
+    finally:
+        try:
+            proc.wait(timeout=3)
+        except Exception:
+            proc.kill()
+        cell_id = _python_sessions.get(sid, {}).get('cell_id', '')
+        rc = proc.returncode if proc.returncode is not None else -1
+        socketio_ref.emit('python_done', {'cell_id': cell_id, 'returncode': rc}, to=sid)
+        _cleanup_python_session(sid)
 
 @app.route('/python-lab')
 @login_required
@@ -2336,7 +2440,7 @@ def student_python_lab():
     """Python Lab page: write and run Python code. Access controlled by admin (classes/teaching groups)."""
     if not _student_has_python_lab_access(session['student_id']):
         return redirect(url_for('dashboard'))
-    return render_template('python_lab.html', execute_timeout=PYTHON_EXECUTE_TIMEOUT)
+    return render_template('python_lab.html', execute_timeout=PYTHON_INTERACTIVE_TIMEOUT)
 
 
 @app.route('/teacher/python-lab')
@@ -2345,7 +2449,7 @@ def teacher_python_lab():
     """Python Lab page for teachers. Access controlled by admin (teachers allowed list)."""
     if not _teacher_has_python_lab_access(session['teacher_id']):
         return redirect(url_for('teacher_dashboard'))
-    return render_template('python_lab_teacher.html', execute_timeout=PYTHON_EXECUTE_TIMEOUT)
+    return render_template('python_lab_teacher.html', execute_timeout=PYTHON_INTERACTIVE_TIMEOUT)
 
 
 @app.route('/api/python/execute', methods=['POST'])
@@ -2390,6 +2494,94 @@ def student_python_execute():
     except Exception as e:
         logger.exception("Python execute error")
         return jsonify({'output': str(e), 'executed': False}), 500
+
+
+# --- Python Lab Socket.IO interactive execution ---
+
+@socketio.on('python_run')
+def handle_python_run(data):
+    """Start interactive Python execution via Socket.IO."""
+    sid = request.sid
+    # Access check via Flask session (shared with Socket.IO in threading mode)
+    student_id = session.get('student_id')
+    teacher_id = session.get('teacher_id')
+    if student_id:
+        if not _student_has_python_lab_access(student_id):
+            emit('python_error', {'cell_id': data.get('cell_id', ''), 'error': 'Access denied'})
+            return
+    elif teacher_id:
+        if not _teacher_has_python_lab_access(teacher_id):
+            emit('python_error', {'cell_id': data.get('cell_id', ''), 'error': 'Access denied'})
+            return
+    else:
+        emit('python_error', {'cell_id': data.get('cell_id', ''), 'error': 'Not logged in'})
+        return
+
+    # Kill any existing session for this socket
+    _cleanup_python_session(sid)
+
+    code = (data.get('code') or '').strip()
+    cell_id = data.get('cell_id', '')
+    if not code:
+        emit('python_error', {'cell_id': cell_id, 'error': 'No code provided'})
+        return
+
+    try:
+        tmpdir = tempfile.mkdtemp(prefix='pylab_')
+        # Write wrapper + user code to a temp file
+        full_code = _PYLAB_INPUT_WRAPPER + '\n' + code
+        code_path = os.path.join(tmpdir, '_run.py')
+        with open(code_path, 'w', encoding='utf-8') as f:
+            f.write(full_code)
+
+        proc = subprocess.Popen(
+            [os.environ.get('PYTHON_EXECUTABLE', 'python3'), '-u', code_path],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=tmpdir,
+            env={**os.environ, 'PYTHONIOENCODING': 'utf-8'},
+        )
+
+        input_q = queue.Queue()
+        _python_sessions[sid] = {
+            'proc': proc, 'tmpdir': tmpdir,
+            'input_queue': input_q, 'cell_id': cell_id,
+        }
+
+        t = threading.Thread(
+            target=_python_output_reader,
+            args=(sid, proc, input_q, socketio, PYTHON_INTERACTIVE_TIMEOUT),
+            daemon=True,
+        )
+        t.start()
+    except Exception as e:
+        logger.exception("Python interactive start error")
+        emit('python_error', {'cell_id': cell_id, 'error': str(e)})
+        _cleanup_python_session(sid)
+
+
+@socketio.on('python_input')
+def handle_python_input(data):
+    """User typed an input value — forward to the running process."""
+    sid = request.sid
+    info = _python_sessions.get(sid)
+    if not info:
+        return
+    value = data.get('value', '')
+    info['input_queue'].put(value)
+
+
+@socketio.on('python_stop')
+def handle_python_stop(data):
+    """User clicked Stop — kill the running process."""
+    sid = request.sid
+    info = _python_sessions.get(sid)
+    if not info:
+        return
+    proc = info.get('proc')
+    if proc and proc.poll() is None:
+        proc.kill()
 
 
 # ============================================================================
@@ -3288,8 +3480,9 @@ def handle_leave_space(data):
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    """Clean up room presence on unexpected disconnect."""
+    """Clean up room presence and Python sessions on unexpected disconnect."""
     sid = request.sid
+    # Clean up collab space
     room = _sid_to_room.pop(sid, None)
     if room and room in _collab_rooms:
         user_info = _collab_rooms[room].pop(sid, None)
@@ -3300,6 +3493,8 @@ def handle_disconnect():
                 'user_id': user_info.get('user_id'),
                 'user_name': user_info.get('user_name', ''),
             }, to=room)
+    # Clean up any running Python Lab process
+    _cleanup_python_session(sid)
 
 
 @socketio.on('color_changed')

@@ -2,6 +2,16 @@
 
 {% block title %}Python Lab - School Portal{% endblock %}
 
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+<style>
+.cell-card textarea { font-family: var(--bs-font-monospace); font-size: 0.9rem; }
+.pylab-output { max-height: 300px; overflow: auto; white-space: pre-wrap; word-wrap: break-word; }
+.pylab-input-field { background: transparent; border: none; border-bottom: 1px solid #6c9; color: #6c9; outline: none; font-family: var(--bs-font-monospace); font-size: 0.85rem; width: 60%; min-width: 120px; }
+.pylab-input-field:focus { border-bottom-color: #fff; color: #fff; }
+</style>
+{% endblock %}
+
 {% block navbar %}
 <nav class="navbar navbar-expand-lg navbar-dark">
     <div class="container">
@@ -32,7 +42,7 @@
     <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
         <div>
             <h1 class="mb-1"><i class="bi bi-code-slash me-2"></i>Python Lab</h1>
-            <p class="text-muted mb-0">Write and run Python code. Output appears below each cell. Max {{ execute_timeout }}s per run. <span class="text-muted small">iPad-friendly: curly quotes are auto-converted to straight quotes.</span></p>
+            <p class="text-muted mb-0">Write and run Python code. <code>input()</code> works interactively. Max {{ execute_timeout }}s per run. <span class="text-muted small">iPad-friendly: curly quotes are auto-converted to straight quotes.</span></p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
             <div class="dropdown">
@@ -59,8 +69,9 @@
 
 <script>
 (function() {
-    const executeTimeout = {{ execute_timeout }};
-    const templates = [
+    var executeTimeout = {{ execute_timeout }};
+    var socket = io({ transports: ['websocket', 'polling'] });
+    var templates = [
         { name: 'Hello World', code: '# Hello World\nprint("Hello, Python Lab!")' },
         { name: 'Variables', code: '# Variables\nname = "Student"\nage = 16\nscore = 85.5\nprint(f"Name: {name}, Age: {age}, Score: {score}")' },
         { name: 'List operations', code: '# List operations\nnumbers = [5, 2, 8, 1, 9, 3]\nminimum = numbers[0]\nmaximum = numbers[0]\nfor num in numbers:\n    if num < minimum: minimum = num\n    if num > maximum: maximum = num\nprint(f"List: {numbers}")\nprint(f"Min: {minimum}, Max: {maximum}")' },
@@ -69,42 +80,59 @@
         { name: 'User input', code: 'name = input("What is your name? ")\nage = input("How old are you? ")\nprint(f"Hello {name}, you are {age} years old!")' },
     ];
 
-    const container = document.getElementById('cells-container');
-    let cellId = 0;
-    let cells = [{ id: String(++cellId), type: 'code', content: '# Write your Python code here\nprint("Hello!")', inputs: '', output: '', running: false }];
+    var container = document.getElementById('cells-container');
+    var cellId = 0;
+    var cells = [{ id: String(++cellId), type: 'code', content: '# Write your Python code here\nprint("Hello!")', output: '', running: false }];
+    var runningCellId = null;
+
+    function escapeHtml(s) {
+        var div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
 
     function renderCells() {
         container.innerHTML = cells.map(function(c) {
-            const running = c.running ? ' Running...' : '';
-            const out = (c.output || '').trim() ? '<pre class="mb-0 small bg-dark text-light rounded p-2 mt-2" style="max-height:200px;overflow:auto;">' + escapeHtml(c.output) + '</pre>' : '';
+            var isRunning = c.running;
+            var runBtn = isRunning
+                ? '<button type="button" class="btn btn-sm btn-danger stop-cell" title="Stop"><i class="bi bi-stop-fill"></i></button> '
+                : '<button type="button" class="btn btn-sm btn-outline-success run-cell" title="Run"><i class="bi bi-play-fill"></i></button> ';
+            var out = '';
+            if (isRunning) {
+                // Output area will be managed live via DOM — just put a placeholder
+                out = '<div class="pylab-output-area mt-2" data-output-id="' + c.id + '"><pre class="mb-0 small bg-dark text-light rounded p-2 pylab-output"></pre></div>';
+            } else if ((c.output || '').trim()) {
+                out = '<pre class="mb-0 small bg-dark text-light rounded p-2 mt-2 pylab-output">' + escapeHtml(c.output) + '</pre>';
+            }
             return '<div class="card mb-3 cell-card" data-id="' + c.id + '">' +
                 '<div class="card-header py-2 d-flex justify-content-between align-items-center">' +
                 '<span class="badge bg-success">code</span>' +
-                '<div>' +
-                '<button type="button" class="btn btn-sm btn-outline-success run-cell" title="Run">' +
-                '<i class="bi bi-play-fill"></i></button> ' +
+                '<div>' + runBtn +
                 '<button type="button" class="btn btn-sm btn-outline-danger delete-cell" title="Delete">' +
                 '<i class="bi bi-trash"></i></button>' +
                 '</div></div>' +
                 '<div class="card-body p-2">' +
                 '<textarea class="form-control font-monospace small" rows="6" data-id="' + c.id + '" placeholder="# Python code...">' + escapeHtml(c.content) + '</textarea>' +
-                '<textarea class="form-control font-monospace small mt-1 stdin-input" rows="2" data-stdin-id="' + c.id + '" placeholder="Stdin inputs \u2014 one value per line (for input() calls)" style="font-size:0.8rem;color:#6c757d;border-color:#dee2e6;">' + escapeHtml(c.inputs) + '</textarea>' +
-                (c.running ? '<p class="text-muted small mt-2 mb-0"><i class="bi bi-hourglass-split me-1"></i>' + running + '</p>' : '') +
                 out +
                 '</div></div>';
         }).join('');
 
+        // Bind event listeners
         container.querySelectorAll('.run-cell').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                const card = this.closest('.cell-card');
-                const id = card.getAttribute('data-id');
+                var id = this.closest('.cell-card').getAttribute('data-id');
                 runCell(id);
+            });
+        });
+        container.querySelectorAll('.stop-cell').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var id = this.closest('.cell-card').getAttribute('data-id');
+                stopCell(id);
             });
         });
         container.querySelectorAll('.delete-cell').forEach(function(btn) {
             btn.addEventListener('click', function() {
-                const card = this.closest('.cell-card');
-                const id = card.getAttribute('data-id');
+                var id = this.closest('.cell-card').getAttribute('data-id');
                 if (cells.length <= 1) return;
                 cells = cells.filter(function(c) { return c.id !== id; });
                 renderCells();
@@ -112,58 +140,114 @@
         });
         container.querySelectorAll('textarea[data-id]').forEach(function(ta) {
             ta.addEventListener('input', function() {
-                const id = this.getAttribute('data-id');
-                const c = cells.find(function(x) { return x.id === id; });
+                var id = this.getAttribute('data-id');
+                var c = cells.find(function(x) { return x.id === id; });
                 if (c) c.content = this.value;
             });
         });
-        container.querySelectorAll('textarea[data-stdin-id]').forEach(function(ta) {
-            ta.addEventListener('input', function() {
-                const id = this.getAttribute('data-stdin-id');
-                const c = cells.find(function(x) { return x.id === id; });
-                if (c) c.inputs = this.value;
-            });
-        });
     }
 
-    function escapeHtml(s) {
-        const div = document.createElement('div');
-        div.textContent = s;
-        return div.innerHTML;
+    function getOutputPre(cellId) {
+        var area = container.querySelector('[data-output-id="' + cellId + '"]');
+        return area ? area.querySelector('pre') : null;
+    }
+
+    function autoScroll(pre) {
+        if (pre) pre.scrollTop = pre.scrollHeight;
     }
 
     function runCell(id) {
-        const c = cells.find(function(x) { return x.id === id; });
-        if (!c || c.running) return;
+        var c = cells.find(function(x) { return x.id === id; });
+        if (!c || runningCellId) return;
         c.running = true;
         c.output = '';
+        runningCellId = id;
         renderCells();
-
-        fetch('{{ url_for("student_python_execute") }}', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: c.content, inputs: c.inputs }),
-        })
-        .then(function(r) {
-            return r.json().then(function(data) {
-                if (!r.ok) throw new Error(data.error || data.output || 'Request failed');
-                return data;
-            });
-        })
-        .then(function(data) {
-            c.running = false;
-            c.output = data.output || data.error || '(no output)';
-            renderCells();
-        })
-        .catch(function(err) {
-            c.running = false;
-            c.output = 'Error: ' + (err.message || 'Request failed. Try again.');
-            renderCells();
-        });
+        socket.emit('python_run', { cell_id: id, code: c.content });
     }
 
+    function stopCell(id) {
+        socket.emit('python_stop', { cell_id: id });
+    }
+
+    function finishCell(cellId) {
+        var c = cells.find(function(x) { return x.id === cellId; });
+        if (!c) return;
+        // Capture accumulated output from the live <pre>
+        var pre = getOutputPre(cellId);
+        if (pre) c.output = pre.textContent;
+        c.running = false;
+        runningCellId = null;
+        renderCells();
+    }
+
+    // --- Socket.IO listeners ---
+
+    socket.on('python_output', function(data) {
+        var pre = getOutputPre(data.cell_id);
+        if (!pre) return;
+        pre.textContent += data.text;
+        autoScroll(pre);
+    });
+
+    socket.on('python_input_request', function(data) {
+        var pre = getOutputPre(data.cell_id);
+        if (!pre) return;
+        // Append the prompt text
+        pre.textContent += data.prompt;
+        // Create inline input field after the <pre>
+        var area = pre.parentElement;
+        var inputRow = document.createElement('div');
+        inputRow.className = 'd-flex align-items-center bg-dark rounded px-2 py-1';
+        inputRow.innerHTML = '<span class="text-light me-1" style="font-size:0.85rem;font-family:var(--bs-font-monospace);">&gt;</span>';
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'pylab-input-field';
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('autocorrect', 'off');
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('spellcheck', 'false');
+        inputRow.appendChild(input);
+        area.appendChild(inputRow);
+        input.focus();
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                var val = input.value;
+                // Show typed value in output and remove input field
+                pre.textContent += val + '\n';
+                inputRow.remove();
+                autoScroll(pre);
+                socket.emit('python_input', { cell_id: data.cell_id, value: val });
+            }
+        });
+    });
+
+    socket.on('python_done', function(data) {
+        finishCell(data.cell_id);
+        // If output is empty, show (no output)
+        var c = cells.find(function(x) { return x.id === data.cell_id; });
+        if (c && !(c.output || '').trim()) {
+            c.output = '(no output)';
+            renderCells();
+        }
+    });
+
+    socket.on('python_error', function(data) {
+        var c = cells.find(function(x) { return x.id === data.cell_id; });
+        if (c) {
+            c.output = 'Error: ' + (data.error || 'Unknown error');
+            c.running = false;
+        }
+        runningCellId = null;
+        renderCells();
+    });
+
+    // --- Cell management ---
+
     document.getElementById('add-code-cell').addEventListener('click', function() {
-        cells.push({ id: String(++cellId), type: 'code', content: '# New cell\n', inputs: '', output: '', running: false });
+        cells.push({ id: String(++cellId), type: 'code', content: '# New cell\n', output: '', running: false });
         renderCells();
     });
 
@@ -171,11 +255,11 @@
         return '<li><button class="dropdown-item template-btn" type="button" data-index="' + i + '">' + escapeHtml(t.name) + '</button></li>';
     }).join('');
     document.querySelector('#templates-menu').addEventListener('click', function(e) {
-        const btn = e.target.closest('.template-btn');
+        var btn = e.target.closest('.template-btn');
         if (!btn) return;
-        const t = templates[parseInt(btn.getAttribute('data-index'), 10)];
+        var t = templates[parseInt(btn.getAttribute('data-index'), 10)];
         if (t) {
-            cells.push({ id: String(++cellId), type: 'code', content: t.code, inputs: '', output: '', running: false });
+            cells.push({ id: String(++cellId), type: 'code', content: t.code, output: '', running: false });
             renderCells();
         }
     });
@@ -183,10 +267,4 @@
     renderCells();
 })();
 </script>
-{% endblock %}
-
-{% block head %}
-<style>
-.cell-card textarea { font-family: var(--bs-font-monospace); font-size: 0.9rem; }
-</style>
 {% endblock %}
