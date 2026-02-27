@@ -114,17 +114,37 @@
                                 <i class="bi bi-file-pdf me-1"></i>Download Question paper (PDF)
                             </a>
                             {% endif %}
+                            {% if drive_available and not existing_submission %}
+                            <button type="button" class="btn btn-primary" id="btn-open-drive" onclick="openInDrive()">
+                                <i class="bi bi-google me-1"></i>
+                                {% if drive_submission and drive_submission.google_drive_url %}
+                                    Continue in Google Sheets
+                                {% else %}
+                                    Open in Google Sheets
+                                {% endif %}
+                            </button>
+                            {% endif %}
                         </div>
-                        <p class="text-muted small mt-2 mb-0">Complete the Excel template and upload it below. You will receive a PDF report and a commented Excel file with feedback.</p>
+                        <p class="text-muted small mt-2 mb-0">Complete the Excel template and upload it below, or use Google Sheets to work online.</p>
                     </div>
                     {% elif assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
                     <div class="question-paper-section mt-4">
                         <h6><i class="bi bi-file-pdf me-2"></i>Question Paper</h6>
                         <div class="d-grid gap-2">
-                            <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
+                            <a href="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}"
                                class="btn btn-primary" download>
                                 <i class="bi bi-download me-1"></i>Download Question Paper
                             </a>
+                            {% if drive_available and not existing_submission %}
+                            <button type="button" class="btn btn-success" id="btn-open-drive" onclick="openInDrive()">
+                                <i class="bi bi-google me-1"></i>
+                                {% if drive_submission and drive_submission.google_drive_url %}
+                                    Continue in Google Docs
+                                {% else %}
+                                    Open in Google Docs
+                                {% endif %}
+                            </button>
+                            {% endif %}
                         </div>
                     </div>
                     {% endif %}
@@ -295,6 +315,11 @@
                             <button type="submit" class="btn btn-success btn-lg" id="submit-btn" disabled>
                                 <i class="bi bi-send-fill me-1"></i>Submit Assignment
                             </button>
+                            {% if drive_available and drive_submission and drive_submission.google_drive_url %}
+                            <button type="button" class="btn btn-primary btn-lg" id="submit-drive-btn" onclick="submitFromDrive()">
+                                <i class="bi bi-google me-1"></i>Submit from Google {% if assignment.marking_type == 'spreadsheet' %}Sheets{% else %}Docs{% endif %}
+                            </button>
+                            {% endif %}
                         </div>
                         
                         <div class="alert alert-warning mt-3 small py-2">
@@ -1522,7 +1547,100 @@
     let uploadedPdf = null;
     let uploadedExcel = null;
     const isSpreadsheetAssignment = {{ 'true' if assignment.marking_type == 'spreadsheet' else 'false' }};
-    
+
+    // === Google Drive Integration ===
+    const driveSubmissionUrl = {{ (drive_submission.google_drive_url|tojson) if drive_submission and drive_submission.google_drive_url else 'null' }};
+
+    async function openInDrive() {
+        const btn = document.getElementById('btn-open-drive');
+        if (!btn) return;
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating your copy...';
+
+        try {
+            const response = await fetch('/api/student/open-in-drive', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ assignment_id: '{{ assignment.assignment_id }}' })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                window.open(result.url, '_blank');
+
+                // Update button text
+                const label = isSpreadsheetAssignment ? 'Continue in Google Sheets' : 'Continue in Google Docs';
+                btn.innerHTML = '<i class="bi bi-google me-1"></i>' + label;
+                btn.disabled = false;
+
+                // Show the Drive submit button if not already present
+                if (!document.getElementById('submit-drive-btn')) {
+                    const submitArea = document.querySelector('#submission-form .d-grid.gap-2.mt-3');
+                    if (submitArea) {
+                        const newBtn = document.createElement('button');
+                        newBtn.type = 'button';
+                        newBtn.className = 'btn btn-primary btn-lg';
+                        newBtn.id = 'submit-drive-btn';
+                        newBtn.onclick = submitFromDrive;
+                        const typeLabel = isSpreadsheetAssignment ? 'Sheets' : 'Docs';
+                        newBtn.innerHTML = '<i class="bi bi-google me-1"></i>Submit from Google ' + typeLabel;
+                        submitArea.appendChild(newBtn);
+                    }
+                }
+            } else {
+                alert(result.error || 'Failed to create Google Drive copy.');
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        } catch (err) {
+            console.error('Open in Drive error:', err);
+            alert('Could not connect to the server. Please try again.');
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+
+    async function submitFromDrive() {
+        const typeLabel = isSpreadsheetAssignment ? 'Sheets' : 'Docs';
+        if (!confirm('Submit your work from Google ' + typeLabel + '? Make sure you have saved all changes in Google ' + typeLabel + ' first.')) {
+            return;
+        }
+
+        const btn = document.getElementById('submit-drive-btn');
+        if (!btn) return;
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Exporting & submitting...';
+
+        const regularBtn = document.getElementById('submit-btn');
+        if (regularBtn) regularBtn.disabled = true;
+
+        try {
+            const response = await fetch('/api/student/submit-from-drive', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ assignment_id: '{{ assignment.assignment_id }}' })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                window.location.href = '/submissions/' + result.submission_id;
+            } else {
+                alert(result.error || 'Submission failed. Please try again.');
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+                if (regularBtn) regularBtn.disabled = false;
+            }
+        } catch (err) {
+            console.error('Submit from Drive error:', err);
+            alert('Could not connect to the server. Please try again.');
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+            if (regularBtn) regularBtn.disabled = false;
+        }
+    }
+
     // === REVIEW UPLOADS (removed - kept for compatibility) ===
     let reviewPhotos = [];
     let reviewPdf = null;

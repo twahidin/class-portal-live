@@ -746,13 +746,31 @@ def view_assignment(assignment_id):
         rejected_submission = rejected_list[0] if rejected_list else None
     
     teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
-    
+
+    # Check if Google Drive submission is available for this assignment
+    drive_available = bool(
+        teacher and
+        teacher.get('google_drive_folder_id') and
+        assignment.get('drive_folders', {}).get('submissions_folder_id')
+    )
+
+    # Check if student already has a Google Drive copy
+    drive_submission = None
+    if drive_available and not existing_submission:
+        drive_submission = Submission.find_one({
+            'assignment_id': assignment_id,
+            'student_id': session['student_id'],
+            'google_drive_file_id': {'$exists': True}
+        })
+
     return render_template('assignment_view.html',
                          student=student,
                          assignment=assignment,
                          existing_submission=existing_submission,
                          rejected_submission=rejected_submission,
-                         teacher=teacher)
+                         teacher=teacher,
+                         drive_available=drive_available,
+                         drive_submission=drive_submission)
 
 @app.route('/assignments/<assignment_id>/save', methods=['POST'])
 @login_required
@@ -1280,6 +1298,415 @@ def download_submission_pdf(submission_id):
     except Exception as e:
         logger.error(f"Error downloading PDF for submission {submission_id}: {e}", exc_info=True)
         return redirect(url_for('view_submission', submission_id=submission_id))
+
+@app.route('/api/student/open-in-drive', methods=['POST'])
+@login_required
+@limiter.limit("20 per hour")
+def api_student_open_in_drive():
+    """Create a Google Doc/Sheet copy of the assignment template for the student to edit."""
+    from gridfs import GridFS
+    from utils.google_drive import get_teacher_drive_manager
+
+    try:
+        data = request.get_json()
+        assignment_id = data.get('assignment_id') if data else None
+        if not assignment_id:
+            return jsonify({'success': False, 'error': 'Missing assignment_id'}), 400
+
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        if not assignment:
+            return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+        student = Student.find_one({'student_id': session['student_id']})
+        if not student:
+            return jsonify({'success': False, 'error': 'Student not found'}), 404
+
+        # Authorization: verify student can access this assignment
+        teacher_ids = get_student_teacher_ids(session['student_id'])
+        if assignment.get('teacher_id') not in teacher_ids:
+            return jsonify({'success': False, 'error': 'Access denied'}), 403
+        if not can_student_access_assignment(student, assignment):
+            return jsonify({'success': False, 'error': 'Access denied'}), 403
+
+        teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
+        if not teacher:
+            return jsonify({'success': False, 'error': 'Teacher not found'}), 404
+
+        # Check teacher has Drive configured and assignment has a submissions folder
+        submissions_folder_id = assignment.get('drive_folders', {}).get('submissions_folder_id')
+        if not teacher.get('google_drive_folder_id') or not submissions_folder_id:
+            return jsonify({'success': False, 'error': 'Google Drive is not configured for this assignment'}), 400
+
+        # Check if student already has a Drive copy (exclude rejected — allow fresh resubmission)
+        existing = Submission.find_one({
+            'assignment_id': assignment_id,
+            'student_id': session['student_id'],
+            'google_drive_file_id': {'$exists': True},
+            'status': {'$nin': ['rejected']}
+        })
+        if existing and existing.get('google_drive_url'):
+            return jsonify({
+                'success': True,
+                'url': existing['google_drive_url'],
+                'already_exists': True
+            })
+
+        # Determine template file to copy
+        marking_type = assignment.get('marking_type', 'standard')
+        if marking_type == 'spreadsheet' and assignment.get('spreadsheet_student_template_id'):
+            template_id = assignment['spreadsheet_student_template_id']
+            source_mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            drive_type = 'spreadsheet'
+        elif assignment.get('question_paper_id'):
+            template_id = assignment['question_paper_id']
+            source_mime_type = 'application/pdf'
+            drive_type = 'document'
+        else:
+            return jsonify({'success': False, 'error': 'No template file found for this assignment'}), 400
+
+        # Fetch template from GridFS
+        fs = GridFS(db.db)
+        from bson import ObjectId
+        try:
+            template_file = fs.get(ObjectId(template_id) if isinstance(template_id, str) else template_id)
+            content_bytes = template_file.read()
+        except Exception as e:
+            logger.error(f"Error reading template from GridFS: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': 'Could not read assignment template'}), 500
+
+        # Upload and convert via Drive
+        drive_manager = get_teacher_drive_manager(teacher)
+        if not drive_manager:
+            return jsonify({'success': False, 'error': 'Could not connect to Google Drive'}), 500
+
+        student_name = student.get('name', 'Student')
+        safe_name = "".join(c for c in student_name if c.isalnum() or c in (' ', '-', '_')).strip()
+        safe_title = "".join(c for c in assignment.get('title', 'Assignment') if c.isalnum() or c in (' ', '-', '_')).strip()
+        filename = f"{safe_name} - {safe_title}"
+        result = drive_manager.upload_and_convert(
+            content_bytes, filename, source_mime_type,
+            folder_id=submissions_folder_id
+        )
+        if not result:
+            return jsonify({'success': False, 'error': 'Failed to create Google Drive copy'}), 500
+
+        # Set permissions so student can edit
+        if not drive_manager.set_anyone_with_link_editor(result['id']):
+            return jsonify({'success': False, 'error': 'Failed to set edit permissions on Drive file'}), 500
+
+        # Create or update a draft submission record
+        submission_id = existing['submission_id'] if existing else generate_submission_id()
+        submission_data = {
+            'google_drive_file_id': result['id'],
+            'google_drive_url': result['link'],
+            'google_drive_type': drive_type,
+            'updated_at': datetime.utcnow()
+        }
+
+        if existing:
+            Submission.update_one(
+                {'submission_id': submission_id},
+                {'$set': submission_data}
+            )
+        else:
+            submission_data.update({
+                'submission_id': submission_id,
+                'assignment_id': assignment_id,
+                'student_id': session['student_id'],
+                'teacher_id': assignment['teacher_id'],
+                'status': 'draft',
+                'submitted_via': 'google_drive',
+                'created_at': datetime.utcnow()
+            })
+            Submission.insert_one(submission_data)
+
+        logger.info(f"Created Drive copy for student {session['student_id']} on assignment {assignment_id}: {result['id']}")
+
+        return jsonify({
+            'success': True,
+            'url': result['link'],
+            'already_exists': False
+        })
+
+    except Exception as e:
+        logger.error(f"Error in open-in-drive: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/student/submit-from-drive', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def api_student_submit_from_drive():
+    """Export the student's Google Doc/Sheet and submit it for marking."""
+    from gridfs import GridFS
+    from bson import ObjectId
+    from utils.google_drive import get_teacher_drive_manager
+
+    try:
+        data = request.get_json()
+        assignment_id = data.get('assignment_id') if data else None
+        if not assignment_id:
+            return jsonify({'success': False, 'error': 'Missing assignment_id'}), 400
+
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        if not assignment:
+            return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+        student = Student.find_one({'student_id': session['student_id']})
+        if not student:
+            return jsonify({'success': False, 'error': 'Student not found'}), 404
+
+        # Authorization: verify student can access this assignment
+        teacher_ids = get_student_teacher_ids(session['student_id'])
+        if assignment.get('teacher_id') not in teacher_ids:
+            return jsonify({'success': False, 'error': 'Access denied'}), 403
+        if not can_student_access_assignment(student, assignment):
+            return jsonify({'success': False, 'error': 'Access denied'}), 403
+
+        teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
+        if not teacher:
+            return jsonify({'success': False, 'error': 'Teacher not found'}), 404
+
+        # Find the draft submission with a Drive file
+        existing = Submission.find_one({
+            'assignment_id': assignment_id,
+            'student_id': session['student_id'],
+            'google_drive_file_id': {'$exists': True}
+        })
+        if not existing:
+            return jsonify({'success': False, 'error': 'No Google Drive document found. Please open in Drive first.'}), 400
+
+        # Block if already submitted
+        if existing.get('status') in ['submitted', 'ai_reviewed', 'reviewed']:
+            return jsonify({'success': False, 'error': 'Already submitted. You cannot resubmit unless the teacher rejects it.'}), 400
+
+        drive_file_id = existing['google_drive_file_id']
+        drive_type = existing.get('google_drive_type', 'document')
+        submission_id = existing['submission_id']
+
+        # Get Drive manager
+        drive_manager = get_teacher_drive_manager(teacher)
+        if not drive_manager:
+            return jsonify({'success': False, 'error': 'Could not connect to Google Drive'}), 500
+
+        # Export from Drive
+        try:
+            if drive_type == 'spreadsheet':
+                exported_bytes = drive_manager.export_as_xlsx(drive_file_id)
+                file_ext = 'xlsx'
+                content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                page_type = 'excel'
+            else:
+                exported_bytes = drive_manager.export_as_pdf(drive_file_id)
+                file_ext = 'pdf'
+                content_type = 'application/pdf'
+                page_type = 'pdf'
+        except Exception as e:
+            logger.error(f"Error exporting from Drive: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': 'Failed to export file from Google Drive'}), 500
+
+        if not exported_bytes:
+            return jsonify({'success': False, 'error': 'Exported file is empty'}), 500
+
+        # Store exported bytes in GridFS
+        fs = GridFS(db.db)
+
+        # Delete old file_ids from GridFS if resubmitting
+        for old_fid in existing.get('file_ids', []):
+            try:
+                fs.delete(ObjectId(old_fid))
+            except Exception as e:
+                logger.warning(f"Error deleting old submission file {old_fid}: {e}")
+
+        file_id = fs.put(
+            exported_bytes,
+            filename=f"{submission_id}_drive_export.{file_ext}",
+            content_type=content_type,
+            submission_id=submission_id,
+            page_num=1
+        )
+        file_ids = [str(file_id)]
+
+        pages = [{
+            'type': page_type,
+            'data': exported_bytes,
+            'page_num': 1
+        }]
+
+        # Update submission to submitted status
+        Submission.update_one(
+            {'submission_id': submission_id},
+            {'$set': {
+                'file_ids': file_ids,
+                'file_type': page_type,
+                'page_count': 1,
+                'status': 'submitted',
+                'submitted_via': 'google_drive',
+                'submitted_at': datetime.utcnow(),
+            }, '$unset': {
+                'rejection_reason': '',
+                'rejected_at': '',
+                'rejected_by': ''
+            }}
+        )
+
+        # Generate AI feedback (marking pipeline)
+        try:
+            marking_type = assignment.get('marking_type', 'standard')
+
+            if marking_type == 'spreadsheet':
+                answer_key_bytes = None
+                if assignment.get('spreadsheet_answer_key_id'):
+                    try:
+                        ans_file = fs.get(assignment['spreadsheet_answer_key_id'])
+                        answer_key_bytes = ans_file.read()
+                    except Exception as e:
+                        logger.warning(f"Could not read spreadsheet answer key: {e}")
+                student_bytes = exported_bytes if page_type == 'excel' else None
+                if not answer_key_bytes or not student_bytes:
+                    ai_result = {'error': 'Missing answer key or Excel submission'}
+                else:
+                    from utils.spreadsheet_evaluator import (
+                        evaluate_spreadsheet_submission,
+                        generate_pdf_report as generate_spreadsheet_pdf,
+                        generate_commented_excel,
+                    )
+                    student_name = student.get('name') or session.get('student_name') or 'Student'
+                    result_dict = evaluate_spreadsheet_submission(
+                        answer_key_bytes=answer_key_bytes,
+                        student_bytes=student_bytes,
+                        student_name=student_name,
+                        student_filename=f"{submission_id}_drive_export.xlsx",
+                    )
+                    if result_dict is None:
+                        ai_result = {'error': 'Spreadsheet evaluation failed'}
+                    else:
+                        pdf_bytes = generate_spreadsheet_pdf(result_dict)
+                        excel_bytes = generate_commented_excel(student_bytes, result_dict)
+                        pdf_id = fs.put(
+                            pdf_bytes,
+                            filename=f"{submission_id}_feedback_report.pdf",
+                            content_type='application/pdf',
+                            submission_id=submission_id,
+                            file_type='spreadsheet_feedback_pdf',
+                        )
+                        excel_id = fs.put(
+                            excel_bytes,
+                            filename=f"{submission_id}_feedback_commented.xlsx",
+                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            submission_id=submission_id,
+                            file_type='spreadsheet_feedback_excel',
+                        )
+                        ai_result = {
+                            'spreadsheet_feedback': result_dict,
+                            'marks_awarded': result_dict.get('marks_awarded'),
+                            'total_marks': result_dict.get('total_marks'),
+                            'percentage': result_dict.get('percentage'),
+                        }
+                        update_fields = {
+                            'ai_feedback': ai_result,
+                            'status': 'ai_reviewed',
+                            'final_marks': result_dict.get('marks_awarded'),
+                            'spreadsheet_feedback_pdf_id': str(pdf_id),
+                            'spreadsheet_feedback_excel_id': str(excel_id),
+                        }
+                        if assignment.get('send_ai_feedback_immediately'):
+                            update_fields['feedback_sent'] = True
+                        Submission.update_one(
+                            {'submission_id': submission_id},
+                            {'$set': update_fields}
+                        )
+                        if update_fields.get('feedback_sent'):
+                            submission_after = Submission.find_one({'submission_id': submission_id})
+                            if submission_after:
+                                _update_profile_and_mastery_from_assignment(session['student_id'], assignment, submission_after)
+                        # Skip the common 413 / update block below for spreadsheet
+                        marking_type = None  # signal we already updated
+
+            elif marking_type == 'rubric':
+                from utils.ai_marking import analyze_essay_with_rubrics
+                rubrics_content = None
+                if assignment.get('rubrics_id'):
+                    try:
+                        rubrics_file = fs.get(assignment['rubrics_id'])
+                        rubrics_content = rubrics_file.read()
+                    except:
+                        pass
+
+                ai_result = analyze_essay_with_rubrics(pages, assignment, rubrics_content, teacher)
+            else:
+                from utils.ai_marking import analyze_submission_images
+                answer_key_content = None
+                if assignment.get('answer_key_id'):
+                    try:
+                        answer_file = fs.get(assignment['answer_key_id'])
+                        answer_key_content = answer_file.read()
+                    except:
+                        pass
+
+                ai_result = analyze_submission_images(pages, assignment, answer_key_content, teacher)
+
+            # If already handled (e.g. spreadsheet), skip standard/rubric update
+            if marking_type is not None:
+                # If AI returned 413 (request too large), auto-reject
+                is_413 = ai_result.get('error_code') == 'request_too_large' or (
+                    ai_result.get('error') and ('413' in str(ai_result.get('error')) or 'request_too_large' in str(ai_result.get('error')).lower())
+                )
+                if is_413:
+                    rejection_reason = (
+                        "Your submission was too large to process. Please resubmit with fewer or smaller images: "
+                        "e.g. one photo per page, lower resolution, or fewer pages. This helps the system process your work."
+                    )
+                    Submission.update_one(
+                        {'submission_id': submission_id},
+                        {'$set': {
+                            'ai_feedback': ai_result,
+                            'status': 'rejected',
+                            'rejection_reason': rejection_reason,
+                            'rejected_at': datetime.utcnow(),
+                            'rejected_by': 'system_413'
+                        }}
+                    )
+                    logger.info(f"Auto-rejected submission {submission_id} due to 413 request_too_large; student can resubmit.")
+                else:
+                    update_fields = {
+                        'ai_feedback': ai_result,
+                        'status': 'ai_reviewed'
+                    }
+                    if assignment.get('send_ai_feedback_immediately') and not ai_result.get('error'):
+                        update_fields['feedback_sent'] = True
+                    Submission.update_one(
+                        {'submission_id': submission_id},
+                        {'$set': update_fields}
+                    )
+                    if update_fields.get('feedback_sent'):
+                        submission_after = Submission.find_one({'submission_id': submission_id})
+                        if submission_after:
+                            _update_profile_and_mastery_from_assignment(session['student_id'], assignment, submission_after)
+        except Exception as e:
+            logger.error(f"AI feedback error for Drive submission: {e}", exc_info=True)
+
+        # Notify teacher
+        submission_doc = Submission.find_one({'submission_id': submission_id})
+        try:
+            notify_submission_ready(submission_doc or {'submission_id': submission_id}, assignment, student, teacher)
+        except Exception as e:
+            logger.warning(f"Notification error: {e}")
+
+        # Skip redundant Drive upload — the Google Doc/Sheet is already in the submissions folder
+
+        final_submission = Submission.find_one({'submission_id': submission_id})
+        final_status = final_submission.get('status', 'submitted') if final_submission else 'submitted'
+
+        return jsonify({
+            'success': True,
+            'submission_id': submission_id,
+            'status': final_status,
+            'redirect': url_for('view_submission', submission_id=submission_id)
+        })
+
+    except Exception as e:
+        logger.error(f"Error in submit-from-drive: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/student/submit', methods=['POST'])
 @login_required

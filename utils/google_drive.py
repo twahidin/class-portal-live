@@ -9,8 +9,7 @@ import io
 logger = logging.getLogger(__name__)
 
 SCOPES = [
-    'https://www.googleapis.com/auth/drive.file',
-    'https://www.googleapis.com/auth/drive.readonly'
+    'https://www.googleapis.com/auth/drive'
 ]
 
 
@@ -211,7 +210,141 @@ class DriveManager:
         except Exception as e:
             logger.error(f"Error uploading content: {e}")
             return None
-    
+
+    def upload_and_convert(self, content_bytes: bytes, filename: str,
+                           source_mime_type: str, folder_id: str = None) -> dict:
+        """Upload a file to Drive and convert it to Google Docs/Sheets format.
+
+        Args:
+            content_bytes: File content
+            filename: Display name for the Google Doc/Sheet
+            source_mime_type: Original MIME type ('application/pdf' or
+                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            folder_id: Target folder ID
+
+        Returns:
+            dict with 'id' and 'link', or None on failure
+        """
+        try:
+            # Determine target Google format based on source MIME type
+            if source_mime_type == 'application/pdf':
+                target_mime_type = 'application/vnd.google-apps.document'
+            elif source_mime_type == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+                target_mime_type = 'application/vnd.google-apps.spreadsheet'
+            else:
+                logger.error(f"Unsupported source MIME type for conversion: {source_mime_type}")
+                return None
+
+            file_metadata = {
+                'name': filename,
+                'mimeType': target_mime_type
+            }
+            if folder_id or self.folder_id:
+                file_metadata['parents'] = [folder_id or self.folder_id]
+
+            media = MediaIoBaseUpload(
+                io.BytesIO(content_bytes),
+                mimetype=source_mime_type,
+                resumable=True
+            )
+
+            file = self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink',
+                supportsAllDrives=True
+            ).execute()
+
+            return {
+                'id': file.get('id'),
+                'link': file.get('webViewLink')
+            }
+        except HttpError as e:
+            if e.resp.status == 403 and ('storageQuotaExceeded' in str(e) or 'Service Accounts do not have storage quota' in str(e)):
+                logger.warning(
+                    "Google Drive: Service account has no storage quota. Use a folder inside a Shared Drive "
+                    "(https://developers.google.com/workspace/drive/api/guides/about-shareddrives) and share it with the "
+                    "service account, or use OAuth delegation (https://support.google.com/a/answer/7281227)."
+                )
+                return None
+            logger.error(f"Error uploading and converting file: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error uploading and converting file: {e}")
+            return None
+
+    def set_anyone_with_link_editor(self, file_id: str) -> bool:
+        """Set file permissions to 'anyone with the link can edit'.
+
+        Args:
+            file_id: Google Drive file ID
+
+        Returns:
+            True on success, False on error
+        """
+        try:
+            self.service.permissions().create(
+                fileId=file_id,
+                body={'type': 'anyone', 'role': 'writer'},
+                supportsAllDrives=True
+            ).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting permissions for file {file_id}: {e}")
+            return False
+
+    def export_as_pdf(self, file_id: str) -> bytes:
+        """Export a Google Doc/Sheet as PDF bytes.
+
+        Args:
+            file_id: Google Drive file ID of a Google Doc or Sheet
+
+        Returns:
+            PDF bytes, or None on error
+        """
+        try:
+            request = self.service.files().export_media(
+                fileId=file_id,
+                mimeType='application/pdf'
+            )
+            file_content = io.BytesIO()
+            downloader = MediaIoBaseDownload(file_content, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+
+            file_content.seek(0)
+            return file_content.read()
+        except Exception as e:
+            logger.error(f"Error exporting file {file_id} as PDF: {e}")
+            return None
+
+    def export_as_xlsx(self, file_id: str) -> bytes:
+        """Export a Google Sheet as xlsx bytes.
+
+        Args:
+            file_id: Google Drive file ID of a Google Sheet
+
+        Returns:
+            xlsx bytes, or None on error
+        """
+        try:
+            request = self.service.files().export_media(
+                fileId=file_id,
+                mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            file_content = io.BytesIO()
+            downloader = MediaIoBaseDownload(file_content, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+
+            file_content.seek(0)
+            return file_content.read()
+        except Exception as e:
+            logger.error(f"Error exporting file {file_id} as xlsx: {e}")
+            return None
+
     def delete_file(self, file_id: str) -> bool:
         """Delete a file from Drive"""
         try:
