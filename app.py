@@ -9720,6 +9720,165 @@ def test_folder_access():
 # Removed download_drive_file endpoint - files are now referenced directly, not downloaded
 # Files are fetched on-demand when serving to students/teachers
 
+@app.route('/api/teacher/drive/sync', methods=['POST'])
+@teacher_required
+def sync_existing_assignments_to_drive():
+    """Backfill existing assignments to Google Drive — creates folders, uploads files, submissions, and feedback."""
+    try:
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        if not teacher:
+            return jsonify({'success': False, 'error': 'Teacher not found'}), 404
+
+        if not teacher.get('google_drive_folder_id'):
+            return jsonify({'success': False, 'error': 'Google Drive folder not configured. Set it in Settings first.'}), 400
+
+        from utils.google_drive import create_assignment_folder_structure, get_teacher_drive_manager, upload_student_submission
+        from utils.pdf_generator import generate_review_pdf, generate_rubric_review_pdf
+        from gridfs import GridFS
+        from bson import ObjectId
+
+        fs = GridFS(db.db)
+        drive_manager = get_teacher_drive_manager(teacher)
+        if not drive_manager:
+            return jsonify({'success': False, 'error': 'Could not connect to Google Drive'}), 500
+
+        assignments = list(Assignment.find({'teacher_id': session['teacher_id']}))
+
+        synced_assignments = 0
+        skipped_assignments = 0
+        synced_submissions = 0
+        synced_feedback = 0
+        errors = []
+
+        for assignment in assignments:
+            assignment_id = assignment.get('assignment_id', str(assignment.get('_id', '')))
+            try:
+                # Skip if already has Drive folders
+                if assignment.get('drive_folders', {}).get('assignment_folder_id'):
+                    skipped_assignments += 1
+                    # Even if assignment is already synced, check for unsynced submissions/feedback
+                    drive_folder_id = assignment['drive_folders']['assignment_folder_id']
+                else:
+                    # Create folder structure
+                    drive_folders = create_assignment_folder_structure(
+                        teacher=teacher,
+                        assignment_title=assignment.get('title', 'Untitled'),
+                        assignment_id=assignment_id
+                    )
+                    if not drive_folders or not drive_folders.get('assignment_folder_id'):
+                        errors.append(f"Assignment '{assignment.get('title')}': failed to create Drive folder")
+                        continue
+
+                    drive_folder_id = drive_folders['assignment_folder_id']
+
+                    # Upload assignment files from GridFS (skip Drive-sourced files)
+                    file_fields = [
+                        ('question_paper_id', 'question_paper_name', 'question_paper'),
+                        ('answer_key_id', 'answer_key_name', 'answer_key'),
+                        ('reference_materials_id', 'reference_materials_name', 'reference_materials'),
+                        ('rubrics_id', 'rubrics_name', 'rubrics'),
+                    ]
+                    for id_field, name_field, label in file_fields:
+                        file_id = assignment.get(id_field)
+                        file_name = assignment.get(name_field, '')
+                        if not file_id:
+                            continue
+                        # Skip Drive-sourced files (stored as references, not GridFS)
+                        if file_name and file_name.startswith('DRIVE:'):
+                            continue
+                        try:
+                            grid_file = fs.get(ObjectId(file_id))
+                            content = grid_file.read()
+                            mime = grid_file.content_type or 'application/pdf'
+                            upload_name = file_name or f"{label}_{assignment_id}"
+                            drive_manager.upload_content(content, upload_name, mime_type=mime, folder_id=drive_folder_id)
+                        except Exception as file_err:
+                            errors.append(f"Assignment '{assignment.get('title')}' {label}: {str(file_err)[:80]}")
+
+                    # Update assignment with drive_folders
+                    Assignment.update_one(
+                        {'assignment_id': assignment_id},
+                        {'$set': {'drive_folders': drive_folders}}
+                    )
+                    synced_assignments += 1
+
+                # Sync submissions and feedback for this assignment
+                submissions = list(Submission.find({'assignment_id': assignment_id}))
+                for sub in submissions:
+                    sub_id = sub.get('submission_id', str(sub.get('_id', '')))
+                    student = Student.find_one({'student_id': sub.get('student_id')})
+
+                    # Upload submission files if not already uploaded
+                    if sub.get('file_ids') and not sub.get('drive_file'):
+                        try:
+                            # Try to get first file from GridFS and upload as-is
+                            first_fid = sub['file_ids'][0]
+                            grid_file = fs.get(ObjectId(first_fid))
+                            content = grid_file.read()
+                            mime = grid_file.content_type or 'application/octet-stream'
+                            ext = '.pdf' if 'pdf' in mime else ('.png' if 'png' in mime else '.jpg')
+                            fname = f"submission_{sub_id}{ext}"
+
+                            drive_result = upload_student_submission(
+                                teacher=teacher,
+                                submissions_folder_id=drive_folder_id,
+                                submission_content=content,
+                                filename=fname,
+                                student_name=student.get('name') if student else None,
+                                student_id=sub.get('student_id')
+                            )
+                            if drive_result:
+                                Submission.update_one(
+                                    {'submission_id': sub_id},
+                                    {'$set': {'drive_file': drive_result}}
+                                )
+                                synced_submissions += 1
+                        except Exception as sub_err:
+                            errors.append(f"Submission {sub_id}: {str(sub_err)[:80]}")
+
+                    # Upload feedback PDF if reviewed/approved but not yet on Drive
+                    if sub.get('status') in ('reviewed', 'approved') and not sub.get('feedback_drive_file'):
+                        try:
+                            marked_copy_files = _get_marked_copy_files(sub)
+                            if assignment.get('marking_type') == 'rubric':
+                                pdf_content = generate_rubric_review_pdf(sub, assignment, student, teacher, marked_copy_files=marked_copy_files)
+                            else:
+                                pdf_content = generate_review_pdf(sub, assignment, student, teacher, marked_copy_files=marked_copy_files)
+
+                            if pdf_content:
+                                fb_result = upload_student_submission(
+                                    teacher=teacher,
+                                    submissions_folder_id=drive_folder_id,
+                                    submission_content=pdf_content,
+                                    filename=f"feedback_{sub_id}.pdf",
+                                    student_name=student.get('name') if student else None,
+                                    student_id=sub.get('student_id')
+                                )
+                                if fb_result:
+                                    Submission.update_one(
+                                        {'submission_id': sub_id},
+                                        {'$set': {'feedback_drive_file': fb_result}}
+                                    )
+                                    synced_feedback += 1
+                        except Exception as fb_err:
+                            errors.append(f"Feedback {sub_id}: {str(fb_err)[:80]}")
+
+            except Exception as assign_err:
+                errors.append(f"Assignment '{assignment.get('title', assignment_id)}': {str(assign_err)[:100]}")
+
+        return jsonify({
+            'success': True,
+            'synced_assignments': synced_assignments,
+            'synced_submissions': synced_submissions,
+            'synced_feedback': synced_feedback,
+            'skipped': skipped_assignments,
+            'errors': errors[:20]  # Cap error list
+        })
+
+    except Exception as e:
+        logger.error(f"Error syncing to Drive: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/teacher/get_students', methods=['GET'])
 @teacher_required
 def teacher_get_students():

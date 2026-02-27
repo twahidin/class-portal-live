@@ -274,8 +274,20 @@
                         <div class="alert alert-success">
                             <i class="bi bi-check-circle me-1"></i>Google Drive folder configured (browse + auto-upload)
                         </div>
+
+                        <!-- Sync Existing Assignments -->
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-outline-primary" id="syncDriveBtn" onclick="syncExistingToDrive()">
+                                <i class="bi bi-cloud-upload me-1"></i>Sync Existing Assignments to Drive
+                            </button>
+                            <small class="text-muted d-block mt-1">
+                                Back up all existing assignments, submissions, and feedback to Google Drive.
+                                Already-synced items are skipped.
+                            </small>
+                            <div id="syncDriveResult" class="mt-2" style="display:none;"></div>
+                        </div>
                         {% endif %}
-                        
+
                         <!-- Setup Instructions -->
                         <div class="mt-3">
                             <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#driveSetupHelp">
@@ -606,6 +618,48 @@
     
     // Load on page load
     loadServiceAccountInfo();
+
+    // Sync existing assignments to Google Drive
+    async function syncExistingToDrive() {
+        const btn = document.getElementById('syncDriveBtn');
+        const resultDiv = document.getElementById('syncDriveResult');
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Syncing...';
+        resultDiv.style.display = 'none';
+
+        try {
+            const response = await fetch('/api/teacher/drive/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                let html = '<div class="alert alert-success mb-0"><i class="bi bi-check-circle me-1"></i><strong>Sync complete!</strong><ul class="mb-0 mt-1">';
+                html += `<li>${data.synced_assignments} assignment(s) synced</li>`;
+                html += `<li>${data.synced_submissions} submission(s) uploaded</li>`;
+                html += `<li>${data.synced_feedback} feedback PDF(s) uploaded</li>`;
+                html += `<li>${data.skipped} assignment(s) already synced</li>`;
+                html += '</ul>';
+                if (data.errors && data.errors.length > 0) {
+                    html += `<hr class="my-2"><small class="text-warning"><strong>${data.errors.length} error(s):</strong><ul class="mb-0">`;
+                    data.errors.forEach(e => html += `<li>${e}</li>`);
+                    html += '</ul></small>';
+                }
+                html += '</div>';
+                resultDiv.innerHTML = html;
+            } else {
+                resultDiv.innerHTML = `<div class="alert alert-danger mb-0"><i class="bi bi-exclamation-circle me-1"></i>${data.error || 'Sync failed'}</div>`;
+            }
+        } catch (e) {
+            resultDiv.innerHTML = '<div class="alert alert-danger mb-0"><i class="bi bi-exclamation-circle me-1"></i>Network error — please try again.</div>';
+        }
+
+        resultDiv.style.display = 'block';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Sync Existing Assignments to Drive';
+    }
 
     // Change Password
     document.getElementById('change-password-btn').addEventListener('click', async () => {
