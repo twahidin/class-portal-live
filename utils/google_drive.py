@@ -97,6 +97,35 @@ class DriveManager:
         self.service = service
         self.folder_id = folder_id
     
+    def find_or_create_folder(self, name: str, parent_id: str = None) -> str:
+        """Find an existing folder by name under parent, or create it if not found.
+        Prevents duplicate folders (e.g. multiple 'Assignments' folders)."""
+        try:
+            target_parent = parent_id or self.folder_id
+            if target_parent:
+                query = (
+                    f"'{target_parent}' in parents and "
+                    f"name='{name}' and "
+                    f"mimeType='application/vnd.google-apps.folder' and "
+                    f"trashed=false"
+                )
+                results = self.service.files().list(
+                    q=query,
+                    fields="files(id, name)",
+                    pageSize=1,
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True
+                ).execute()
+                files = results.get('files', [])
+                if files:
+                    logger.info(f"Found existing folder '{name}' (ID: {files[0]['id']})")
+                    return files[0]['id']
+            # Not found — create it
+            return self.create_folder(name, parent_id=parent_id)
+        except Exception as e:
+            logger.warning(f"Error searching for folder '{name}', falling back to create: {e}")
+            return self.create_folder(name, parent_id=parent_id)
+
     def create_folder(self, name: str, parent_id: str = None) -> str:
         """Create a folder in Drive"""
         try:
@@ -504,18 +533,17 @@ def upload_assignment_file(file_path: str, assignment: dict, teacher: dict) -> d
 def create_assignment_folder_structure(teacher: dict, assignment_title: str, assignment_id: str) -> dict:
     """
     Create the folder structure for an assignment in Google Drive.
-    
+
     Structure:
     Teacher's Folder/
-    └── [Assignment Title]/
-        ├── Question Papers/
-        └── Submissions/
-    
+    └── Assignments/
+        └── [Assignment Title] ([assignment_id])/
+
+    Uses find_or_create_folder for "Assignments" to avoid duplicates.
+
     Returns:
         dict with folder IDs: {
-            'assignment_folder_id': '...',
-            'question_papers_folder_id': '...',
-            'submissions_folder_id': '...'
+            'assignment_folder_id': '...'
         }
         or None if failed
     """
@@ -523,32 +551,30 @@ def create_assignment_folder_structure(teacher: dict, assignment_title: str, ass
     if not manager:
         logger.warning("Drive manager not available for folder creation")
         return None
-    
+
     try:
+        # Find or create the "Assignments" parent folder (idempotent)
+        assignments_parent_id = manager.find_or_create_folder("Assignments")
+        if not assignments_parent_id:
+            logger.error("Failed to find/create Assignments parent folder")
+            return None
+
         # Sanitize folder name
         safe_title = "".join(c for c in assignment_title if c.isalnum() or c in (' ', '-', '_')).strip()
         folder_name = f"{safe_title} ({assignment_id})"
-        
-        # Create main assignment folder
-        assignment_folder_id = manager.create_folder(folder_name)
+
+        # Create the assignment folder (unique per assignment_id, no subfolders)
+        assignment_folder_id = manager.create_folder(folder_name, parent_id=assignments_parent_id)
         if not assignment_folder_id:
             logger.error("Failed to create assignment folder")
             return None
-        
-        # Create Question Papers subfolder
-        question_papers_folder_id = manager.create_folder("Question Papers", parent_id=assignment_folder_id)
-        
-        # Create Submissions subfolder
-        submissions_folder_id = manager.create_folder("Submissions", parent_id=assignment_folder_id)
-        
+
         logger.info(f"Created folder structure for assignment {assignment_id}")
-        
+
         return {
-            'assignment_folder_id': assignment_folder_id,
-            'question_papers_folder_id': question_papers_folder_id,
-            'submissions_folder_id': submissions_folder_id
+            'assignment_folder_id': assignment_folder_id
         }
-        
+
     except Exception as e:
         logger.error(f"Error creating assignment folder structure: {e}")
         return None

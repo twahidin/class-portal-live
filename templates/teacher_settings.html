@@ -244,7 +244,7 @@
                     </div>
                     <div class="card-body">
                         <p class="text-muted">
-                            Configure a Google Drive folder to browse and select files when creating assignments.
+                            Configure a Google Drive folder to browse source files and auto-upload assignments, submissions, and feedback.
                         </p>
                         
                         <!-- Service Account Info -->
@@ -258,21 +258,21 @@
                         </div>
                         
                         <div class="mb-3">
-                            <label class="form-label">Google Drive Source Files Folder ID</label>
-                            <input type="text" class="form-control" name="google_drive_source_folder_id" 
+                            <label class="form-label">Google Drive Folder ID</label>
+                            <input type="text" class="form-control" name="google_drive_source_folder_id"
                                    value="{{ teacher.google_drive_source_folder_id or '' }}"
                                    placeholder="e.g., 1aBcDeFgHiJkLmNoPqRsTuVwXyZ">
                             <small class="text-muted">
-                                Folder containing your question papers, answer keys, and reference materials. 
-                                You can browse and select files from this folder when creating assignments instead of uploading from your computer.
+                                This folder is used for <strong>browsing</strong> source files (question papers, answer keys) when creating assignments,
+                                and for <strong>auto-uploading</strong> assignment files, student submissions, and feedback PDFs.
                                 <br>Find this in the URL when viewing the folder: <code>drive.google.com/drive/folders/[FOLDER_ID]</code>
-                                <br><strong class="text-info">ℹ️ Files are referenced directly from your Drive (not copied). Viewer permission is sufficient.</strong>
+                                <br><strong class="text-info">ℹ️ The service account needs <strong>Editor</strong> permission to upload files.</strong>
                             </small>
                         </div>
                         
                         {% if teacher.google_drive_source_folder_id %}
                         <div class="alert alert-success">
-                            <i class="bi bi-check-circle me-1"></i>Source files folder configured
+                            <i class="bi bi-check-circle me-1"></i>Google Drive folder configured (browse + auto-upload)
                         </div>
                         {% endif %}
                         
@@ -283,34 +283,23 @@
                             </button>
                             <div class="collapse mt-2" id="driveSetupHelp">
                                 <div class="card card-body bg-light small">
-                                    <h6 class="fw-bold">For Submissions Folder:</h6>
+                                    <h6 class="fw-bold">Setup (one folder for everything):</h6>
                                     <ol class="mb-3">
-                                        <li>Create a folder in your Google Drive where you want submissions saved</li>
+                                        <li>Create a folder in your Google Drive (e.g. "Class Portal")</li>
+                                        <li>Upload your question papers, answer keys, and reference materials to this folder</li>
                                         <li>Right-click the folder and select <strong>Share</strong></li>
                                         <li>Paste the service account email shown above</li>
                                         <li>Set permission to <strong>Editor</strong></li>
                                         <li>Uncheck "Notify people" and click <strong>Share</strong></li>
                                         <li>Copy the Folder ID from the URL (drive.google.com/drive/folders/<strong>[FOLDER_ID]</strong>)</li>
-                                        <li>Paste it in the "Google Drive Folder ID (for Submissions)" field above</li>
+                                        <li>Paste it in the "Google Drive Folder ID" field above</li>
                                     </ol>
-                                    
-                                    <h6 class="fw-bold">For Source Files Folder:</h6>
-                                    <ol class="mb-0">
-                                        <li>Create a folder in your Google Drive where you store your question papers, answer keys, etc.</li>
-                                        <li>Upload your PDFs, Google Docs, or Google Sheets to this folder</li>
-                                        <li>Right-click the folder and select <strong>Share</strong></li>
-                                        <li>Paste the <strong>same service account email</strong> shown above</li>
-                                        <li>Set permission to <strong>Viewer</strong> (sufficient for reading files - files are referenced, not copied)</li>
-                                        <li>Uncheck "Notify people" and click <strong>Share</strong></li>
-                                        <li>Copy the Folder ID from the URL</li>
-                                        <li>Paste it in the "Google Drive Source Files Folder ID" field above</li>
-                                    </ol>
-                                    <div class="alert alert-info mt-2 mb-0">
-                                        <small><i class="bi bi-info-circle me-1"></i><strong>Note:</strong> Files from this folder are referenced directly from Google Drive (not copied). The system only reads them when needed, so Viewer permission is sufficient.</small>
-                                    </div>
-                                    <div class="alert alert-info mt-3 mb-0">
-                                        <small><i class="bi bi-info-circle me-1"></i><strong>Note:</strong> You can use the same folder for both, but it's recommended to keep them separate for better organization.</small>
-                                    </div>
+                                    <h6 class="fw-bold">What happens automatically:</h6>
+                                    <ul class="mb-0">
+                                        <li><strong>Browse:</strong> Select source files from this folder when creating assignments</li>
+                                        <li><strong>Upload:</strong> Assignment files, student submissions, and feedback PDFs are auto-uploaded to an <code>Assignments/</code> subfolder</li>
+                                        <li>Files already in Drive are referenced (not copied)</li>
+                                    </ul>
                                 </div>
                             </div>
                         </div>

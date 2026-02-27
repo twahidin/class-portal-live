@@ -92,6 +92,24 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', logge
 # Initialize database
 db.init_app(app)
 
+# One-time migration: unify Google Drive folder IDs for existing teachers
+try:
+    if db.db is not None:
+        _migrated = db.db.teachers.update_many(
+            {
+                'google_drive_source_folder_id': {'$exists': True, '$ne': None},
+                '$or': [
+                    {'google_drive_folder_id': {'$exists': False}},
+                    {'google_drive_folder_id': None}
+                ]
+            },
+            [{'$set': {'google_drive_folder_id': '$google_drive_source_folder_id'}}]
+        )
+        if _migrated.modified_count:
+            logger.info(f"Migrated {_migrated.modified_count} teacher(s): copied google_drive_source_folder_id → google_drive_folder_id")
+except Exception as _mig_err:
+    logger.warning(f"Drive folder migration skipped: {_mig_err}")
+
 # ============================================================================
 # JINJA2 FILTERS
 # ============================================================================
@@ -751,7 +769,7 @@ def view_assignment(assignment_id):
     drive_available = bool(
         teacher and
         teacher.get('google_drive_folder_id') and
-        assignment.get('drive_folders', {}).get('submissions_folder_id')
+        assignment.get('drive_folders', {}).get('assignment_folder_id')
     )
 
     # Check if student already has a Google Drive copy
@@ -1332,9 +1350,9 @@ def api_student_open_in_drive():
         if not teacher:
             return jsonify({'success': False, 'error': 'Teacher not found'}), 404
 
-        # Check teacher has Drive configured and assignment has a submissions folder
-        submissions_folder_id = assignment.get('drive_folders', {}).get('submissions_folder_id')
-        if not teacher.get('google_drive_folder_id') or not submissions_folder_id:
+        # Check teacher has Drive configured and assignment has a Drive folder
+        assignment_folder_id = assignment.get('drive_folders', {}).get('assignment_folder_id')
+        if not teacher.get('google_drive_folder_id') or not assignment_folder_id:
             return jsonify({'success': False, 'error': 'Google Drive is not configured for this assignment'}), 400
 
         # Check if student already has a Drive copy (exclude rejected — allow fresh resubmission)
@@ -1385,7 +1403,7 @@ def api_student_open_in_drive():
         filename = f"{safe_name} - {safe_title}"
         result = drive_manager.upload_and_convert(
             content_bytes, filename, source_mime_type,
-            folder_id=submissions_folder_id
+            folder_id=assignment_folder_id
         )
         if not result:
             return jsonify({'success': False, 'error': 'Failed to create Google Drive copy'}), 500
@@ -1968,18 +1986,18 @@ def student_submit_files():
             logger.warning(f"Notification error: {e}")
         
         # Upload to Google Drive if teacher has it configured and assignment has Drive folders
-        if teacher.get('google_drive_folder_id') and assignment.get('drive_folders', {}).get('submissions_folder_id'):
+        if teacher.get('google_drive_folder_id') and assignment.get('drive_folders', {}).get('assignment_folder_id'):
             try:
                 from utils.google_drive import upload_student_submission
                 from utils.pdf_generator import generate_submission_pdf
-                
+
                 # Generate a PDF of the submission for upload
                 try:
                     submission_pdf = generate_submission_pdf(pages, submission_id)
                     if submission_pdf:
                         drive_result = upload_student_submission(
                             teacher=teacher,
-                            submissions_folder_id=assignment['drive_folders']['submissions_folder_id'],
+                            submissions_folder_id=assignment['drive_folders']['assignment_folder_id'],
                             submission_content=submission_pdf,
                             filename=f"submission_{submission_id}.pdf",
                             student_name=student.get('name'),
@@ -5913,18 +5931,42 @@ def create_assignment():
             if rubrics_drive_id:
                 drive_file_refs['rubrics_drive_id'] = rubrics_drive_id
             
-            # Create Google Drive folder structure for submissions (not for source files)
+            # Create Google Drive folder structure and upload assignment files
             if teacher.get('google_drive_folder_id'):
                 try:
-                    from utils.google_drive import create_assignment_folder_structure
-                    
-                    # Create folder structure for submissions only
+                    from utils.google_drive import create_assignment_folder_structure, get_teacher_drive_manager
+
                     drive_folders = create_assignment_folder_structure(
                         teacher=teacher,
                         assignment_title=assignment_title,
                         assignment_id=assignment_id
                     )
-                    logger.info(f"Created submission folder structure for assignment {assignment_id}")
+                    logger.info(f"Created folder structure for assignment {assignment_id}")
+
+                    # Upload form-uploaded files to the assignment folder (skip Drive-sourced files)
+                    if drive_folders and drive_folders.get('assignment_folder_id'):
+                        _dm = get_teacher_drive_manager(teacher)
+                        if _dm:
+                            _folder = drive_folders['assignment_folder_id']
+                            _files_to_upload = [
+                                (question_paper_content, question_paper_name, 'question_paper'),
+                                (answer_key_content, answer_key_name, 'answer_key'),
+                                (reference_materials_content, reference_materials_name, 'reference_materials'),
+                                (rubrics_content, rubrics_name, 'rubrics'),
+                            ]
+                            for _content, _name, _label in _files_to_upload:
+                                if _content and _name and not _name.startswith('DRIVE:'):
+                                    try:
+                                        _result = _dm.upload_content(
+                                            _content, _name,
+                                            mime_type='application/pdf',
+                                            folder_id=_folder
+                                        )
+                                        if _result:
+                                            drive_file_refs[f'{_label}_uploaded_drive_id'] = _result.get('id')
+                                            logger.info(f"Uploaded {_label} to Drive folder")
+                                    except Exception as _uf_err:
+                                        logger.warning(f"Could not upload {_label} to Drive: {_uf_err}")
                 except Exception as drive_error:
                     logger.warning(f"Google Drive folder creation failed (continuing anyway): {drive_error}")
             
@@ -6810,19 +6852,19 @@ def save_review_feedback(submission_id):
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
         student = Student.find_one({'student_id': submission['student_id']})
         
-        if teacher and teacher.get('google_drive_folder_id') and assignment.get('drive_folders', {}).get('submissions_folder_id'):
+        if teacher and teacher.get('google_drive_folder_id') and assignment.get('drive_folders', {}).get('assignment_folder_id'):
             try:
                 from utils.pdf_generator import generate_review_pdf
                 from utils.google_drive import upload_student_submission
-                
+
                 # Generate PDF with student work and feedback
                 marked_copy_files = _get_marked_copy_files(submission)
                 pdf_content = generate_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
                 if pdf_content:
-                    # Upload to submissions folder
+                    # Upload to assignment folder
                     drive_result = upload_student_submission(
                         teacher=teacher,
-                        submissions_folder_id=assignment['drive_folders']['submissions_folder_id'],
+                        submissions_folder_id=assignment['drive_folders']['assignment_folder_id'],
                         submission_content=pdf_content,
                         filename=f"feedback_{submission_id}.pdf",
                         student_name=student.get('name'),
@@ -7488,19 +7530,19 @@ def save_rubric_feedback(submission_id):
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
         student = Student.find_one({'student_id': submission['student_id']})
         
-        if teacher and teacher.get('google_drive_folder_id') and assignment.get('drive_folders', {}).get('submissions_folder_id'):
+        if teacher and teacher.get('google_drive_folder_id') and assignment.get('drive_folders', {}).get('assignment_folder_id'):
             try:
                 from utils.pdf_generator import generate_rubric_review_pdf
                 from utils.google_drive import upload_student_submission
-                
+
                 # Generate PDF with student work and feedback
                 marked_copy_files = _get_marked_copy_files(submission)
                 pdf_content = generate_rubric_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
                 if pdf_content:
-                    # Upload to submissions folder
+                    # Upload to assignment folder
                     drive_result = upload_student_submission(
                         teacher=teacher,
-                        submissions_folder_id=assignment['drive_folders']['submissions_folder_id'],
+                        submissions_folder_id=assignment['drive_folders']['assignment_folder_id'],
                         submission_content=pdf_content,
                         filename=f"feedback_{submission_id}.pdf",
                         student_name=student.get('name'),
@@ -7920,17 +7962,23 @@ def approve_submission(submission_id):
         # Optionally upload to Google Drive
         student = Student.find_one({'student_id': submission['student_id']})
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
-        
-        if teacher.get('google_drive_folder_id'):
+
+        if teacher.get('google_drive_folder_id') and assignment.get('drive_folders', {}).get('assignment_folder_id'):
             try:
                 pdf_content = generate_feedback_pdf(submission, assignment, student)
                 if pdf_content:
                     drive_manager = get_teacher_drive_manager(teacher)
                     if drive_manager:
-                        drive_manager.upload_content(
+                        drive_result = drive_manager.upload_content(
                             pdf_content,
-                            f"{student['student_id']}_{assignment['assignment_id']}_feedback.pdf"
+                            f"{student['student_id']}_{assignment['assignment_id']}_feedback.pdf",
+                            folder_id=assignment['drive_folders']['assignment_folder_id']
                         )
+                        if drive_result:
+                            Submission.update_one(
+                                {'submission_id': submission_id},
+                                {'$set': {'feedback_drive_file': drive_result}}
+                            )
             except Exception as e:
                 logger.warning(f"Could not upload to Drive: {e}")
         
@@ -7981,11 +8029,14 @@ def teacher_settings():
             if data.get('default_ai_model'):
                 update_data['default_ai_model'] = data['default_ai_model']
             
-            # Update Google Drive source files folder (removed submissions folder - not saving student files)
+            # Update Google Drive folder — unified: one folder for browse + auto-upload
             if data.get('google_drive_source_folder_id'):
-                update_data['google_drive_source_folder_id'] = data['google_drive_source_folder_id']
+                folder_id = data['google_drive_source_folder_id'].strip()
+                update_data['google_drive_source_folder_id'] = folder_id
+                update_data['google_drive_folder_id'] = folder_id
             elif 'google_drive_source_folder_id' in data:
                 update_data['google_drive_source_folder_id'] = None
+                update_data['google_drive_folder_id'] = None
             
             # Update subjects
             if data.get('subjects'):
