@@ -6033,7 +6033,7 @@ def create_assignment():
                 'question_help_limit': int(data.get('question_help_limit', 5)),
                 'notify_student_telegram': data.get('notify_student_telegram') == 'on',
                 'release_answer_key_pdf': data.get('release_answer_key_pdf') == 'on',
-                'linked_module_id': (data.get('linked_module_id') or '').strip() or None,  # Link to module tree for profile/mastery
+                'linked_module_ids': [v for v in request.form.getlist('linked_module_ids') if v.strip()],
                 'created_at': datetime.utcnow(),
                 'updated_at': datetime.utcnow()
             }
@@ -6172,7 +6172,7 @@ def edit_assignment(assignment_id):
                 'question_help_limit': int(data.get('question_help_limit', 5)),
                 'notify_student_telegram': data.get('notify_student_telegram') == 'on',
                 'release_answer_key_pdf': data.get('release_answer_key_pdf') == 'on',
-                'linked_module_id': (data.get('linked_module_id') or '').strip() or None,
+                'linked_module_ids': [v for v in request.form.getlist('linked_module_ids') if v.strip()],
                 'updated_at': datetime.utcnow()
             }
             
@@ -8759,8 +8759,11 @@ def _update_profile_and_mastery_from_assignment(student_id, assignment, submissi
     When an assignment is linked to a module and feedback has been sent, update the student's
     module mastery and learning profile from the assignment score. Builds profile from every assignment.
     """
-    linked_module_id = assignment.get('linked_module_id')
-    if not linked_module_id:
+    # Support both legacy linked_module_id (scalar) and new linked_module_ids (array)
+    module_ids = assignment.get('linked_module_ids') or []
+    if not module_ids and assignment.get('linked_module_id'):
+        module_ids = [assignment['linked_module_id']]
+    if not module_ids:
         return
     total_marks = assignment.get('total_marks') or 100
     if total_marks <= 0:
@@ -8768,52 +8771,53 @@ def _update_profile_and_mastery_from_assignment(student_id, assignment, submissi
     display_marks, percentage = _submission_display_marks(submission, total_marks)
     if display_marks is None and percentage <= 0:
         return
-    try:
-        # Update module mastery for the linked (root) module: set to assignment score %
-        score_int = round(percentage)
-        StudentModuleMastery.update_one(
-            {'student_id': student_id, 'module_id': linked_module_id},
-            {
-                '$set': {
-                    'mastery_score': min(100, max(0, score_int)),
-                    'status': 'mastered' if score_int >= 100 else ('in_progress' if score_int > 0 else 'not_started'),
-                    'updated_at': datetime.utcnow(),
-                    'last_activity': datetime.utcnow(),
+    for linked_module_id in module_ids:
+        try:
+            # Update module mastery for the linked module: set to assignment score %
+            score_int = round(percentage)
+            StudentModuleMastery.update_one(
+                {'student_id': student_id, 'module_id': linked_module_id},
+                {
+                    '$set': {
+                        'mastery_score': min(100, max(0, score_int)),
+                        'status': 'mastered' if score_int >= 100 else ('in_progress' if score_int > 0 else 'not_started'),
+                        'updated_at': datetime.utcnow(),
+                        'last_activity': datetime.utcnow(),
+                    },
+                    '$inc': {'time_spent_minutes': 1},
                 },
-                '$inc': {'time_spent_minutes': 1},
-            },
-            upsert=True,
-        )
-        # Optionally propagate to parent (root is top-level so no parent)
-        module = Module.find_one({'module_id': linked_module_id})
-        if module and module.get('parent_id'):
-            _propagate_mastery_to_parent(student_id, module['parent_id'])
-
-        # Update learning profile (strengths/weaknesses) by subject
-        subject = assignment.get('subject') or 'General'
-        topic = assignment.get('title') or (module.get('title') if module else 'Assignment')
-        profile = StudentLearningProfile.find_one({'student_id': student_id, 'subject': subject})
-        update_ops = {'$set': {'last_updated': datetime.utcnow()}}
-        if percentage >= 80:
-            entry = {'topic': topic, 'confidence': percentage / 100.0, 'recorded_at': datetime.utcnow().isoformat(), 'source': 'assignment'}
-            if profile:
-                update_ops.setdefault('$push', {})['strengths'] = entry
-            else:
-                update_ops.setdefault('$set', {})['strengths'] = [entry]
-        elif percentage < 50:
-            entry = {'topic': topic, 'notes': f'Assignment score {round(percentage)}%', 'recorded_at': datetime.utcnow().isoformat(), 'source': 'assignment'}
-            if profile:
-                update_ops.setdefault('$push', {})['weaknesses'] = entry
-            else:
-                update_ops.setdefault('$set', {})['weaknesses'] = [entry]
-        if '$push' in update_ops or ('$set' in update_ops and any(k in update_ops['$set'] for k in ('strengths', 'weaknesses'))):
-            StudentLearningProfile.update_one(
-                {'student_id': student_id, 'subject': subject},
-                update_ops,
                 upsert=True,
             )
-    except Exception as e:
-        logger.warning("Error updating profile/mastery from assignment: %s", e)
+            # Optionally propagate to parent
+            module = Module.find_one({'module_id': linked_module_id})
+            if module and module.get('parent_id'):
+                _propagate_mastery_to_parent(student_id, module['parent_id'])
+
+            # Update learning profile (strengths/weaknesses) by subject
+            subject = assignment.get('subject') or 'General'
+            topic = assignment.get('title') or (module.get('title') if module else 'Assignment')
+            profile = StudentLearningProfile.find_one({'student_id': student_id, 'subject': subject})
+            update_ops = {'$set': {'last_updated': datetime.utcnow()}}
+            if percentage >= 80:
+                entry = {'topic': topic, 'confidence': percentage / 100.0, 'recorded_at': datetime.utcnow().isoformat(), 'source': 'assignment'}
+                if profile:
+                    update_ops.setdefault('$push', {})['strengths'] = entry
+                else:
+                    update_ops.setdefault('$set', {})['strengths'] = [entry]
+            elif percentage < 50:
+                entry = {'topic': topic, 'notes': f'Assignment score {round(percentage)}%', 'recorded_at': datetime.utcnow().isoformat(), 'source': 'assignment'}
+                if profile:
+                    update_ops.setdefault('$push', {})['weaknesses'] = entry
+                else:
+                    update_ops.setdefault('$set', {})['weaknesses'] = [entry]
+            if '$push' in update_ops or ('$set' in update_ops and any(k in update_ops['$set'] for k in ('strengths', 'weaknesses'))):
+                StudentLearningProfile.update_one(
+                    {'student_id': student_id, 'subject': subject},
+                    update_ops,
+                    upsert=True,
+                )
+        except Exception as e:
+            logger.warning("Error updating profile/mastery from assignment for module %s: %s", linked_module_id, e)
 
 
 def _update_student_profile(student_id, subject, updates):
@@ -8864,9 +8868,6 @@ def teacher_modules():
     )
     for module in root_modules:
         module['total_modules'] = len(_get_all_module_ids_in_tree(module['module_id']))
-        tb = ModuleTextbook.find_one({'module_id': module['module_id']})
-        module['has_textbook'] = bool(tb) and rag_service.textbook_has_content(module['module_id'])
-        module['textbook_name'] = (tb.get('name', '') if tb else '') or ''
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
     return render_template('teacher_modules.html', modules=root_modules, teacher=teacher)
 
@@ -8880,9 +8881,40 @@ def create_module():
         try:
             subject = request.form.get('subject', '').strip()
             year_level = request.form.get('year_level', '').strip()
-            file = request.files.get('syllabus_file')
+            creation_mode = request.form.get('creation_mode', 'ai').strip()
 
-            if not file or not subject:
+            if not subject:
+                return jsonify({'error': 'Subject is required'}), 400
+
+            # Blank creation: single root node, no AI
+            if creation_mode == 'blank':
+                root_id = _generate_module_id()
+                module_doc = {
+                    'module_id': root_id,
+                    'teacher_id': session['teacher_id'],
+                    'subject': subject,
+                    'year_level': year_level,
+                    'title': subject,
+                    'description': '',
+                    'parent_id': None,
+                    'children_ids': [],
+                    'depth': 0,
+                    'is_leaf': True,
+                    'position': {'x': 0, 'y': 0, 'z': 0, 'angle': 0, 'distance': 0},
+                    'color': '#667eea',
+                    'icon': 'bi-diagram-3',
+                    'learning_objectives': [],
+                    'estimated_hours': 0,
+                    'created_at': datetime.utcnow(),
+                    'updated_at': datetime.utcnow(),
+                    'status': 'draft',
+                }
+                Module.insert_one(module_doc)
+                return jsonify({'success': True, 'module_id': root_id, 'total_modules': 1})
+
+            # AI generation mode (default)
+            file = request.files.get('syllabus_file')
+            if not file:
                 return jsonify({'error': 'Missing required fields'}), 400
 
             file_content = file.read()
@@ -8928,6 +8960,33 @@ def create_module():
 
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
     return render_template('teacher_create_module.html', teacher=teacher)
+
+@app.route('/teacher/modules/tree-nodes')
+@teacher_required
+def module_tree_nodes_for_picker():
+    """Return all teacher's module trees as nested JSON for the assignment tree picker."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'trees': []})
+    root_modules = list(
+        Module.find({'teacher_id': session['teacher_id'], 'parent_id': None}).sort('title', 1)
+    )
+    def build_picker_tree(m):
+        m = dict(m)
+        m['children'] = [
+            build_picker_tree(Module.find_one({'module_id': cid}))
+            for cid in m.get('children_ids', [])
+            if Module.find_one({'module_id': cid})
+        ]
+        return {
+            'module_id': m['module_id'],
+            'title': m.get('title', 'Untitled'),
+            'subject': m.get('subject', ''),
+            'color': m.get('color', '#667eea'),
+            'depth': m.get('depth', 0),
+            'children': m['children'],
+        }
+    trees = [build_picker_tree(r) for r in root_modules]
+    return jsonify({'trees': trees})
 
 @app.route('/teacher/modules/<module_id>')
 @teacher_required
@@ -8982,10 +9041,111 @@ def update_module_node(module_id, node_id):
             update['learning_objectives'] = objs if isinstance(objs, list) else []
         if 'custom_prompt' in data:
             update['custom_prompt'] = (data.get('custom_prompt') or '').strip()
+        if 'subtitle' in data:
+            update['subtitle'] = (data.get('subtitle') or '').strip()
+        if 'color' in data:
+            update['color'] = (data.get('color') or '').strip()
         Module.update_one({'module_id': node_id, 'teacher_id': session['teacher_id']}, {'$set': update})
         return jsonify({'success': True})
     except Exception as e:
         logger.error("Error updating module node: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/teacher/modules/<module_id>/node', methods=['POST'])
+@teacher_required
+def add_module_node(module_id):
+    """Add a new child node to a module tree."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    root = Module.find_one({'module_id': module_id, 'teacher_id': session['teacher_id']})
+    if not root:
+        return jsonify({'error': 'Module tree not found'}), 404
+    try:
+        data = request.get_json() or {}
+        parent_node_id = data.get('parent_node_id', module_id)
+        parent = Module.find_one({'module_id': parent_node_id, 'teacher_id': session['teacher_id']})
+        if not parent:
+            return jsonify({'error': 'Parent node not found'}), 404
+        new_id = _generate_module_id()
+        node_doc = {
+            'module_id': new_id,
+            'teacher_id': session['teacher_id'],
+            'subject': root.get('subject', ''),
+            'year_level': root.get('year_level', ''),
+            'title': (data.get('title') or '').strip() or 'New Topic',
+            'subtitle': (data.get('subtitle') or '').strip(),
+            'description': '',
+            'parent_id': parent_node_id,
+            'children_ids': [],
+            'depth': (parent.get('depth', 0) + 1),
+            'is_leaf': True,
+            'position': {'x': 0, 'y': 0, 'z': 0, 'angle': 0, 'distance': 0},
+            'color': (data.get('color') or '').strip() or parent.get('color', '#667eea'),
+            'icon': 'bi-book',
+            'learning_objectives': [],
+            'estimated_hours': 0,
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow(),
+            'status': root.get('status', 'draft'),
+        }
+        Module.insert_one(node_doc)
+        # Update parent: add child ID and mark as non-leaf
+        Module.update_one(
+            {'module_id': parent_node_id, 'teacher_id': session['teacher_id']},
+            {'$push': {'children_ids': new_id}, '$set': {'is_leaf': False, 'updated_at': datetime.utcnow()}}
+        )
+        return jsonify({'success': True, 'node_id': new_id, 'node': {
+            'module_id': new_id,
+            'title': node_doc['title'],
+            'subtitle': node_doc['subtitle'],
+            'description': '',
+            'color': node_doc['color'],
+            'depth': node_doc['depth'],
+            'parent_id': parent_node_id,
+            'children': [],
+            'children_ids': [],
+            'is_leaf': True,
+        }})
+    except Exception as e:
+        logger.error("Error adding module node: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/teacher/modules/<module_id>/node/<node_id>', methods=['DELETE'])
+@teacher_required
+def delete_module_node(module_id, node_id):
+    """Delete a module node and all its descendants."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    if module_id == node_id:
+        return jsonify({'error': 'Cannot delete root node. Use the delete tree button instead.'}), 400
+    root = Module.find_one({'module_id': module_id, 'teacher_id': session['teacher_id']})
+    if not root:
+        return jsonify({'error': 'Module tree not found'}), 404
+    node = Module.find_one({'module_id': node_id, 'teacher_id': session['teacher_id']})
+    if not node:
+        return jsonify({'error': 'Node not found'}), 404
+    try:
+        # Collect all descendant IDs
+        all_ids = _get_all_module_ids_in_tree(node_id)
+        # Remove from parent's children_ids
+        parent_id = node.get('parent_id')
+        if parent_id:
+            Module.update_one(
+                {'module_id': parent_id, 'teacher_id': session['teacher_id']},
+                {'$pull': {'children_ids': node_id}, '$set': {'updated_at': datetime.utcnow()}}
+            )
+            # Check if parent is now a leaf
+            parent = Module.find_one({'module_id': parent_id})
+            if parent and len(parent.get('children_ids', [])) == 0:
+                Module.update_one({'module_id': parent_id}, {'$set': {'is_leaf': True}})
+        # Delete all nodes, resources, mastery records, learning sessions in subtree
+        db.db.modules.delete_many({'module_id': {'$in': all_ids}})
+        db.db.module_resources.delete_many({'module_id': {'$in': all_ids}})
+        db.db.student_module_mastery.delete_many({'module_id': {'$in': all_ids}})
+        db.db.learning_sessions.delete_many({'module_id': {'$in': all_ids}})
+        return jsonify({'success': True, 'deleted_count': len(all_ids)})
+    except Exception as e:
+        logger.error("Error deleting module node: %s", e)
         return jsonify({'error': str(e)}), 500
 
 

@@ -14,12 +14,35 @@
             <i class="bi bi-arrow-left me-1"></i>Back to Modules
         </a>
         <h1><i class="bi bi-plus-circle me-2"></i>Create New Module</h1>
-        <p class="text-muted">Upload a syllabus or scheme of work (PDF) to generate a module tree with AI</p>
+        <p class="text-muted">Choose how to create your module tree</p>
+    </div>
+
+    <!-- Mode selector -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <div class="card h-100 mode-card active" id="modeAiCard" data-mode="ai">
+                <div class="card-body text-center p-4">
+                    <i class="bi bi-magic display-4 text-primary"></i>
+                    <h5 class="mt-3">Generate from Syllabus</h5>
+                    <p class="text-muted small mb-0">Upload a PDF syllabus or scheme of work and AI will generate your module tree automatically</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card h-100 mode-card" id="modeBlankCard" data-mode="blank">
+                <div class="card-body text-center p-4">
+                    <i class="bi bi-diagram-3 display-4 text-secondary"></i>
+                    <h5 class="mt-3">Start Blank</h5>
+                    <p class="text-muted small mb-0">Create an empty module tree and manually add topics one by one</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="card shadow-sm">
         <div class="card-body p-4">
             <form id="create-module-form" enctype="multipart/form-data">
+                <input type="hidden" id="creation_mode" name="creation_mode" value="ai">
                 <div class="mb-3">
                     <label for="subject" class="form-label">Subject <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="subject" name="subject" placeholder="e.g. Mathematics" required>
@@ -28,10 +51,12 @@
                     <label for="year_level" class="form-label">Year Level</label>
                     <input type="text" class="form-control" id="year_level" name="year_level" placeholder="e.g. Secondary 3">
                 </div>
-                <div class="mb-4">
-                    <label for="syllabus_file" class="form-label">Syllabus / Scheme of Work (PDF) <span class="text-danger">*</span></label>
-                    <input type="file" class="form-control" id="syllabus_file" name="syllabus_file" accept=".pdf,.doc,.docx" required>
-                    <div class="form-text">PDF is recommended for best AI extraction.</div>
+                <div id="aiFields">
+                    <div class="mb-4">
+                        <label for="syllabus_file" class="form-label">Syllabus / Scheme of Work (PDF) <span class="text-danger">*</span></label>
+                        <input type="file" class="form-control" id="syllabus_file" name="syllabus_file" accept=".pdf,.doc,.docx">
+                        <div class="form-text">PDF is recommended for best AI extraction.</div>
+                    </div>
                 </div>
                 <div id="create-status" class="alert d-none mb-3"></div>
                 <button type="submit" class="btn btn-primary" id="submit-btn">
@@ -42,43 +67,73 @@
     </div>
 </div>
 
+<style>
+.mode-card { cursor: pointer; border: 2px solid transparent; transition: all 0.2s; }
+.mode-card:hover { border-color: #667eea40; }
+.mode-card.active { border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.15); }
+</style>
+
 <script>
-document.getElementById('create-module-form').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const status = document.getElementById('create-status');
-    const btn = document.getElementById('submit-btn');
-    status.classList.add('d-none');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating...';
+(function() {
+    const modeInput = document.getElementById('creation_mode');
+    const aiFields = document.getElementById('aiFields');
+    const submitBtn = document.getElementById('submit-btn');
+    const syllabusFile = document.getElementById('syllabus_file');
+    const modeCards = document.querySelectorAll('.mode-card');
 
-    const formData = new FormData();
-    formData.append('subject', document.getElementById('subject').value.trim());
-    formData.append('year_level', document.getElementById('year_level').value.trim());
-    formData.append('syllabus_file', document.getElementById('syllabus_file').files[0]);
-
-    try {
-        const res = await fetch('{{ url_for("create_module") }}', {
-            method: 'POST',
-            body: formData,
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data.success) {
-            status.className = 'alert alert-success';
-            status.textContent = 'Module tree created with ' + (data.total_modules || 0) + ' modules. Redirecting...';
-            status.classList.remove('d-none');
-            window.location.href = '{{ url_for("view_module", module_id="__ID__") }}'.replace('__ID__', data.module_id);
-            return;
+    function setMode(mode) {
+        modeInput.value = mode;
+        modeCards.forEach(c => c.classList.toggle('active', c.dataset.mode === mode));
+        if (mode === 'blank') {
+            aiFields.style.display = 'none';
+            syllabusFile.removeAttribute('required');
+            submitBtn.innerHTML = '<i class="bi bi-diagram-3 me-1"></i>Create Blank Module';
+        } else {
+            aiFields.style.display = 'block';
+            syllabusFile.setAttribute('required', '');
+            submitBtn.innerHTML = '<i class="bi bi-magic me-1"></i>Generate Module Tree';
         }
-        status.className = 'alert alert-danger';
-        status.textContent = data.error || 'Failed to create module';
-        status.classList.remove('d-none');
-    } catch (err) {
-        status.className = 'alert alert-danger';
-        status.textContent = 'Network error. Please try again.';
-        status.classList.remove('d-none');
     }
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-magic me-1"></i>Generate Module Tree';
-});
+
+    modeCards.forEach(c => c.addEventListener('click', () => setMode(c.dataset.mode)));
+
+    document.getElementById('create-module-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const status = document.getElementById('create-status');
+        status.classList.add('d-none');
+        submitBtn.disabled = true;
+        const mode = modeInput.value;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + (mode === 'blank' ? 'Creating...' : 'Generating...');
+
+        const formData = new FormData();
+        formData.append('creation_mode', mode);
+        formData.append('subject', document.getElementById('subject').value.trim());
+        formData.append('year_level', document.getElementById('year_level').value.trim());
+        if (mode === 'ai' && syllabusFile.files[0]) {
+            formData.append('syllabus_file', syllabusFile.files[0]);
+        }
+
+        try {
+            const res = await fetch('{{ url_for("create_module") }}', { method: 'POST', body: formData });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.success) {
+                status.className = 'alert alert-success';
+                status.textContent = mode === 'blank' ? 'Blank module created. Redirecting...' : 'Module tree created with ' + (data.total_modules || 0) + ' modules. Redirecting...';
+                status.classList.remove('d-none');
+                window.location.href = '{{ url_for("view_module", module_id="__ID__") }}'.replace('__ID__', data.module_id);
+                return;
+            }
+            status.className = 'alert alert-danger';
+            status.textContent = data.error || 'Failed to create module';
+            status.classList.remove('d-none');
+        } catch (err) {
+            status.className = 'alert alert-danger';
+            status.textContent = 'Network error. Please try again.';
+            status.classList.remove('d-none');
+        }
+        submitBtn.disabled = false;
+        setMode(mode);
+    });
+})();
 </script>
 {% endblock %}

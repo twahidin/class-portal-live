@@ -36,6 +36,7 @@ class Database:
         self.db.assignments.create_index([('teacher_id', 1), ('subject', 1)])
         self.db.assignments.create_index('assignment_id', unique=True)
         self.db.assignments.create_index('linked_module_id', sparse=True)
+        self.db.assignments.create_index('linked_module_ids', sparse=True)
         self.db.submissions.create_index([('student_id', 1), ('assignment_id', 1)])
         self.db.submissions.create_index([('assignment_id', 1), ('status', 1)])
         self.db.submissions.create_index('submission_id', unique=True)

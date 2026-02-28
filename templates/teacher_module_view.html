@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ module.title }} - Teacher Portal{% endblock %}
+{% block title %}{{ module.title }} - Tree Editor{% endblock %}
 
 {% block navbar %}
 {% set active_nav = 'learning_tools' %}
@@ -8,412 +8,240 @@
 {% endblock %}
 
 {% block content %}
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <a href="{{ url_for('teacher_modules') }}" class="btn btn-outline-secondary btn-sm mb-2">
-                <i class="bi bi-arrow-left me-1"></i>Back to Modules
+<div class="tree-editor-layout">
+    <!-- Toolbar -->
+    <div class="tree-toolbar">
+        <div class="d-flex align-items-center gap-2">
+            <a href="{{ url_for('teacher_modules') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i>
             </a>
-            <h1><i class="bi {{ module.icon or 'bi-diagram-3' }} me-2" style="color: {{ module.color or '#667eea' }};"></i>{{ module.title }}</h1>
-            <p class="text-muted mb-0">{{ module.subject }} • {{ module.year_level }}</p>
+            <div>
+                <h5 class="mb-0">{{ module.title }}</h5>
+                <small class="text-muted">{{ module.subject }}{% if module.year_level %} &middot; {{ module.year_level }}{% endif %}</small>
+            </div>
         </div>
-        <div class="d-flex gap-2 align-items-center">
-            <a href="{{ url_for('module_class_mastery', module_id=module.module_id) }}" class="btn btn-outline-success">
-                <i class="bi bi-graph-up me-1"></i>Class Mastery
-            </a>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary" id="nodeCountBadge">0 nodes</span>
+            <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary" id="zoomInBtn" title="Zoom in"><i class="bi bi-zoom-in"></i></button>
+                <button type="button" class="btn btn-outline-secondary" id="zoomOutBtn" title="Zoom out"><i class="bi bi-zoom-out"></i></button>
+                <button type="button" class="btn btn-outline-secondary" id="fitBtn" title="Fit to view"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
             {% if module.status != 'published' %}
-            <button type="button" class="btn btn-primary" id="publish-btn">
-                <i class="bi bi-send me-1"></i>Publish for Students
+            <button type="button" class="btn btn-primary btn-sm" id="publishBtn">
+                <i class="bi bi-send me-1"></i>Publish
             </button>
             {% else %}
             <span class="badge bg-success align-self-center">Published</span>
             {% endif %}
-            <button type="button" class="btn btn-outline-danger" id="delete-module-tree-btn" title="Delete this module tree">
-                <i class="bi bi-trash me-1"></i>Delete
+            <button type="button" class="btn btn-outline-danger btn-sm" id="deleteTreeBtn" title="Delete entire tree">
+                <i class="bi bi-trash"></i>
             </button>
         </div>
     </div>
 
-    <div class="teacher-flat-map-wrapper">
-        <div class="flat-map-container teacher-flat-map" id="teacherMapContainer">
-            <div class="flat-map-controls">
-                <button type="button" class="flat-control-btn" title="Zoom In" id="teacherZoomIn"><i class="bi bi-zoom-in"></i></button>
-                <button type="button" class="flat-control-btn" title="Zoom Out" id="teacherZoomOut"><i class="bi bi-zoom-out"></i></button>
-                <button type="button" class="flat-control-btn" title="Reset" id="teacherResetView"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-            <div class="flat-pan-zoom" id="teacherPanZoom">
-                <div class="flat-pan-zoom-content" id="teacherPanZoomContent">
-                    <div class="flat-modules-layer" id="teacherModulesLayer"></div>
-                    <svg class="flat-connections-svg" id="teacherConnectionsSvg"></svg>
+    <!-- Main area: tree canvas + sidebar -->
+    <div class="tree-main">
+        <!-- Tree canvas -->
+        <div class="tree-canvas-wrapper" id="treeCanvasWrapper">
+            <div class="tree-viewport" id="treeViewport">
+                <div class="tree-content" id="treeContent">
+                    <!-- Tree rendered here -->
                 </div>
             </div>
         </div>
-    </div>
-    <p class="text-muted small mt-2">Click any node to edit; right-click to expand or collapse branches. Drag to pan, use buttons to zoom.</p>
 
-    <!-- Textbook RAG: disabled for now — will reconnect with external vector DB later -->
-    <!--
-    <div class="card mt-4 shadow-sm">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-journal-book me-2"></i>Textbook (RAG)</span>
-            <small class="text-muted">AI tutor can use this to answer from your textbook</small>
-        </div>
-        <div class="card-body">
-            <div id="textbook-status" class="mb-3">
-                <span class="text-muted">Loading…</span>
+        <!-- Right sidebar -->
+        <div class="tree-sidebar" id="treeSidebar">
+            <div class="sidebar-empty" id="sidebarEmpty">
+                <i class="bi bi-hand-index-thumb display-6 text-muted"></i>
+                <p class="text-muted mt-2 mb-0">Click a node to edit</p>
             </div>
-            <div id="textbook-upload-area">
-                <div id="textbook-upload-progress" class="d-none mb-3">
-                    <div class="d-flex align-items-center gap-2 mb-2">
-                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                        <span class="text-muted" id="textbook-progress-text">Uploading and processing…</span>
-                    </div>
-                    <div class="progress" style="height: 6px;">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
-                    </div>
-                    <small class="text-muted d-block mt-1">Processing text → chunking → generating embeddings. This may take 1–2 minutes for larger files.</small>
+            <div class="sidebar-editor" id="sidebarEditor" style="display:none;">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0">Edit Node</h6>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="closeSidebar"><i class="bi bi-x-lg"></i></button>
                 </div>
-                <form id="textbook-upload-form" enctype="multipart/form-data">
-                    <div class="mb-2">
-                        <label class="form-label small">Title (optional)</label>
-                        <input type="text" class="form-control form-control-sm" id="textbook-title" name="title" placeholder="e.g. Chapter 1 or Mathematics Year 3">
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Title</label>
+                    <input type="text" class="form-control form-control-sm" id="editTitle">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Subtitle</label>
+                    <input type="text" class="form-control form-control-sm" id="editSubtitle" placeholder="e.g. Chapter 3">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Description</label>
+                    <textarea class="form-control form-control-sm" id="editDescription" rows="3"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Color</label>
+                    <div class="color-swatches" id="colorSwatches">
+                        <button type="button" class="swatch" data-color="#667eea" style="background:#667eea;" title="Blue"></button>
+                        <button type="button" class="swatch" data-color="#22c55e" style="background:#22c55e;" title="Green"></button>
+                        <button type="button" class="swatch" data-color="#a855f7" style="background:#a855f7;" title="Purple"></button>
+                        <button type="button" class="swatch" data-color="#f97316" style="background:#f97316;" title="Orange"></button>
+                        <button type="button" class="swatch" data-color="#64748b" style="background:#64748b;" title="Slate"></button>
+                        <button type="button" class="swatch" data-color="#ef4444" style="background:#ef4444;" title="Red"></button>
+                        <button type="button" class="swatch" data-color="#06b6d4" style="background:#06b6d4;" title="Cyan"></button>
+                        <button type="button" class="swatch" data-color="#eab308" style="background:#eab308;" title="Yellow"></button>
                     </div>
-                    <div class="mb-2">
-                        <input type="file" class="form-control form-control-sm" id="textbook-file" name="textbook_file" accept=".pdf,.txt" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-sm" id="textbook-upload-btn">
-                        <i class="bi bi-upload me-1"></i>Add PDF or TXT (chapter or full book)
-                    </button>
-                </form>
-                <p class="form-text small mb-0">Upload PDFs or TXT files — each upload is added to the RAG (e.g. chapter by chapter). TXT must be UTF-8. Requires OPENAI_API_KEY.</p>
-            </div>
-            <div id="textbook-delete-area" style="display: none;">
-                <button type="button" class="btn btn-outline-danger btn-sm" id="textbook-delete-btn">
-                    <i class="bi bi-trash me-1"></i>Remove textbook
+                </div>
+                <div class="save-indicator mb-3" id="saveIndicator" style="display:none;">
+                    <i class="bi bi-check-circle text-success me-1"></i>
+                    <small class="text-success">Saved</small>
+                </div>
+                <hr>
+                <button type="button" class="btn btn-outline-danger btn-sm w-100" id="deleteNodeBtn" style="display:none;">
+                    <i class="bi bi-trash me-1"></i>Delete Node
                 </button>
             </div>
-            <div id="textbook-message" class="alert d-none mt-2"></div>
         </div>
     </div>
-    -->
 </div>
 
-<div class="flat-context-menu" id="teacherContextMenu">
-    <button type="button" id="teacherExpandBtn"><i class="bi bi-chevron-down me-1"></i>Expand branch</button>
-    <button type="button" id="teacherCollapseBtn"><i class="bi bi-chevron-up me-1"></i>Collapse branch</button>
-</div>
-
-<!-- Node Editor Sidebar -->
-<div class="node-editor-sidebar" id="nodeEditor" style="display: none;">
-    <div class="node-editor-header d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
-        <h5 class="mb-0">Edit Module Node</h5>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="closeNodeEditor"><i class="bi bi-x-lg"></i></button>
-    </div>
-    <form id="nodeEditorForm">
-        <input type="hidden" id="editNodeId" name="node_id">
-        <div class="mb-3">
-            <label class="form-label small text-muted">Module Title</label>
-            <input type="text" class="form-control form-control-sm" id="editTitle" name="title" required>
-        </div>
-        <div class="mb-3">
-            <label class="form-label small text-muted">Description</label>
-            <textarea class="form-control form-control-sm" id="editDescription" name="description" rows="2"></textarea>
-        </div>
-        <div class="mb-3">
-            <label class="form-label small text-muted">Learning Objectives (one per line)</label>
-            <textarea class="form-control form-control-sm" id="editLearningObjectives" name="learning_objectives" rows="3" placeholder="One objective per line"></textarea>
-        </div>
-        <div class="mb-3">
-            <label class="form-label small text-muted">Custom prompt for AI tutor</label>
-            <textarea class="form-control form-control-sm" id="editCustomPrompt" name="custom_prompt" rows="4" placeholder="Optional: instructions for the AI when students learn this module (e.g. focus on examples, use simpler language)"></textarea>
-        </div>
-        <div class="mb-3">
-            <label class="form-label small text-muted d-flex justify-content-between align-items-center">
-                Resources
-                <span class="badge bg-primary" id="resourceCount">0</span>
-            </label>
-            <div id="resourceList" class="resource-list mb-2"></div>
-            <div class="add-resource-area">
-                <button type="button" class="btn btn-sm btn-outline-primary w-100" id="addResourceBtn"><i class="bi bi-plus-circle me-1"></i>Add Resource</button>
-            </div>
-        </div>
-        <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-primary btn-sm flex-grow-1"><i class="bi bi-check me-1"></i>Save Changes</button>
-        </div>
-    </form>
-</div>
-
-<!-- Add Resource Modal -->
-<div class="modal fade" id="addResourceModal" tabindex="-1">
-    <div class="modal-dialog">
+<!-- Delete confirm modal -->
+<div class="modal fade" id="deleteNodeModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Add Resource</h5>
+                <h6 class="modal-title">Delete Node</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-2">
-                    <label class="form-label small">Type</label>
-                    <select class="form-select form-select-sm" id="resType">
-                        <option value="youtube">YouTube / Video</option>
-                        <option value="pdf">PDF (link or upload)</option>
-                        <option value="link">Website / Link</option>
-                        <option value="slides">Google Slides</option>
-                    </select>
-                </div>
-                <div class="mb-2">
-                    <label class="form-label small">Title</label>
-                    <input type="text" class="form-control form-control-sm" id="resTitle" placeholder="e.g. Introduction Video">
-                </div>
-                <div class="mb-2" id="resUrlWrap">
-                    <label class="form-label small">URL</label>
-                    <input type="url" class="form-control form-control-sm" id="resUrl" placeholder="https://...">
-                </div>
-                <div class="mb-2 d-none" id="resPdfUploadWrap">
-                    <label class="form-label small">Or upload PDF</label>
-                    <input type="file" class="form-control form-control-sm" id="resPdfFile" accept="application/pdf">
-                    <p class="form-text small mb-0">Max 10 MB. Leave URL empty to use upload only.</p>
-                </div>
+                <p class="mb-0">Delete <strong id="deleteNodeTitle"></strong> and all its children? This cannot be undone.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary btn-sm" id="saveResourceBtn"><i class="bi bi-plus me-1"></i>Add</button>
+                <button type="button" class="btn btn-danger btn-sm" id="confirmDeleteNodeBtn">Delete</button>
             </div>
         </div>
     </div>
 </div>
 
 <style>
-.teacher-flat-map-wrapper { height: 560px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-.flat-map-container.teacher-flat-map { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); height: 100%; }
-.flat-modules-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-.flat-modules-layer .flat-module-node { pointer-events: auto; }
-.flat-connections-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
-.flat-connection-line { stroke: rgba(255,255,255,0.3); stroke-width: 2; fill: none; }
-.flat-module-node { position: absolute; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; z-index: 10; }
-.flat-module-node:hover { transform: scale(1.1); z-index: 20; }
-.flat-module-node.selected { transform: scale(1.15); z-index: 30; box-shadow: 0 0 0 4px rgba(255,255,255,0.5); }
-.flat-module-circle { border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 3px solid rgba(255,255,255,0.2); position: relative; overflow: hidden; }
-.flat-module-circle::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 40%; background: linear-gradient(to bottom, rgba(255,255,255,0.2), transparent); border-radius: 50% 50% 0 0; }
-.flat-module-label { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; color: white; font-size: 0.7rem; font-weight: 500; text-align: center; white-space: normal; overflow-wrap: break-word; word-break: normal; max-width: 180px; line-height: 1.2; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-.flat-module-node.dragging { cursor: grabbing; }
-.flat-module-node.dragging .flat-module-circle { cursor: grabbing; }
-.flat-module-icon { color: white; font-size: 1.5rem; position: relative; z-index: 1; }
-.flat-map-controls { position: absolute; top: 1rem; right: 1rem; display: flex; flex-direction: column; gap: 0.5rem; z-index: 100; }
-.flat-control-btn { width: 40px; height: 40px; border-radius: 10px; border: none; background: rgba(255,255,255,0.95); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; color: #1e293b; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-.flat-control-btn:hover { background: #667eea; color: white; }
-.flat-pan-zoom { width: 100%; height: 100%; cursor: grab; }
-.flat-pan-zoom:active { cursor: grabbing; }
-.flat-pan-zoom-content { position: relative; width: 1400px; height: 900px; transform-origin: center center; }
-.node-editor-sidebar { position: fixed; right: 0; top: 56px; bottom: 0; width: 360px; height: calc(100vh - 56px); overflow-y: auto; background: #fff; border-left: 1px solid #e2e8f0; padding: 1.25rem; z-index: 1050; box-shadow: -4px 0 12px rgba(0,0,0,0.08); }
-.resource-list .resource-item { display: flex; align-items: center; padding: 0.5rem; background: #f8fafc; border-radius: 8px; margin-bottom: 0.5rem; }
-.resource-list .resource-item .resource-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 0.5rem; font-size: 1rem; }
-.resource-list .resource-item .resource-icon.youtube { background: rgba(255,0,0,0.1); color: #f00; }
-.resource-list .resource-item .resource-icon.pdf { background: rgba(239,68,68,0.1); color: #ef4444; }
-.resource-list .resource-item .resource-icon.link { background: rgba(6,182,212,0.1); color: #06b6d4; }
-.resource-list .resource-item .resource-icon.slides { background: rgba(234,88,12,0.1); color: #ea580c; }
-.resource-list .resource-item .flex-grow-1 { min-width: 0; }
-.resource-list .resource-item .btn-link { padding: 0 0.25rem; font-size: 0.9rem; }
-.flat-context-menu { position: fixed; z-index: 200; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 0.25rem 0; min-width: 140px; display: none; }
-.flat-context-menu.show { display: block; }
-.flat-context-menu button { display: block; width: 100%; text-align: left; border: none; background: none; padding: 0.5rem 1rem; font-size: 0.875rem; cursor: pointer; }
-.flat-context-menu button:hover { background: #f1f5f9; }
-.flat-context-menu button:disabled { opacity: 0.5; cursor: default; }
+.tree-editor-layout { display: flex; flex-direction: column; height: calc(100vh - 56px); overflow: hidden; }
+.tree-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 1rem; border-bottom: 1px solid #e2e8f0; background: #fff; flex-shrink: 0; }
+.tree-main { display: flex; flex: 1; overflow: hidden; }
+.tree-canvas-wrapper { flex: 1; overflow: hidden; position: relative; background: #f8fafc; }
+.tree-viewport { width: 100%; height: 100%; overflow: hidden; cursor: grab; }
+.tree-viewport:active { cursor: grabbing; }
+.tree-content { transform-origin: 0 0; padding: 40px 40px 80px; min-width: max-content; }
+.tree-sidebar { width: 320px; border-left: 1px solid #e2e8f0; background: #fff; overflow-y: auto; padding: 1rem; flex-shrink: 0; display: flex; flex-direction: column; }
+.sidebar-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; }
+
+/* CSS Tree */
+.css-tree { list-style: none; padding: 0; margin: 0; }
+.css-tree ul { list-style: none; padding-left: 28px; margin: 0; position: relative; }
+.css-tree ul::before { content: ''; position: absolute; left: 14px; top: 0; bottom: 16px; width: 1px; background: #cbd5e1; }
+.css-tree li { position: relative; padding: 4px 0; }
+.css-tree ul > li::before { content: ''; position: absolute; left: -14px; top: 20px; width: 14px; height: 1px; background: #cbd5e1; }
+
+.tree-node-card {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-radius: 8px;
+    border: 2px solid transparent; background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    cursor: pointer; transition: all 0.15s; user-select: none;
+    position: relative; min-width: 120px;
+}
+.tree-node-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.tree-node-card.active { border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.2); }
+.tree-node-card .node-color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.tree-node-card .node-title { font-weight: 500; font-size: 0.875rem; }
+.tree-node-card .node-subtitle { font-size: 0.75rem; color: #64748b; }
+.tree-node-card .node-desc-icon { font-size: 0.7rem; color: #94a3b8; margin-left: auto; }
+.tree-node-card .node-actions { display: none; position: absolute; right: -8px; top: 50%; transform: translateY(-50%); gap: 2px; }
+.tree-node-card:hover .node-actions { display: flex; }
+.node-action-btn {
+    width: 22px; height: 22px; border-radius: 50%; border: 1px solid #e2e8f0;
+    background: #fff; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 0.65rem; color: #64748b; transition: all 0.15s;
+}
+.node-action-btn:hover { background: #f1f5f9; color: #334155; }
+.node-action-btn.add-btn:hover { background: #dcfce7; color: #16a34a; border-color: #86efac; }
+.node-action-btn.del-btn:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+
+/* Color swatches */
+.color-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+.swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: all 0.15s; }
+.swatch:hover { transform: scale(1.15); }
+.swatch.active { border-color: #1e293b; box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor; }
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .tree-sidebar { position: fixed; right: 0; top: 0; bottom: 0; z-index: 1050; width: 300px; box-shadow: -4px 0 12px rgba(0,0,0,0.1); }
+    .tree-sidebar.hidden { display: none; }
+}
 </style>
 
 <script>
 (function() {
     const moduleTree = {{ modules_json|safe }};
-    const mapContainer = document.getElementById('teacherMapContainer');
-    const panZoomContent = document.getElementById('teacherPanZoomContent');
-    const connectionsSvg = document.getElementById('teacherConnectionsSvg');
-    const modulesLayer = document.getElementById('teacherModulesLayer');
-    if (!moduleTree || !modulesLayer) return;
+    const moduleId = '{{ module.module_id }}';
+    const treeContent = document.getElementById('treeContent');
+    const treeViewport = document.getElementById('treeViewport');
+    const sidebarEmpty = document.getElementById('sidebarEmpty');
+    const sidebarEditor = document.getElementById('sidebarEditor');
+    const editTitle = document.getElementById('editTitle');
+    const editSubtitle = document.getElementById('editSubtitle');
+    const editDescription = document.getElementById('editDescription');
+    const colorSwatches = document.getElementById('colorSwatches');
+    const saveIndicator = document.getElementById('saveIndicator');
+    const deleteNodeBtn = document.getElementById('deleteNodeBtn');
+    const nodeCountBadge = document.getElementById('nodeCountBadge');
 
-    const CANVAS_W = 1400, CANVAS_H = 900;
-    const rootX = 700, rootY = 400;
-    const nodesWithPos = [];
-    const nodePositions = {};
+    let selectedNodeId = null;
+    let saveTimeout = null;
 
-    function layoutNode(node, cx, cy, depth, siblingIndex, siblingCount, pathTitles) {
-        const children = node.children || [];
-        const isRoot = depth === 0;
-        const radius = isRoot ? 70 : (depth === 1 ? 50 : (depth === 2 ? 35 : 25));
-        nodePositions[node.module_id] = { x: cx, y: cy, radius, depth };
-        nodesWithPos.push({ node, cx, cy, radius, depth, pathTitles: pathTitles.slice() });
-        const n = children.length;
-        for (let i = 0; i < n; i++) {
-            const angle = (i / Math.max(n, 1)) * Math.PI * 1.8 + Math.PI * 0.1;
-            const dist = (isRoot ? 220 : 120) + depth * 60;
-            const child = children[i];
-            const nx = cx + Math.cos(angle) * dist;
-            const ny = cy + Math.sin(angle) * dist;
-            layoutNode(child, nx, ny, depth + 1, i, n, pathTitles.concat([child.title]));
-        }
-    }
-    layoutNode(moduleTree, rootX, rootY, 0, 0, 1, [moduleTree.title]);
-
+    // ---- Tree rendering ----
     function escapeHtml(s) {
-        const div = document.createElement('div');
-        div.textContent = s;
-        return div.innerHTML;
-    }
-    function screenToContent(clientX, clientY) {
-        const rect = mapContainer.getBoundingClientRect();
-        return { x: (clientX - rect.left - panX) / scale, y: (clientY - rect.top - panY) / scale };
-    }
-    function updateConnectionLines() {
-        const visibleIds = getVisibleIds();
-        let pathD = '';
-        nodesWithPos.forEach(function(item) {
-            if (!visibleIds.has(item.node.module_id)) return;
-            (item.node.children || []).forEach(function(c) {
-                if (!visibleIds.has(c.module_id)) return;
-                const from = nodePositions[item.node.module_id];
-                const to = nodePositions[c.module_id];
-                if (from && to) pathD += '<line class="flat-connection-line" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '"/>';
-            });
-        });
-        connectionsSvg.innerHTML = pathD;
+        const d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
     }
 
-    const expandedIds = new Set();
-    function getVisibleIds() {
-        const vis = new Set();
-        vis.add(moduleTree.module_id);
-        function addChildren(n) {
-            if (!expandedIds.has(n.module_id)) return;
-            (n.children || []).forEach(function(c) {
-                vis.add(c.module_id);
-                addChildren(c);
-            });
+    function countNodes(node) {
+        let c = 1;
+        (node.children || []).forEach(ch => c += countNodes(ch));
+        return c;
+    }
+
+    function renderTree(node, isRoot) {
+        const children = node.children || [];
+        const hasDesc = !!(node.description || '').trim();
+        const color = node.color || '#667eea';
+        const subtitle = node.subtitle || '';
+
+        let html = '<li>';
+        html += '<div class="tree-node-card' + (selectedNodeId === node.module_id ? ' active' : '') + '" data-id="' + node.module_id + '">';
+        html += '<span class="node-color-dot" style="background:' + escapeHtml(color) + ';"></span>';
+        html += '<div>';
+        html += '<div class="node-title">' + escapeHtml(node.title) + '</div>';
+        if (subtitle) html += '<div class="node-subtitle">' + escapeHtml(subtitle) + '</div>';
+        html += '</div>';
+        if (hasDesc) html += '<i class="bi bi-text-left node-desc-icon" title="Has description"></i>';
+        html += '<div class="node-actions">';
+        html += '<button type="button" class="node-action-btn add-btn" data-add="' + node.module_id + '" title="Add child"><i class="bi bi-plus"></i></button>';
+        if (!isRoot) html += '<button type="button" class="node-action-btn del-btn" data-del="' + node.module_id + '" title="Delete"><i class="bi bi-trash3"></i></button>';
+        html += '</div>';
+        html += '</div>';
+
+        if (children.length > 0) {
+            html += '<ul>';
+            children.forEach(ch => html += renderTree(ch, false));
+            html += '</ul>';
         }
-        addChildren(moduleTree);
-        return vis;
+        html += '</li>';
+        return html;
     }
 
     function redraw() {
-        const visibleIds = getVisibleIds();
-        let pathD = '';
-        nodesWithPos.forEach(function(item) {
-            if (!visibleIds.has(item.node.module_id)) return;
-            (item.node.children || []).forEach(function(c) {
-                if (!visibleIds.has(c.module_id)) return;
-                const from = nodePositions[item.node.module_id];
-                const to = nodePositions[c.module_id];
-                if (from && to) pathD += '<line class="flat-connection-line" x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '"/>';
-            });
-        });
-        connectionsSvg.innerHTML = pathD;
-        connectionsSvg.setAttribute('viewBox', '0 0 ' + CANVAS_W + ' ' + CANVAS_H);
-        connectionsSvg.setAttribute('width', '100%');
-        connectionsSvg.setAttribute('height', '100%');
-
-        modulesLayer.innerHTML = '';
-        nodesWithPos.forEach(function(item) {
-            if (!visibleIds.has(item.node.module_id)) return;
-            const n = item.node;
-            const levelClass = item.depth === 0 ? 'flat-module-root' : (item.depth === 1 ? 'flat-module-l1' : (item.depth === 2 ? 'flat-module-l2' : 'flat-module-l3'));
-            const left = item.cx - item.radius;
-            const top = item.cy - item.radius;
-            const colorStyle = (n.color && n.color.indexOf('#') === 0) ? ('background: linear-gradient(135deg, ' + n.color + ', ' + n.color + 'dd);') : 'background: linear-gradient(135deg, #667eea, #764ba2);';
-            const div = document.createElement('div');
-            div.className = 'flat-module-node ' + levelClass;
-            div.setAttribute('data-node-id', n.module_id);
-            div.style.left = left + 'px';
-            div.style.top = top + 'px';
-            div.innerHTML = '<div class="flat-module-circle" style="' + colorStyle + ' width:' + (item.radius*2) + 'px; height:' + (item.radius*2) + 'px;"><i class="bi ' + (n.icon || 'bi-book') + ' flat-module-icon"></i></div><span class="flat-module-label">' + escapeHtml(n.title) + '</span>';
-            div.onclick = function(e) { if (!dragNodeId) { e.stopPropagation(); openNodeEditor(n); } };
-            div.oncontextmenu = function(e) { e.preventDefault(); showContextMenu(e, n); };
-            div.onmousedown = function(e) { if (e.button === 0) startDrag(e, n, item); };
-            modulesLayer.appendChild(div);
-        });
+        const count = countNodes(moduleTree);
+        nodeCountBadge.textContent = count + ' node' + (count !== 1 ? 's' : '');
+        treeContent.innerHTML = '<ul class="css-tree">' + renderTree(moduleTree, true) + '</ul>';
+        bindNodeEvents();
     }
-
-    let dragNodeId = null, dragOffsetX = 0, dragOffsetY = 0;
-    function startDrag(e, node, item) {
-        e.preventDefault();
-        e.stopPropagation();
-        const pos = screenToContent(e.clientX, e.clientY);
-        dragNodeId = node.module_id;
-        dragOffsetX = pos.x - item.cx;
-        dragOffsetY = pos.y - item.cy;
-        document.body.classList.add('flat-dragging');
-        const div = modulesLayer.querySelector('[data-node-id="' + node.module_id + '"]');
-        if (div) div.classList.add('dragging');
-    }
-    function onDragMove(e) {
-        if (!dragNodeId) return;
-        const pos = screenToContent(e.clientX, e.clientY);
-        const nx = pos.x - dragOffsetX;
-        const ny = pos.y - dragOffsetY;
-        const item = nodesWithPos.find(function(p) { return p.node.module_id === dragNodeId; });
-        if (!item) return;
-        item.cx = nx;
-        item.cy = ny;
-        nodePositions[dragNodeId].x = nx;
-        nodePositions[dragNodeId].y = ny;
-        const div = modulesLayer.querySelector('[data-node-id="' + dragNodeId + '"]');
-        if (div) { div.style.left = (nx - item.radius) + 'px'; div.style.top = (ny - item.radius) + 'px'; }
-        updateConnectionLines();
-    }
-    function endDrag() {
-        if (dragNodeId) {
-            const div = modulesLayer.querySelector('[data-node-id="' + dragNodeId + '"]');
-            if (div) div.classList.remove('dragging');
-            dragNodeId = null;
-        }
-        document.body.classList.remove('flat-dragging');
-    }
-    document.addEventListener('mousemove', onDragMove);
-    document.addEventListener('mouseup', endDrag);
-    document.addEventListener('mouseleave', endDrag);
-
-    let contextNode = null;
-    const teacherContextMenu = document.getElementById('teacherContextMenu');
-    const teacherExpandBtn = document.getElementById('teacherExpandBtn');
-    const teacherCollapseBtn = document.getElementById('teacherCollapseBtn');
-    function showContextMenu(e, node) {
-        contextNode = node;
-        teacherContextMenu.classList.add('show');
-        teacherContextMenu.style.left = e.clientX + 'px';
-        teacherContextMenu.style.top = e.clientY + 'px';
-        const hasChildren = (node.children || []).length > 0;
-        teacherExpandBtn.disabled = !hasChildren || expandedIds.has(node.module_id);
-        teacherCollapseBtn.disabled = !expandedIds.has(node.module_id);
-    }
-    function hideContextMenu() {
-        teacherContextMenu.classList.remove('show');
-        contextNode = null;
-    }
-    teacherExpandBtn.onclick = function() {
-        if (contextNode) expandedIds.add(contextNode.module_id);
-        redraw();
-        hideContextMenu();
-    };
-    teacherCollapseBtn.onclick = function() {
-        if (contextNode) expandedIds.delete(contextNode.module_id);
-        redraw();
-        hideContextMenu();
-    };
-    document.addEventListener('click', hideContextMenu);
-    document.addEventListener('scroll', hideContextMenu, true);
-
-    redraw();
-
-    const nodeEditor = document.getElementById('nodeEditor');
-    const closeNodeEditor = document.getElementById('closeNodeEditor');
-    const nodeEditorForm = document.getElementById('nodeEditorForm');
-    const editNodeId = document.getElementById('editNodeId');
-    const editTitle = document.getElementById('editTitle');
-    const editDescription = document.getElementById('editDescription');
-    const editLearningObjectives = document.getElementById('editLearningObjectives');
-    const editCustomPrompt = document.getElementById('editCustomPrompt');
-    const resourceList = document.getElementById('resourceList');
-    const resourceCount = document.getElementById('resourceCount');
-    const addResourceBtn = document.getElementById('addResourceBtn');
-    const addResourceModal = document.getElementById('addResourceModal');
-    const saveResourceBtn = document.getElementById('saveResourceBtn');
 
     function findNode(tree, id) {
         if (tree.module_id === id) return tree;
@@ -424,61 +252,204 @@
         return null;
     }
 
-    function openNodeEditor(nodeData) {
-        document.querySelectorAll('#teacherModulesLayer .flat-module-node.selected').forEach(function(el) { el.classList.remove('selected'); });
-        const el = document.querySelector('[data-node-id="' + nodeData.module_id + '"]');
-        if (el) el.classList.add('selected');
-        editNodeId.value = nodeData.module_id;
-        editTitle.value = nodeData.title || '';
-        editDescription.value = nodeData.description || '';
-        editLearningObjectives.value = Array.isArray(nodeData.learning_objectives) ? nodeData.learning_objectives.join('\n') : (nodeData.learning_objectives || '');
-        editCustomPrompt.value = nodeData.custom_prompt || '';
-        nodeEditor.style.display = 'block';
-        loadResources(nodeData.module_id);
+    function findParent(tree, id) {
+        for (const c of (tree.children || [])) {
+            if (c.module_id === id) return tree;
+            const found = findParent(c, id);
+            if (found) return found;
+        }
+        return null;
     }
 
-    async function loadResources(nodeId) {
-        try {
-            const res = await fetch('{{ url_for("manage_module_resources", module_id=module.module_id, node_id="__NODE__") }}'.replace('__NODE__', encodeURIComponent(nodeId)));
-            const data = await res.json();
-            const list = (data.resources || []);
-            resourceCount.textContent = list.length;
-            resourceList.innerHTML = list.map(function(r) {
-                const icons = { youtube: 'bi-youtube', pdf: 'bi-file-pdf', slides: 'bi-file-earmark-slides', link: 'bi-link-45deg' };
-                const icon = icons[r.type] || 'bi-link-45deg';
-                const iconCls = r.type === 'youtube' ? 'youtube' : (r.type === 'pdf' ? 'pdf' : (r.type === 'slides' ? 'slides' : 'link'));
-                return '<div class="resource-item"><div class="resource-icon ' + iconCls + '"><i class="bi ' + icon + '"></i></div><div class="flex-grow-1 small text-truncate" title="' + (r.title || '') + '">' + (r.title || 'Resource') + '</div><button type="button" class="btn btn-link text-danger p-0 delete-resource" data-resource-id="' + (r.resource_id || '') + '"><i class="bi bi-trash"></i></button></div>';
-            }).join('');
-            resourceList.querySelectorAll('.delete-resource').forEach(function(btn) {
-                btn.addEventListener('click', function() {
-                    const rid = this.getAttribute('data-resource-id');
-                    if (!rid || !confirm('Remove this resource?')) return;
-                    fetch('{{ url_for("delete_module_resource", module_id=module.module_id, node_id="__NODE__", resource_id="__RID__") }}'.replace('__NODE__', encodeURIComponent(nodeId)).replace('__RID__', encodeURIComponent(rid)), { method: 'DELETE' })
-                        .then(function(r) { return r.json(); })
-                        .then(function(d) { if (d.success) loadResources(nodeId); });
-                });
+    // ---- Node events ----
+    function bindNodeEvents() {
+        treeContent.querySelectorAll('.tree-node-card').forEach(card => {
+            card.addEventListener('click', function(e) {
+                if (e.target.closest('.node-action-btn')) return;
+                selectNode(this.dataset.id);
             });
-        } catch (e) { resourceList.innerHTML = '<div class="small text-muted">Could not load resources.</div>'; resourceCount.textContent = '0'; }
+        });
+        treeContent.querySelectorAll('.add-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                addChild(this.dataset.add);
+            });
+        });
+        treeContent.querySelectorAll('.del-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                promptDeleteNode(this.dataset.del);
+            });
+        });
     }
 
-    let scale = 1, panX = 0, panY = 0, isPan = false, startX, startY;
+    // ---- Select node ----
+    function selectNode(id) {
+        selectedNodeId = id;
+        const node = findNode(moduleTree, id);
+        if (!node) return;
+        // Highlight
+        treeContent.querySelectorAll('.tree-node-card').forEach(c => c.classList.remove('active'));
+        const el = treeContent.querySelector('[data-id="' + id + '"]');
+        if (el) el.classList.add('active');
+        // Fill sidebar
+        sidebarEmpty.style.display = 'none';
+        sidebarEditor.style.display = 'block';
+        editTitle.value = node.title || '';
+        editSubtitle.value = node.subtitle || '';
+        editDescription.value = node.description || '';
+        // Color swatches
+        colorSwatches.querySelectorAll('.swatch').forEach(s => {
+            s.classList.toggle('active', s.dataset.color === (node.color || '#667eea'));
+        });
+        // Delete button: hide for root
+        deleteNodeBtn.style.display = (id === moduleId) ? 'none' : 'block';
+        saveIndicator.style.display = 'none';
+    }
+
+    // ---- Auto-save ----
+    function scheduleSave() {
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveIndicator.style.display = 'none';
+        saveTimeout = setTimeout(() => doSave(), 600);
+    }
+
+    async function doSave() {
+        if (!selectedNodeId) return;
+        const node = findNode(moduleTree, selectedNodeId);
+        if (!node) return;
+        const payload = {
+            title: editTitle.value.trim() || 'Untitled',
+            subtitle: editSubtitle.value.trim(),
+            description: editDescription.value.trim(),
+            color: node.color || '#667eea',
+        };
+        try {
+            const res = await fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/node/' + encodeURIComponent(selectedNodeId), {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success) {
+                node.title = payload.title;
+                node.subtitle = payload.subtitle;
+                node.description = payload.description;
+                node.color = payload.color;
+                redraw();
+                selectNode(selectedNodeId);
+                saveIndicator.style.display = 'block';
+                setTimeout(() => { saveIndicator.style.display = 'none'; }, 2000);
+            }
+        } catch (e) { /* silent */ }
+    }
+
+    editTitle.addEventListener('input', scheduleSave);
+    editSubtitle.addEventListener('input', scheduleSave);
+    editDescription.addEventListener('input', scheduleSave);
+
+    colorSwatches.querySelectorAll('.swatch').forEach(s => {
+        s.addEventListener('click', function() {
+            const node = findNode(moduleTree, selectedNodeId);
+            if (!node) return;
+            node.color = this.dataset.color;
+            colorSwatches.querySelectorAll('.swatch').forEach(sw => sw.classList.remove('active'));
+            this.classList.add('active');
+            scheduleSave();
+        });
+    });
+
+    // ---- Add child ----
+    async function addChild(parentId) {
+        try {
+            const res = await fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/node', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ parent_node_id: parentId }),
+            });
+            const data = await res.json();
+            if (data.success && data.node) {
+                const parent = findNode(moduleTree, parentId);
+                if (parent) {
+                    if (!parent.children) parent.children = [];
+                    parent.children.push(data.node);
+                    if (!parent.children_ids) parent.children_ids = [];
+                    parent.children_ids.push(data.node_id);
+                }
+                redraw();
+                selectNode(data.node_id);
+            } else {
+                alert(data.error || 'Failed to add node');
+            }
+        } catch (e) { alert('Failed to add node'); }
+    }
+
+    // ---- Delete node ----
+    let pendingDeleteId = null;
+    const deleteModal = document.getElementById('deleteNodeModal');
+    const deleteNodeTitle = document.getElementById('deleteNodeTitle');
+    const confirmDeleteBtn = document.getElementById('confirmDeleteNodeBtn');
+
+    function promptDeleteNode(id) {
+        const node = findNode(moduleTree, id);
+        if (!node) return;
+        pendingDeleteId = id;
+        deleteNodeTitle.textContent = node.title || 'this node';
+        new bootstrap.Modal(deleteModal).show();
+    }
+
+    confirmDeleteBtn.addEventListener('click', async function() {
+        if (!pendingDeleteId) return;
+        confirmDeleteBtn.disabled = true;
+        try {
+            const res = await fetch('/teacher/modules/' + encodeURIComponent(moduleId) + '/node/' + encodeURIComponent(pendingDeleteId), {
+                method: 'DELETE',
+            });
+            const data = await res.json();
+            if (data.success) {
+                // Remove from tree
+                const parent = findParent(moduleTree, pendingDeleteId);
+                if (parent) {
+                    parent.children = (parent.children || []).filter(c => c.module_id !== pendingDeleteId);
+                    parent.children_ids = (parent.children_ids || []).filter(id => id !== pendingDeleteId);
+                }
+                if (selectedNodeId === pendingDeleteId) {
+                    selectedNodeId = null;
+                    sidebarEditor.style.display = 'none';
+                    sidebarEmpty.style.display = 'flex';
+                }
+                bootstrap.Modal.getInstance(deleteModal).hide();
+                redraw();
+            } else {
+                alert(data.error || 'Delete failed');
+            }
+        } catch (e) { alert('Delete failed'); }
+        confirmDeleteBtn.disabled = false;
+    });
+
+    deleteNodeBtn.addEventListener('click', function() {
+        if (selectedNodeId && selectedNodeId !== moduleId) {
+            promptDeleteNode(selectedNodeId);
+        }
+    });
+
+    // ---- Close sidebar ----
+    document.getElementById('closeSidebar').addEventListener('click', function() {
+        selectedNodeId = null;
+        sidebarEditor.style.display = 'none';
+        sidebarEmpty.style.display = 'flex';
+        treeContent.querySelectorAll('.tree-node-card').forEach(c => c.classList.remove('active'));
+    });
+
+    // ---- Pan & Zoom ----
+    let scale = 1, panX = 0, panY = 0, isPan = false, startX = 0, startY = 0;
     function updateTransform() {
-        panZoomContent.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + scale + ')';
+        treeContent.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
     }
-    function centerContent() {
-        if (!mapContainer) return;
-        const rect = mapContainer.getBoundingClientRect();
-        panX = (rect.width - CANVAS_W * scale) / 2;
-        panY = (rect.height - CANVAS_H * scale) / 2;
-        updateTransform();
-    }
-    document.getElementById('teacherZoomIn').onclick = function() { scale = Math.min(scale * 1.2, 2); updateTransform(); };
-    document.getElementById('teacherZoomOut').onclick = function() { scale = Math.max(scale / 1.2, 0.4); updateTransform(); };
-    document.getElementById('teacherResetView').onclick = function() { scale = 1; centerContent(); };
-    document.getElementById('teacherPanZoom').addEventListener('mousedown', function(e) {
-        if (e.target.closest('.flat-module-node')) return;
+    treeViewport.addEventListener('mousedown', function(e) {
+        if (e.target.closest('.tree-node-card')) return;
         isPan = true; startX = e.clientX - panX; startY = e.clientY - panY;
-        document.getElementById('teacherPanZoom').style.cursor = 'grabbing';
+        treeViewport.style.cursor = 'grabbing';
     });
     document.addEventListener('mousemove', function(e) {
         if (!isPan) return;
@@ -486,110 +457,48 @@
         updateTransform();
     });
     document.addEventListener('mouseup', function() {
-        isPan = false;
-        var pz = document.getElementById('teacherPanZoom');
-        if (pz) pz.style.cursor = 'grab';
+        isPan = false; treeViewport.style.cursor = 'grab';
     });
-    document.getElementById('teacherPanZoom').addEventListener('wheel', function(e) {
+    treeViewport.addEventListener('wheel', function(e) {
         e.preventDefault();
-        scale = Math.max(0.4, Math.min(2, scale * (e.deltaY > 0 ? 0.9 : 1.1)));
+        const factor = e.deltaY > 0 ? 0.9 : 1.1;
+        scale = Math.max(0.3, Math.min(2.5, scale * factor));
         updateTransform();
     }, { passive: false });
-    window.addEventListener('load', centerContent);
-    window.addEventListener('resize', centerContent);
 
-    closeNodeEditor && closeNodeEditor.addEventListener('click', function() { nodeEditor.style.display = 'none'; });
+    document.getElementById('zoomInBtn').addEventListener('click', function() { scale = Math.min(scale * 1.2, 2.5); updateTransform(); });
+    document.getElementById('zoomOutBtn').addEventListener('click', function() { scale = Math.max(scale / 1.2, 0.3); updateTransform(); });
+    document.getElementById('fitBtn').addEventListener('click', function() { scale = 1; panX = 0; panY = 0; updateTransform(); });
 
-    nodeEditorForm && nodeEditorForm.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        const nodeId = editNodeId.value;
-        const objectivesText = editLearningObjectives.value.trim();
-        const objectives = objectivesText ? objectivesText.split(/\n/).map(function(s) { return s.trim(); }).filter(Boolean) : [];
-        try {
-            const res = await fetch('{{ url_for("update_module_node", module_id=module.module_id, node_id="__NODE__") }}'.replace('__NODE__', encodeURIComponent(nodeId)), {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: editTitle.value.trim(),
-                    description: editDescription.value.trim(),
-                    learning_objectives: objectives,
-                    custom_prompt: editCustomPrompt.value.trim(),
-                }),
-            });
-            const data = await res.json();
-            if (data.success) {
-                var nd = findNode(moduleTree, nodeId);
-                if (nd) { nd.title = editTitle.value.trim(); nd.description = editDescription.value.trim(); nd.learning_objectives = objectives; nd.custom_prompt = editCustomPrompt.value.trim(); }
-                var sel = document.querySelector('[data-node-id="' + nodeId + '"] .flat-module-label');
-                if (sel) sel.textContent = editTitle.value.trim().length > 12 ? editTitle.value.trim().slice(0,11) + '…' : editTitle.value.trim();
-                alert('Saved.');
-            } else alert(data.error || 'Save failed');
-        } catch (err) { alert('Save failed'); }
-    });
+    // ---- Publish ----
+    const publishBtn = document.getElementById('publishBtn');
+    if (publishBtn) {
+        publishBtn.addEventListener('click', async function() {
+            this.disabled = true;
+            try {
+                const res = await fetch('{{ url_for("publish_module", module_id=module.module_id) }}', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) window.location.reload();
+                else alert(data.error || 'Publish failed');
+            } finally { this.disabled = false; }
+        });
+    }
 
-    document.getElementById('resType').addEventListener('change', function() {
-        const wrap = document.getElementById('resPdfUploadWrap');
-        if (wrap) wrap.classList.toggle('d-none', this.value !== 'pdf');
-    });
-    addResourceBtn && addResourceBtn.addEventListener('click', function() {
-        document.getElementById('resTitle').value = '';
-        document.getElementById('resUrl').value = '';
-        const pdfInput = document.getElementById('resPdfFile');
-        if (pdfInput) { pdfInput.value = ''; }
-        document.getElementById('resPdfUploadWrap').classList.toggle('d-none', document.getElementById('resType').value !== 'pdf');
-        addResourceModal.setAttribute('data-edit-node-id', editNodeId.value);
-        new bootstrap.Modal(addResourceModal).show();
-    });
-    saveResourceBtn && saveResourceBtn.addEventListener('click', function() {
-        const nodeId = addResourceModal.getAttribute('data-edit-node-id');
-        const type = document.getElementById('resType').value;
-        const title = document.getElementById('resTitle').value.trim();
-        const url = document.getElementById('resUrl').value.trim();
-        const pdfFile = document.getElementById('resPdfFile').files[0];
-        const MAX_PDF_MB = 10;
-        if (!title) { alert('Title required'); return; }
-        if (type === 'pdf') {
-            if (!url && !pdfFile) { alert('Provide a PDF link (URL) or upload a PDF file'); return; }
-            if (pdfFile && pdfFile.size > MAX_PDF_MB * 1024 * 1024) { alert('PDF must be ' + MAX_PDF_MB + ' MB or smaller'); return; }
-        } else if (!url) { alert('URL required'); return; }
-        const formData = new FormData();
-        formData.append('type', type);
-        formData.append('title', title);
-        formData.append('url', url || '');
-        if (pdfFile) formData.append('file', pdfFile);
-        fetch('{{ url_for("manage_module_resources", module_id=module.module_id, node_id="__NODE__") }}'.replace('__NODE__', encodeURIComponent(nodeId)), { method: 'POST', body: formData })
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d.success) { bootstrap.Modal.getInstance(addResourceModal).hide(); loadResources(nodeId); }
-                else alert(d.error || 'Failed to add');
-            });
-    });
-
-    document.getElementById('publish-btn') && document.getElementById('publish-btn').addEventListener('click', async function() {
-        const btn = this;
-        btn.disabled = true;
-        try {
-            const res = await fetch('{{ url_for("publish_module", module_id=module.module_id) }}', { method: 'POST' });
-            const data = await res.json();
-            if (data.success) window.location.reload();
-        } finally { btn.disabled = false; }
-    });
-
-    document.getElementById('delete-module-tree-btn') && document.getElementById('delete-module-tree-btn').addEventListener('click', function() {
+    // ---- Delete tree ----
+    document.getElementById('deleteTreeBtn').addEventListener('click', function() {
         if (!confirm('Delete this entire module tree? All nodes, resources, and student progress will be removed. This cannot be undone.')) return;
-        const btn = this;
-        btn.disabled = true;
+        this.disabled = true;
         fetch('{{ url_for("delete_module_tree", module_id=module.module_id) }}', { method: 'POST' })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
+            .then(r => r.json())
+            .then(data => {
                 if (data.success) window.location.href = '{{ url_for("teacher_modules") }}';
-                else { alert(data.error || 'Delete failed'); btn.disabled = false; }
+                else { alert(data.error || 'Delete failed'); this.disabled = false; }
             })
-            .catch(function() { alert('Delete failed'); btn.disabled = false; });
+            .catch(() => { alert('Delete failed'); this.disabled = false; });
     });
 
-    // Textbook RAG — disabled for now (will reconnect with external vector DB later)
-    const moduleId = '{{ module.module_id }}';
+    // ---- Initial render ----
+    redraw();
 })();
 </script>
 {% endblock %}
