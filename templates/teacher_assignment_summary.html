@@ -18,7 +18,7 @@
                     <li class="breadcrumb-item active">Summary Report</li>
                 </ol>
             </nav>
-            
+
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <h3><i class="bi bi-bar-chart me-2"></i>{{ assignment.title }}</h3>
@@ -46,7 +46,7 @@
             </div>
         </div>
     </div>
-    
+
     <!-- Stats Cards -->
     <div class="row g-3 mb-4">
         <div class="col-md-3">
@@ -84,7 +84,7 @@
                 <div class="card-body">
                     <h2 class="text-info mb-0">{{ stats.pass_rate }}%</h2>
                     <p class="text-muted mb-0">Pass Rate</p>
-                    <small class="text-muted">≥50% threshold</small>
+                    <small class="text-muted">&ge;50% threshold</small>
                 </div>
             </div>
         </div>
@@ -107,7 +107,197 @@
         </div>
         {% endif %}
     </div>
-    
+
+    <!-- Item Analysis -->
+    {% if item_analysis and not item_analysis.get('insufficient_data') and item_analysis.questions %}
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-clipboard2-data me-2"></i>Item Analysis</h5>
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#item-analysis-legend">
+                <i class="bi bi-question-circle me-1"></i>Legend
+            </button>
+        </div>
+        <div class="collapse" id="item-analysis-legend">
+            <div class="card-body border-bottom bg-light">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="fw-bold">Facility Index (FI)</h6>
+                        <p class="small text-muted mb-1">How easy the question is (mean marks / max marks)</p>
+                        <span class="badge bg-success me-1">&ge;0.7 Easy</span>
+                        <span class="badge bg-warning text-dark me-1">0.3-0.7 Moderate</span>
+                        <span class="badge bg-danger">&lt;0.3 Hard</span>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="fw-bold">Discrimination Index (DI)</h6>
+                        <p class="small text-muted mb-1">How well it separates strong vs weak students (upper 27% - lower 27%)</p>
+                        <span class="badge bg-success me-1">&ge;0.3 Good</span>
+                        <span class="badge bg-warning text-dark me-1">0.1-0.3 Moderate</span>
+                        <span class="badge bg-danger">&lt;0.1 Poor</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Question</th>
+                            <th>FI</th>
+                            <th>DI</th>
+                            <th>Mean Score</th>
+                            <th>Attempts</th>
+                            <th>Interpretation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for q in item_analysis.questions %}
+                        <tr>
+                            <td><strong>Q{{ q.q_num }}</strong></td>
+                            <td>
+                                {% if q.fi is not none %}
+                                <span class="badge bg-{{ q.fi_color }}{% if q.fi_color == 'warning' %} text-dark{% endif %}">{{ q.fi }}</span>
+                                <small class="text-muted ms-1">{{ q.fi_label }}</small>
+                                {% else %}
+                                <span class="text-muted">N/A</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if q.di is not none %}
+                                <span class="badge bg-{{ q.di_color }}{% if q.di_color == 'warning' %} text-dark{% endif %}">{{ q.di }}</span>
+                                <small class="text-muted ms-1">{{ q.di_label }}</small>
+                                {% else %}
+                                <span class="text-muted">N/A</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if q.mean_marks is not none %}
+                                {{ q.mean_marks }}/{{ q.max_marks|int }}
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
+                            <td>{{ q.attempt_count }}</td>
+                            <td><small>{{ q.interpretation }}</small></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% if item_analysis.student_count is defined %}
+        <div class="card-footer text-muted small">
+            Based on {{ item_analysis.student_count }} students. Upper/lower groups: {{ item_analysis.group_size }} students each (27%).
+        </div>
+        {% endif %}
+    </div>
+    {% elif item_analysis and item_analysis.get('insufficient_data') %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-clipboard2-data me-2"></i>Item Analysis</h5>
+        </div>
+        <div class="card-body text-center text-muted py-4">
+            <i class="bi bi-info-circle" style="font-size: 2rem;"></i>
+            <p class="mt-2 mb-0">Not enough graded submissions to compute item analysis. At least 2 submissions with per-question marks are needed.</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- AI Class Summary -->
+    <div class="card mb-4" id="ai-summary-card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-robot me-2"></i>AI Class Summary</h5>
+            <div>
+                {% if ai_class_summary and not ai_class_summary.get('error') %}
+                <small class="text-muted me-2" id="summary-timestamp">
+                    {% if ai_class_summary.generated_at %}Generated: {{ ai_class_summary.generated_at[:16] }}{% endif %}
+                </small>
+                <button class="btn btn-sm btn-outline-primary" onclick="generateClassSummary()" id="regenerate-btn">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Regenerate
+                </button>
+                {% else %}
+                <button class="btn btn-sm btn-primary" onclick="generateClassSummary()" id="generate-btn">
+                    <i class="bi bi-stars me-1"></i>Generate Summary
+                </button>
+                {% endif %}
+            </div>
+        </div>
+        <div class="card-body" id="ai-summary-content">
+            {% if ai_class_summary and not ai_class_summary.get('error') %}
+            <div class="row g-3">
+                {% if ai_class_summary.concepts_grasped %}
+                <div class="col-md-6">
+                    <h6 class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Concepts Grasped</h6>
+                    <ul class="list-unstyled">
+                        {% for c in ai_class_summary.concepts_grasped %}
+                        <li class="mb-1"><i class="bi bi-check text-success me-1"></i>{{ c }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                {% if ai_class_summary.misconceptions %}
+                <div class="col-md-6">
+                    <h6 class="text-warning"><i class="bi bi-exclamation-triangle-fill me-1"></i>Misconceptions</h6>
+                    <ul class="list-unstyled">
+                        {% for m in ai_class_summary.misconceptions %}
+                        <li class="mb-1"><i class="bi bi-exclamation-circle text-warning me-1"></i>{{ m }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                {% if ai_class_summary.areas_needing_clarification %}
+                <div class="col-md-6">
+                    <h6 class="text-danger"><i class="bi bi-flag-fill me-1"></i>Areas Needing Clarification</h6>
+                    <ul class="list-unstyled">
+                        {% for a in ai_class_summary.areas_needing_clarification %}
+                        <li class="mb-1"><i class="bi bi-arrow-right text-danger me-1"></i>{{ a }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                {% if ai_class_summary.recommended_actions %}
+                <div class="col-md-6">
+                    <h6 class="text-primary"><i class="bi bi-list-check me-1"></i>Recommended Actions</h6>
+                    <ol class="ps-3">
+                        {% for r in ai_class_summary.recommended_actions %}
+                        <li class="mb-1">{{ r }}</li>
+                        {% endfor %}
+                    </ol>
+                </div>
+                {% endif %}
+            </div>
+            {% if ai_class_summary.question_notes %}
+            <hr>
+            <h6><i class="bi bi-card-text me-1"></i>Per-Question Notes</h6>
+            <div class="row g-2">
+                {% for qn in ai_class_summary.question_notes %}
+                <div class="col-md-6">
+                    <div class="d-flex align-items-start">
+                        <span class="badge bg-secondary me-2">Q{{ qn.q_num }}</span>
+                        <small>{{ qn.note }}</small>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% elif ai_class_summary and ai_class_summary.get('error') %}
+            <div class="text-center text-muted py-3">
+                <i class="bi bi-exclamation-circle" style="font-size: 1.5rem;"></i>
+                <p class="mt-2 mb-0">{{ ai_class_summary.error }}</p>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-4" id="summary-placeholder">
+                <i class="bi bi-robot" style="font-size: 2rem;"></i>
+                <p class="mt-2 mb-0">Click "Generate Summary" to get AI-powered analysis of class performance, misconceptions, and recommended actions.</p>
+            </div>
+            {% endif %}
+            <div class="text-center py-4 d-none" id="summary-loading">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2 mb-0 text-muted">Analyzing class performance...</p>
+            </div>
+        </div>
+    </div>
+
     <div class="row">
         <!-- Left Column: Score Distribution & Insights -->
         <div class="col-lg-5 mb-4">
@@ -153,7 +343,7 @@
                     {% endif %}
                 </div>
             </div>
-            
+
             <!-- Areas of Strength & Improvement -->
             <div class="card">
                 <div class="card-header">
@@ -170,7 +360,7 @@
                         </ul>
                     </div>
                     {% endif %}
-                    
+
                     {% if insights.strengths %}
                     <h6 class="text-success"><i class="bi bi-check-circle me-1"></i>Areas of Strength</h6>
                     <ul class="list-unstyled mb-4">
@@ -187,7 +377,7 @@
                         {% endfor %}
                     </ul>
                     {% endif %}
-                    
+
                     {% if insights.improvements %}
                     <h6 class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Areas to Address</h6>
                     <ul class="list-unstyled mb-4">
@@ -214,7 +404,7 @@
                         {% endfor %}
                     </ul>
                     {% endif %}
-                    
+
                     {% if insights.misconceptions %}
                     <h6 class="text-warning"><i class="bi bi-question-circle me-1"></i>Potential Misconceptions</h6>
                     <ul class="list-unstyled">
@@ -231,14 +421,14 @@
                         {% endfor %}
                     </ul>
                     {% endif %}
-                    
+
                     {% if not insights.strengths and not insights.improvements %}
                     <p class="text-muted mb-0">Insights will appear after more submissions are graded.</p>
                     {% endif %}
                 </div>
             </div>
         </div>
-        
+
         <!-- Right Column: Student List -->
         <div class="col-lg-7 mb-4">
             <div class="card">
@@ -307,7 +497,7 @@
                                     </td>
                                     <td>
                                         {% if item.submission %}
-                                        <a href="{{ url_for('review_submission', submission_id=item.submission.submission_id) }}" 
+                                        <a href="{{ url_for('review_submission', submission_id=item.submission.submission_id) }}"
                                            class="btn btn-sm btn-outline-primary">
                                             <i class="bi bi-eye"></i>
                                         </a>
@@ -337,13 +527,13 @@
 function filterStudents(status) {
     const rows = document.querySelectorAll('#students-table tbody tr');
     const buttons = document.querySelectorAll('.btn-group .btn');
-    
+
     buttons.forEach(btn => btn.classList.remove('active'));
     event.target.classList.add('active');
-    
+
     rows.forEach(row => {
         const rowStatus = row.dataset.status;
-        
+
         if (status === 'all') {
             row.style.display = '';
         } else if (status === 'reviewed') {
@@ -356,6 +546,97 @@ function filterStudents(status) {
             row.style.display = rowStatus === 'not_submitted' ? '' : 'none';
         }
     });
+}
+
+function generateClassSummary() {
+    const content = document.getElementById('ai-summary-content');
+    const loading = document.getElementById('summary-loading');
+    const placeholder = document.getElementById('summary-placeholder');
+    const genBtn = document.getElementById('generate-btn');
+    const regenBtn = document.getElementById('regenerate-btn');
+
+    // Hide existing content, show spinner
+    content.querySelectorAll('.row, hr, h6, .text-center:not(#summary-loading)').forEach(el => el.classList.add('d-none'));
+    if (placeholder) placeholder.classList.add('d-none');
+    loading.classList.remove('d-none');
+    if (genBtn) genBtn.disabled = true;
+    if (regenBtn) regenBtn.disabled = true;
+
+    fetch('{{ url_for("generate_class_summary_api", assignment_id=assignment.assignment_id) }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        loading.classList.add('d-none');
+        if (data.success) {
+            renderSummary(data.summary);
+        } else {
+            content.innerHTML = `<div class="text-center text-danger py-3">
+                <i class="bi bi-exclamation-circle" style="font-size:1.5rem;"></i>
+                <p class="mt-2 mb-0">${data.error || 'Failed to generate summary'}</p>
+            </div>`;
+        }
+        // Update button to "Regenerate"
+        const header = document.querySelector('#ai-summary-card .card-header div:last-child');
+        header.innerHTML = `<small class="text-muted me-2" id="summary-timestamp">Generated: just now</small>
+            <button class="btn btn-sm btn-outline-primary" onclick="generateClassSummary()" id="regenerate-btn">
+                <i class="bi bi-arrow-clockwise me-1"></i>Regenerate
+            </button>`;
+    })
+    .catch(err => {
+        loading.classList.add('d-none');
+        content.innerHTML = `<div class="text-center text-danger py-3">
+            <i class="bi bi-exclamation-circle" style="font-size:1.5rem;"></i>
+            <p class="mt-2 mb-0">Network error. Please try again.</p>
+        </div>`;
+    });
+}
+
+function renderSummary(s) {
+    const content = document.getElementById('ai-summary-content');
+    let html = '<div class="row g-3">';
+
+    if (s.concepts_grasped && s.concepts_grasped.length) {
+        html += '<div class="col-md-6"><h6 class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Concepts Grasped</h6><ul class="list-unstyled">';
+        s.concepts_grasped.forEach(c => html += `<li class="mb-1"><i class="bi bi-check text-success me-1"></i>${escapeHtml(c)}</li>`);
+        html += '</ul></div>';
+    }
+    if (s.misconceptions && s.misconceptions.length) {
+        html += '<div class="col-md-6"><h6 class="text-warning"><i class="bi bi-exclamation-triangle-fill me-1"></i>Misconceptions</h6><ul class="list-unstyled">';
+        s.misconceptions.forEach(m => html += `<li class="mb-1"><i class="bi bi-exclamation-circle text-warning me-1"></i>${escapeHtml(m)}</li>`);
+        html += '</ul></div>';
+    }
+    if (s.areas_needing_clarification && s.areas_needing_clarification.length) {
+        html += '<div class="col-md-6"><h6 class="text-danger"><i class="bi bi-flag-fill me-1"></i>Areas Needing Clarification</h6><ul class="list-unstyled">';
+        s.areas_needing_clarification.forEach(a => html += `<li class="mb-1"><i class="bi bi-arrow-right text-danger me-1"></i>${escapeHtml(a)}</li>`);
+        html += '</ul></div>';
+    }
+    if (s.recommended_actions && s.recommended_actions.length) {
+        html += '<div class="col-md-6"><h6 class="text-primary"><i class="bi bi-list-check me-1"></i>Recommended Actions</h6><ol class="ps-3">';
+        s.recommended_actions.forEach(r => html += `<li class="mb-1">${escapeHtml(r)}</li>`);
+        html += '</ol></div>';
+    }
+    html += '</div>';
+
+    if (s.question_notes && s.question_notes.length) {
+        html += '<hr><h6><i class="bi bi-card-text me-1"></i>Per-Question Notes</h6><div class="row g-2">';
+        s.question_notes.forEach(qn => {
+            html += `<div class="col-md-6"><div class="d-flex align-items-start">
+                <span class="badge bg-secondary me-2">Q${qn.q_num}</span>
+                <small>${escapeHtml(qn.note)}</small>
+            </div></div>`;
+        });
+        html += '</div>';
+    }
+
+    content.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 </script>
 {% endblock %}

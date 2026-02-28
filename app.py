@@ -4942,7 +4942,13 @@ def assignment_summary(assignment_id):
     
     # Analyze class insights from AI feedback
     insights = analyze_class_insights(submissions)
-    
+
+    # Item analysis (FI/DI per question)
+    item_analysis = compute_item_analysis(assignment, submissions)
+
+    # Cached AI class summary (if previously generated)
+    ai_class_summary = assignment.get('ai_class_summary')
+
     # Build student submission list (use AI-derived marks when final_marks not yet set)
     student_submissions = []
     for student in sorted(all_students, key=lambda x: x.get('name', '')):
@@ -4979,7 +4985,44 @@ def assignment_summary(assignment_id):
                          stats=stats,
                          score_distribution=score_distribution,
                          insights=insights,
+                         item_analysis=item_analysis,
+                         ai_class_summary=ai_class_summary,
                          student_submissions=student_submissions)
+
+
+@app.route('/teacher/assignment/<assignment_id>/generate-class-summary', methods=['POST'])
+@teacher_required
+def generate_class_summary_api(assignment_id):
+    """Generate or regenerate AI class summary for an assignment."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+    submissions = list(Submission.find({
+        'assignment_id': assignment_id,
+        'status': {'$in': ['submitted', 'ai_reviewed', 'reviewed']}
+    }))
+
+    if len(submissions) < 2:
+        return jsonify({'success': False, 'error': 'Need at least 2 submissions to generate a summary'})
+
+    item_analysis = compute_item_analysis(assignment, submissions)
+    summary = generate_ai_class_summary(assignment, submissions, item_analysis, teacher)
+
+    if summary.get('error'):
+        return jsonify({'success': False, 'error': summary['error']})
+
+    # Cache in assignment document
+    Assignment.update_one(
+        {'assignment_id': assignment_id},
+        {'$set': {'ai_class_summary': summary}}
+    )
+
+    return jsonify({'success': True, 'summary': summary})
 
 
 def _build_feedback_summary_report(assignment, submissions, student_submissions_list, insights):
@@ -5581,6 +5624,274 @@ def analyze_class_insights(submissions: list) -> dict:
         'misconceptions': misconceptions[:5],
         'recommendations': recommendations
     }
+
+
+def compute_item_analysis(assignment, submissions):
+    """Compute Facility Index (FI) and Discrimination Index (DI) per question.
+
+    FI = mean marks / max marks (how easy the question is)
+    DI = (upper 27% mean - lower 27% mean) / max marks (how well it discriminates)
+    """
+    total_marks = float(assignment.get('total_marks', 100) or 100)
+
+    # Reuse the same question-marks extraction pattern from _build_feedback_summary_report
+    # First, collect all question numbers
+    question_nums = set()
+    for sub in submissions:
+        for q in (sub.get('ai_feedback') or {}).get('questions', []):
+            q_num = q.get('question_num')
+            if q_num is not None:
+                question_nums.add(q_num)
+        for q_num_key in (sub.get('teacher_feedback') or {}).get('questions', {}).keys():
+            try:
+                question_nums.add(int(q_num_key) if isinstance(q_num_key, str) and q_num_key.isdigit() else q_num_key)
+            except (ValueError, TypeError):
+                question_nums.add(q_num_key)
+    if not question_nums and assignment.get('questions'):
+        question_nums = set(range(1, len(assignment.get('questions', [])) + 1))
+
+    if not question_nums or len(submissions) < 2:
+        return {'questions': [], 'overall_reliability': None, 'insufficient_data': True}
+
+    question_labels = sorted(question_nums, key=lambda x: (not isinstance(x, int), str(x)))
+
+    # Helper to extract per-question marks (same logic as _get_question_marks in _build_feedback_summary_report)
+    def _get_q_marks(sub, q_num):
+        tf = sub.get('teacher_feedback') or {}
+        af = sub.get('ai_feedback') or {}
+        q_map = tf.get('questions', {}) or af.get('questions', [])
+        if isinstance(q_map, list):
+            for q in q_map:
+                if q.get('question_num') == q_num:
+                    m = q.get('marks_awarded') or q.get('marks')
+                    mt = q.get('marks_total') or q.get('marks_total')
+                    if m is not None and mt:
+                        try:
+                            return float(m), float(mt)
+                        except (ValueError, TypeError):
+                            pass
+                    return None, None
+        else:
+            q_data = q_map.get(str(q_num)) or q_map.get(q_num)
+            if q_data:
+                m = q_data.get('marks') or q_data.get('marks_awarded')
+                mt = q_data.get('marks_total')
+                if m is not None:
+                    try:
+                        return float(m), float(mt) if mt else 1.0
+                    except (ValueError, TypeError):
+                        pass
+        return None, None
+
+    # Collect per-question marks for each student, and total scores for ranking
+    student_totals = []  # (total_score, {q_num: (marks, max_marks)})
+    for sub in submissions:
+        display_marks, _ = _submission_display_marks(sub, total_marks)
+        q_marks = {}
+        for q_num in question_labels:
+            m, mt = _get_q_marks(sub, q_num)
+            if m is not None and mt is not None and mt > 0:
+                q_marks[q_num] = (m, mt)
+        if display_marks is not None:
+            student_totals.append((display_marks, q_marks))
+
+    if len(student_totals) < 2:
+        return {'questions': [], 'overall_reliability': None, 'insufficient_data': True}
+
+    # Sort by total score for upper/lower 27% groups
+    student_totals.sort(key=lambda x: x[0])
+    n = len(student_totals)
+    group_size = max(1, round(n * 0.27))
+    lower_group = student_totals[:group_size]
+    upper_group = student_totals[-group_size:]
+
+    results = []
+    for q_num in question_labels:
+        # Collect marks for this question across all students
+        all_marks = []
+        max_marks_val = None
+        for _, q_marks in student_totals:
+            if q_num in q_marks:
+                m, mt = q_marks[q_num]
+                all_marks.append(m)
+                if max_marks_val is None:
+                    max_marks_val = mt
+
+        if not all_marks or max_marks_val is None or max_marks_val <= 0:
+            results.append({
+                'q_num': q_num,
+                'fi': None, 'di': None,
+                'fi_label': 'N/A', 'di_label': 'N/A',
+                'fi_color': 'secondary', 'di_color': 'secondary',
+                'interpretation': 'Insufficient data',
+                'mean_marks': None, 'max_marks': max_marks_val,
+                'attempt_count': 0
+            })
+            continue
+
+        mean_marks = sum(all_marks) / len(all_marks)
+        fi = mean_marks / max_marks_val
+
+        # Upper/lower group means for this question
+        upper_marks = [q_marks.get(q_num, (None, None))[0] for _, q_marks in upper_group if q_num in q_marks]
+        lower_marks = [q_marks.get(q_num, (None, None))[0] for _, q_marks in lower_group if q_num in q_marks]
+
+        if upper_marks and lower_marks:
+            upper_mean = sum(upper_marks) / len(upper_marks)
+            lower_mean = sum(lower_marks) / len(lower_marks)
+            di = (upper_mean - lower_mean) / max_marks_val
+        else:
+            di = None
+
+        # FI labels and colors
+        if fi >= 0.7:
+            fi_label, fi_color = 'Easy', 'success'
+        elif fi >= 0.3:
+            fi_label, fi_color = 'Moderate', 'warning'
+        else:
+            fi_label, fi_color = 'Hard', 'danger'
+
+        # DI labels and colors
+        if di is None:
+            di_label, di_color = 'N/A', 'secondary'
+        elif di >= 0.3:
+            di_label, di_color = 'Good', 'success'
+        elif di >= 0.1:
+            di_label, di_color = 'Moderate', 'warning'
+        else:
+            di_label, di_color = 'Poor', 'danger'
+
+        # C3R interpretation matrix
+        if di is not None:
+            if fi < 0.3 and di < 0.1:
+                interpretation = 'Hard item with poor discrimination — review item wording or provide intervention'
+            elif fi < 0.3 and di >= 0.1:
+                interpretation = 'Challenging item that discriminates well — students who studied performed better'
+            elif fi >= 0.7 and di < 0.1:
+                interpretation = 'Easy item with low discrimination — consider placing at beginning of test'
+            elif fi >= 0.7 and di >= 0.3:
+                interpretation = 'Easy but still discriminating — good foundational item'
+            elif 0.3 <= fi < 0.7 and di >= 0.3:
+                interpretation = 'Good item — moderate difficulty with strong discrimination'
+            elif 0.3 <= fi < 0.7 and 0.1 <= di < 0.3:
+                interpretation = 'Acceptable item — moderate difficulty and discrimination'
+            else:
+                interpretation = 'Item needs review — moderate difficulty but poor discrimination'
+        else:
+            interpretation = 'Cannot compute discrimination — insufficient data'
+
+        results.append({
+            'q_num': q_num,
+            'fi': round(fi, 2),
+            'di': round(di, 2) if di is not None else None,
+            'fi_label': fi_label, 'di_label': di_label,
+            'fi_color': fi_color, 'di_color': di_color,
+            'interpretation': interpretation,
+            'mean_marks': round(mean_marks, 1),
+            'max_marks': max_marks_val,
+            'attempt_count': len(all_marks)
+        })
+
+    # Sort by FI ascending (hardest questions first)
+    results.sort(key=lambda x: (x['fi'] is None, x['fi'] if x['fi'] is not None else 999))
+
+    return {
+        'questions': results,
+        'overall_reliability': None,
+        'insufficient_data': False,
+        'student_count': n,
+        'group_size': group_size
+    }
+
+
+def generate_ai_class_summary(assignment, submissions, item_analysis, teacher):
+    """AI-generated summary of class performance, misconceptions, and recommendations."""
+    from utils.ai_marking import get_teacher_ai_service
+
+    client, model, provider = get_teacher_ai_service(teacher)
+    if not client:
+        return {'error': 'No AI provider available. Configure an API key in Settings.'}
+
+    # Build context from item analysis and submission data
+    insights = analyze_class_insights(submissions)
+
+    question_summary = []
+    for q in item_analysis.get('questions', []):
+        if q.get('fi') is not None:
+            question_summary.append(
+                f"Q{q['q_num']}: FI={q['fi']} ({q['fi_label']}), DI={q['di']} ({q['di_label']}), "
+                f"Mean={q['mean_marks']}/{q['max_marks']}, Attempts={q['attempt_count']}"
+            )
+
+    strengths_text = ', '.join(f"Q{s['question']} ({s['percentage']}% correct)" for s in insights.get('strengths', []))
+    improvements_text = ', '.join(f"Q{i['question']} ({i['percentage']}% incorrect)" for i in insights.get('improvements', []))
+    misconceptions_text = '\n'.join(f"- Q{m['question']}: {m['sample_feedback']} ({m['affected_count']} students)" for m in insights.get('misconceptions', []))
+
+    prompt = f"""You are an educational assessment analyst. Analyze this class assignment data and provide actionable insights for the teacher.
+
+Assignment: {assignment.get('title', 'Untitled')}
+Subject: {assignment.get('subject', 'Unknown')}
+Total Marks: {assignment.get('total_marks', 100)}
+Total Students: {item_analysis.get('student_count', len(submissions))}
+
+Item Analysis (per question):
+{chr(10).join(question_summary) if question_summary else 'No per-question data available.'}
+
+Areas of Strength: {strengths_text or 'None identified'}
+Areas Needing Improvement: {improvements_text or 'None identified'}
+Misconceptions Found:
+{misconceptions_text or 'None identified'}
+
+Respond in this exact JSON format:
+{{
+    "concepts_grasped": ["list 2-4 key concepts students understood well, based on high FI questions"],
+    "misconceptions": ["list 2-4 specific misconceptions with evidence from the data"],
+    "areas_needing_clarification": ["list 2-3 topics/concepts that need reteaching"],
+    "recommended_actions": ["list 3-5 concrete next steps for the teacher, e.g. reteach topic X, create practice on Y"],
+    "question_notes": [{{"q_num": 1, "note": "short observation"}}]
+}}
+
+Be specific and reference question numbers. Keep each item concise (1-2 sentences max). Focus on actionable insights, not generic advice."""
+
+    try:
+        if provider == 'anthropic':
+            response = client.messages.create(
+                model=model,
+                max_tokens=1500,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            content = response.content[0].text
+        elif provider == 'openai':
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=1500,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            content = response.choices[0].message.content
+        elif provider == 'google':
+            response = client.generate_content(prompt)
+            content = response.text
+        else:
+            return {'error': f'Unsupported provider: {provider}'}
+
+        # Parse JSON from response — strip markdown code fences if present
+        content = content.strip()
+        if content.startswith('```'):
+            content = content.split('\n', 1)[1] if '\n' in content else content[3:]
+            if content.endswith('```'):
+                content = content[:-3]
+            content = content.strip()
+
+        result = json.loads(content)
+        result['generated_at'] = datetime.utcnow().isoformat()
+        return result
+
+    except json.JSONDecodeError:
+        return {'error': 'Failed to parse AI response'}
+    except Exception as e:
+        logger.error(f"Error generating AI class summary: {e}", exc_info=True)
+        return {'error': str(e)}
+
 
 @app.route('/teacher/assignment/<assignment_id>/report')
 @teacher_required
