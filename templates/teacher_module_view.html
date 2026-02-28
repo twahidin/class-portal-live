@@ -57,6 +57,9 @@
             </div>
         </div>
 
+        <!-- Sidebar resize handle -->
+        <div class="sidebar-resize-handle" id="sidebarResizeHandle" title="Drag to resize"></div>
+
         <!-- Right sidebar -->
         <div class="tree-sidebar" id="treeSidebar">
             <div class="sidebar-empty" id="sidebarEmpty">
@@ -132,7 +135,9 @@
 .tree-canvas-wrapper { flex: 1; overflow: hidden; position: relative; background: #f8fafc; }
 .tree-viewport { width: 100%; height: 100%; overflow: auto; }
 .tree-content { transform-origin: 0 0; padding: 40px 40px 80px; min-width: max-content; }
-.tree-sidebar { width: 320px; border-left: 1px solid #e2e8f0; background: #fff; overflow-y: auto; padding: 1rem; flex-shrink: 0; display: flex; flex-direction: column; }
+.tree-sidebar { width: 320px; min-width: 260px; max-width: 600px; border-left: 1px solid #e2e8f0; background: #fff; overflow-y: auto; padding: 1rem; flex-shrink: 0; display: flex; flex-direction: column; }
+.sidebar-resize-handle { width: 5px; cursor: col-resize; background: transparent; flex-shrink: 0; position: relative; z-index: 20; }
+.sidebar-resize-handle:hover, .sidebar-resize-handle.active { background: #667eea; }
 .sidebar-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; }
 
 /* CSS Tree */
@@ -347,6 +352,9 @@
         editTitle.value = node.title || '';
         editSubtitle.value = node.subtitle || '';
         editDescription.value = node.description || '';
+        // Auto-size description
+        editDescription.style.height = 'auto';
+        editDescription.style.height = Math.max(72, editDescription.scrollHeight) + 'px';
         // Color swatches
         colorSwatches.querySelectorAll('.swatch').forEach(s => {
             s.classList.toggle('active', s.dataset.color === (node.color || '#667eea'));
@@ -513,6 +521,40 @@
     document.getElementById('expandAllBtn').addEventListener('click', function() {
         collapsedNodes.clear();
         redraw();
+    });
+
+    // ---- Sidebar resize ----
+    const resizeHandle = document.getElementById('sidebarResizeHandle');
+    const sidebar = document.getElementById('treeSidebar');
+    let isResizing = false;
+    resizeHandle.addEventListener('mousedown', function(e) {
+        isResizing = true;
+        resizeHandle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!isResizing) return;
+        const containerRight = sidebar.parentElement.getBoundingClientRect().right;
+        const newWidth = containerRight - e.clientX;
+        if (newWidth >= 260 && newWidth <= 600) {
+            sidebar.style.width = newWidth + 'px';
+        }
+    });
+    document.addEventListener('mouseup', function() {
+        if (isResizing) {
+            isResizing = false;
+            resizeHandle.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+
+    // ---- Auto-grow description textarea ----
+    editDescription.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.max(72, this.scrollHeight) + 'px';
     });
 
     // ---- Publish ----
