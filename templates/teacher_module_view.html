@@ -22,6 +22,12 @@
         </div>
         <div class="d-flex align-items-center gap-2">
             <span class="badge bg-secondary" id="nodeCountBadge">0 nodes</span>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="collapseAllBtn" title="Collapse all">
+                <i class="bi bi-arrows-collapse me-1"></i>Collapse
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="expandAllBtn" title="Expand all">
+                <i class="bi bi-arrows-expand me-1"></i>Expand
+            </button>
             <div class="btn-group btn-group-sm">
                 <button type="button" class="btn btn-outline-secondary" id="zoomInBtn" title="Zoom in"><i class="bi bi-zoom-in"></i></button>
                 <button type="button" class="btn btn-outline-secondary" id="zoomOutBtn" title="Zoom out"><i class="bi bi-zoom-out"></i></button>
@@ -124,7 +130,7 @@
 .tree-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 1rem; border-bottom: 1px solid #e2e8f0; background: #fff; flex-shrink: 0; }
 .tree-main { display: flex; flex: 1; overflow: hidden; }
 .tree-canvas-wrapper { flex: 1; overflow: hidden; position: relative; background: #f8fafc; }
-.tree-viewport { width: 100%; height: 100%; overflow: hidden; cursor: grab; }
+.tree-viewport { width: 100%; height: 100%; overflow: auto; cursor: grab; }
 .tree-viewport:active { cursor: grabbing; }
 .tree-content { transform-origin: 0 0; padding: 40px 40px 80px; min-width: max-content; }
 .tree-sidebar { width: 320px; border-left: 1px solid #e2e8f0; background: #fff; overflow-y: auto; padding: 1rem; flex-shrink: 0; display: flex; flex-direction: column; }
@@ -162,6 +168,19 @@
 .node-action-btn.add-btn:hover { background: #dcfce7; color: #16a34a; border-color: #86efac; }
 .node-action-btn.del-btn:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
 
+/* Collapse toggle */
+.collapse-toggle {
+    width: 20px; height: 20px; border-radius: 4px; border: 1px solid #cbd5e1;
+    background: #fff; display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 0.65rem; color: #64748b; transition: all 0.15s;
+    margin-right: 4px; flex-shrink: 0; vertical-align: middle;
+}
+.collapse-toggle:hover { background: #f1f5f9; color: #334155; border-color: #94a3b8; }
+.collapse-toggle .bi { transition: transform 0.2s; }
+.collapse-toggle.collapsed .bi { transform: rotate(-90deg); }
+.css-tree li > ul.collapsed-children { display: none; }
+.child-count { font-size: 0.65rem; color: #94a3b8; margin-left: 2px; }
+
 /* Color swatches */
 .color-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
 .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: all 0.15s; }
@@ -193,6 +212,7 @@
 
     let selectedNodeId = null;
     let saveTimeout = null;
+    const collapsedNodes = new Set();
 
     // ---- Tree rendering ----
     function escapeHtml(s) {
@@ -207,19 +227,37 @@
         return c;
     }
 
+    function countDescendants(node) {
+        let c = 0;
+        (node.children || []).forEach(ch => { c += 1 + countDescendants(ch); });
+        return c;
+    }
+
     function renderTree(node, isRoot) {
         const children = node.children || [];
         const hasDesc = !!(node.description || '').trim();
         const color = node.color || '#667eea';
         const subtitle = node.subtitle || '';
+        const isCollapsed = collapsedNodes.has(node.module_id);
 
         let html = '<li>';
         html += '<div class="tree-node-card' + (selectedNodeId === node.module_id ? ' active' : '') + '" data-id="' + node.module_id + '">';
+
+        // Collapse toggle for nodes with children
+        if (children.length > 0) {
+            html += '<button type="button" class="collapse-toggle' + (isCollapsed ? ' collapsed' : '') + '" data-toggle="' + node.module_id + '" title="' + (isCollapsed ? 'Expand' : 'Collapse') + '">';
+            html += '<i class="bi bi-chevron-down"></i>';
+            html += '</button>';
+        }
+
         html += '<span class="node-color-dot" style="background:' + escapeHtml(color) + ';"></span>';
         html += '<div>';
         html += '<div class="node-title">' + escapeHtml(node.title) + '</div>';
         if (subtitle) html += '<div class="node-subtitle">' + escapeHtml(subtitle) + '</div>';
         html += '</div>';
+        if (isCollapsed && children.length > 0) {
+            html += '<span class="child-count" title="' + countDescendants(node) + ' hidden nodes">' + children.length + '</span>';
+        }
         if (hasDesc) html += '<i class="bi bi-text-left node-desc-icon" title="Has description"></i>';
         html += '<div class="node-actions">';
         html += '<button type="button" class="node-action-btn add-btn" data-add="' + node.module_id + '" title="Add child"><i class="bi bi-plus"></i></button>';
@@ -228,7 +266,7 @@
         html += '</div>';
 
         if (children.length > 0) {
-            html += '<ul>';
+            html += '<ul' + (isCollapsed ? ' class="collapsed-children"' : '') + '>';
             children.forEach(ch => html += renderTree(ch, false));
             html += '</ul>';
         }
@@ -265,7 +303,7 @@
     function bindNodeEvents() {
         treeContent.querySelectorAll('.tree-node-card').forEach(card => {
             card.addEventListener('click', function(e) {
-                if (e.target.closest('.node-action-btn')) return;
+                if (e.target.closest('.node-action-btn') || e.target.closest('.collapse-toggle')) return;
                 selectNode(this.dataset.id);
             });
         });
@@ -279,6 +317,18 @@
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 promptDeleteNode(this.dataset.del);
+            });
+        });
+        treeContent.querySelectorAll('.collapse-toggle').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const nodeId = this.dataset.toggle;
+                if (collapsedNodes.has(nodeId)) {
+                    collapsedNodes.delete(nodeId);
+                } else {
+                    collapsedNodes.add(nodeId);
+                }
+                redraw();
             });
         });
     }
@@ -469,6 +519,22 @@
     document.getElementById('zoomInBtn').addEventListener('click', function() { scale = Math.min(scale * 1.2, 2.5); updateTransform(); });
     document.getElementById('zoomOutBtn').addEventListener('click', function() { scale = Math.max(scale / 1.2, 0.3); updateTransform(); });
     document.getElementById('fitBtn').addEventListener('click', function() { scale = 1; panX = 0; panY = 0; updateTransform(); });
+
+    // ---- Collapse / Expand all ----
+    function collectNodeIds(node) {
+        const ids = [];
+        if ((node.children || []).length > 0) ids.push(node.module_id);
+        (node.children || []).forEach(ch => ids.push(...collectNodeIds(ch)));
+        return ids;
+    }
+    document.getElementById('collapseAllBtn').addEventListener('click', function() {
+        collectNodeIds(moduleTree).forEach(id => collapsedNodes.add(id));
+        redraw();
+    });
+    document.getElementById('expandAllBtn').addEventListener('click', function() {
+        collapsedNodes.clear();
+        redraw();
+    });
 
     // ---- Publish ----
     const publishBtn = document.getElementById('publishBtn');
