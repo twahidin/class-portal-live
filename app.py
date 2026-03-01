@@ -32,6 +32,7 @@ import tempfile
 import queue
 import threading
 import PyPDF2
+from urllib.parse import quote
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -301,6 +302,23 @@ def admin_logout():
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+def safe_content_disposition(disposition, filename):
+    """Build a Content-Disposition header value safe for non-ASCII filenames.
+
+    Uses RFC 5987 filename*=UTF-8'' encoding when the filename contains
+    characters outside the latin-1 range, which gunicorn requires for headers.
+    """
+    # Try ascii-safe path first
+    try:
+        filename.encode('latin-1')
+        return f'{disposition}; filename="{filename}"'
+    except UnicodeEncodeError:
+        # Fallback: ASCII filename + UTF-8 filename* per RFC 5987
+        ascii_name = filename.encode('ascii', 'replace').decode('ascii')
+        utf8_name = quote(filename, safe='')
+        return f'{disposition}; filename="{ascii_name}"; filename*=UTF-8\'\'{utf8_name}'
+
 
 def get_student_teacher_ids(student_id):
     """Get all teacher IDs for a student, including those from teaching groups"""
@@ -2401,33 +2419,33 @@ def download_student_assignment_file(assignment_id, file_type):
                         file_content,
                         mimetype='application/pdf',
                         headers={
-                            'Content-Disposition': f'inline; filename="{file_name}"'
+                            'Content-Disposition': safe_content_disposition('inline', file_name)
                         }
                     )
             return 'File not found', 404
         except Exception as e:
             logger.error(f"Error fetching file from Google Drive: {e}")
             return 'File not found', 404
-    
+
     # Otherwise, get from GridFS (uploaded file)
     if file_id_field not in assignment or not assignment[file_id_field]:
         logger.error(f"File ID field '{file_id_field}' not found in assignment {assignment_id}")
         return 'File not found', 404
-    
+
     fs = GridFS(db.db)
     try:
         file_id = assignment[file_id_field]
         # Ensure file_id is ObjectId
         if isinstance(file_id, str):
             file_id = ObjectId(file_id)
-        
+
         logger.info(f"Attempting to get file {file_id} from GridFS")
         file_data = fs.get(file_id)
         return Response(
             file_data.read(),
             mimetype='application/pdf',
             headers={
-                'Content-Disposition': f'inline; filename="{assignment.get(file_name_field, "document.pdf")}"'
+                'Content-Disposition': safe_content_disposition('inline', assignment.get(file_name_field, 'document.pdf'))
             }
         )
     except Exception as e:
@@ -2589,12 +2607,12 @@ def download_student_feedback_pdf(submission_id):
             pdf_content = generate_review_pdf(submission, assignment, student, teacher, marked_copy_files=marked_copy_files)
         
         filename = f"feedback_{assignment['title']}_{student['student_id']}.pdf"
-        
+
         return Response(
             pdf_content,
             mimetype='application/pdf',
             headers={
-                'Content-Disposition': f'attachment; filename="{filename}"'
+                'Content-Disposition': safe_content_disposition('attachment', filename)
             }
         )
     except Exception as e:
@@ -2766,7 +2784,7 @@ def serve_module_resource_file(resource_id):
         return 'Invalid resource', 500
     from flask import Response
     return Response(pdf_bytes, mimetype='application/pdf', headers={
-        'Content-Disposition': 'inline; filename="%s.pdf"' % (res.get('title', 'resource') or 'resource',),
+        'Content-Disposition': safe_content_disposition('inline', (res.get('title', 'resource') or 'resource') + '.pdf'),
     })
 
 
@@ -5230,7 +5248,7 @@ def download_heatmap_pdf(assignment_id):
         return Response(
             pdf_content,
             mimetype='application/pdf',
-            headers={'Content-Disposition': f'attachment; filename="feedback_summary_heatmap_{safe_title}.pdf"'}
+            headers={'Content-Disposition': safe_content_disposition('attachment', f'feedback_summary_heatmap_{safe_title}.pdf')}
         )
     except Exception as e:
         logger.error(f"Error generating heatmap PDF: {e}")
@@ -5943,12 +5961,12 @@ def download_assignment_report(assignment_id):
         pdf_content = generate_class_report_pdf(assignment, submissions, students_map, teacher)
         
         filename = f"report_{assignment['title'].replace(' ', '_')}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
-        
+
         return Response(
             pdf_content,
             mimetype='application/pdf',
             headers={
-                'Content-Disposition': f'attachment; filename="{filename}"'
+                'Content-Disposition': safe_content_disposition('attachment', filename)
             }
         )
     except Exception as e:
@@ -6691,7 +6709,7 @@ def download_assignment_file(assignment_id, file_type):
                         file_content,
                         mimetype='application/pdf',
                         headers={
-                            'Content-Disposition': f'inline; filename="{file_name}"'
+                            'Content-Disposition': safe_content_disposition('inline', file_name)
                         }
                     )
             return 'File not found', 404
@@ -6721,7 +6739,7 @@ def download_assignment_file(assignment_id, file_type):
             file_data.read(),
             mimetype=mimetype,
             headers={
-                'Content-Disposition': f'{disposition}; filename="{file_name}"'
+                'Content-Disposition': safe_content_disposition(disposition, file_name)
             }
         )
     except Exception as e:
@@ -8027,7 +8045,7 @@ def download_rubric_feedback_pdf(submission_id):
             pdf_content,
             mimetype='application/pdf',
             headers={
-                'Content-Disposition': f'attachment; filename="{filename}"'
+                'Content-Disposition': safe_content_disposition('attachment', filename)
             }
         )
     except Exception as e:
@@ -8061,7 +8079,7 @@ def download_feedback_pdf(submission_id):
             pdf_content,
             mimetype='application/pdf',
             headers={
-                'Content-Disposition': f'attachment; filename="{filename}"'
+                'Content-Disposition': safe_content_disposition('attachment', filename)
             }
         )
     except Exception as e:
@@ -8097,7 +8115,7 @@ def teacher_download_feedback_excel(submission_id):
         return Response(
             file_data.read(),
             mimetype=content_type,
-            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+            headers={'Content-Disposition': safe_content_disposition('attachment', filename)}
         )
     except Exception as e:
         logger.error(f"Error serving feedback Excel: {e}")
@@ -8131,7 +8149,7 @@ def teacher_download_feedback_pdf(submission_id):
         return Response(
             file_data.read(),
             mimetype='application/pdf',
-            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+            headers={'Content-Disposition': safe_content_disposition('attachment', filename)}
         )
     except Exception as e:
         logger.error(f"Error serving feedback PDF: {e}")
@@ -8232,7 +8250,7 @@ def download_submission_feedback_excel(submission_id):
         return Response(
             file_data.read(),
             mimetype=content_type,
-            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+            headers={'Content-Disposition': safe_content_disposition('attachment', filename)}
         )
     except Exception as e:
         logger.error(f"Error serving feedback Excel: {e}")
@@ -11788,7 +11806,7 @@ def generate_teaching_group_student_list(group_id):
             pdf_bytes,
             mimetype='application/pdf',
             headers={
-                'Content-Disposition': f'attachment; filename=teaching_group_{safe_name}_students.pdf'
+                'Content-Disposition': safe_content_disposition('attachment', f'teaching_group_{safe_name}_students.pdf')
             }
         )
         
