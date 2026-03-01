@@ -5892,20 +5892,27 @@ Be specific and reference question numbers. Keep each item concise (1-2 sentence
         else:
             return {'error': f'Unsupported provider: {provider}'}
 
-        # Parse JSON from response — strip markdown code fences if present
+        # Parse JSON from response — handle markdown fences, preamble text, etc.
         content = content.strip()
-        if content.startswith('```'):
-            content = content.split('\n', 1)[1] if '\n' in content else content[3:]
-            if content.endswith('```'):
-                content = content[:-3]
-            content = content.strip()
+        # Strip ```json ... ``` or ``` ... ``` fences
+        import re
+        fence_match = re.search(r'```(?:json)?\s*\n?(.*?)```', content, re.DOTALL)
+        if fence_match:
+            content = fence_match.group(1).strip()
+        else:
+            # Try to find JSON object in the response
+            brace_start = content.find('{')
+            brace_end = content.rfind('}')
+            if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+                content = content[brace_start:brace_end + 1]
 
         result = json.loads(content)
         result['generated_at'] = datetime.utcnow().isoformat()
         return result
 
-    except json.JSONDecodeError:
-        return {'error': 'Failed to parse AI response'}
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Failed to parse AI class summary JSON: {e}, content preview: {content[:300] if 'content' in dir() else 'N/A'}")
+        return {'error': 'Failed to parse AI response. Try regenerating.'}
     except Exception as e:
         logger.error(f"Error generating AI class summary: {e}", exc_info=True)
         return {'error': str(e)}
