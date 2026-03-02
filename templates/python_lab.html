@@ -50,9 +50,9 @@
                 <ul class="dropdown-menu" id="templates-menu"></ul>
             </div>
             <button type="button" class="btn btn-outline-primary" id="add-code-cell"><i class="bi bi-plus-lg me-1"></i>Add code cell</button>
-            <button type="button" class="btn btn-outline-secondary" id="save-cells" title="Save as .py file"><i class="bi bi-download me-1"></i>Save</button>
-            <button type="button" class="btn btn-outline-secondary" id="open-cells" title="Open .py file"><i class="bi bi-upload me-1"></i>Open</button>
-            <input type="file" id="file-input" accept=".py,.txt" style="display:none">
+            <button type="button" class="btn btn-outline-secondary" id="save-cells" title="Save as .ipynb notebook"><i class="bi bi-download me-1"></i>Save</button>
+            <button type="button" class="btn btn-outline-secondary" id="open-cells" title="Open .ipynb or .py file"><i class="bi bi-upload me-1"></i>Open</button>
+            <input type="file" id="file-input" accept=".ipynb,.py,.txt" style="display:none">
         </div>
     </div>
 
@@ -267,7 +267,7 @@
         }
     });
 
-    // --- Save / Open .py files ---
+    // --- Save / Open .ipynb files ---
 
     function downloadCells() {
         // Sync textarea contents before saving
@@ -275,15 +275,44 @@
             var c = cells.find(function(x) { return x.id === ta.getAttribute('data-id'); });
             if (c) c.content = ta.value;
         });
-        var parts = cells.map(function(c, i) {
-            return '# %% Cell ' + (i + 1) + '\n' + c.content;
+        // Build Jupyter notebook JSON
+        var nbCells = cells.map(function(c) {
+            var source = c.content.split('\n').map(function(line, i, arr) {
+                return i < arr.length - 1 ? line + '\n' : line;
+            });
+            var cell = {
+                cell_type: 'code',
+                execution_count: null,
+                metadata: {},
+                source: source,
+                outputs: []
+            };
+            if (c.output && c.output.trim()) {
+                cell.outputs = [{
+                    output_type: 'stream',
+                    name: 'stdout',
+                    text: c.output.split('\n').map(function(line, i, arr) {
+                        return i < arr.length - 1 ? line + '\n' : line;
+                    })
+                }];
+            }
+            return cell;
         });
-        var text = parts.join('\n\n');
-        var blob = new Blob([text], { type: 'text/plain' });
+        var notebook = {
+            nbformat: 4,
+            nbformat_minor: 5,
+            metadata: {
+                kernelspec: { display_name: 'Python 3', language: 'python', name: 'python3' },
+                language_info: { name: 'python', version: '3.12.0' }
+            },
+            cells: nbCells
+        };
+        var text = JSON.stringify(notebook, null, 1);
+        var blob = new Blob([text], { type: 'application/x-ipynb+json' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
         a.href = url;
-        a.download = 'python_lab.py';
+        a.download = 'python_lab.ipynb';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -294,14 +323,35 @@
         var reader = new FileReader();
         reader.onload = function(e) {
             var text = e.target.result;
-            var segments = text.split(/^# %% Cell.*$/m);
             var newCells = [];
-            segments.forEach(function(seg) {
-                var trimmed = seg.trim();
-                if (trimmed) {
-                    newCells.push({ id: String(++cellId), type: 'code', content: trimmed, output: '', running: false });
+
+            if (file.name.endsWith('.ipynb')) {
+                try {
+                    var nb = JSON.parse(text);
+                    (nb.cells || []).forEach(function(cell) {
+                        if (cell.cell_type === 'code') {
+                            var src = Array.isArray(cell.source) ? cell.source.join('') : (cell.source || '');
+                            var out = '';
+                            (cell.outputs || []).forEach(function(o) {
+                                if (o.text) out += (Array.isArray(o.text) ? o.text.join('') : o.text);
+                            });
+                            newCells.push({ id: String(++cellId), type: 'code', content: src, output: out, running: false });
+                        }
+                    });
+                } catch (err) {
+                    alert('Failed to parse notebook file.');
+                    return;
                 }
-            });
+            } else {
+                var segments = text.split(/^# %% Cell.*$/m);
+                segments.forEach(function(seg) {
+                    var trimmed = seg.trim();
+                    if (trimmed) {
+                        newCells.push({ id: String(++cellId), type: 'code', content: trimmed, output: '', running: false });
+                    }
+                });
+            }
+
             if (newCells.length === 0) {
                 newCells.push({ id: String(++cellId), type: 'code', content: text.trim() || '# Empty file\n', output: '', running: false });
             }
