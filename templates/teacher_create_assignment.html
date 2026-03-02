@@ -97,6 +97,13 @@
                                     </label>
                                     <small class="text-muted d-block ms-4">For Excel-based tasks; students submit a spreadsheet and receive a PDF report and commented Excel with feedback</small>
                                 </div>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="radio" name="marking_type" id="marking_python" value="python">
+                                    <label class="form-check-label" for="marking_python">
+                                        <i class="bi bi-code-slash me-1"></i>Python assignment
+                                    </label>
+                                    <small class="text-muted d-block ms-4">For Python coding tasks; students complete in Python Lab</small>
+                                </div>
                             </div>
                         </div>
                         
@@ -296,8 +303,40 @@
                                 </div>
                             </div>
                         </div>
-                        
-                        <div class="row">
+
+                        <!-- Python assignment: question template + answer key template (.py/.ipynb) -->
+                        <div id="upload-docs-python" class="row" style="display: none;">
+                            <div class="col-md-6 mb-3">
+                                <div class="upload-zone" id="python_template-zone">
+                                    <input type="file" class="form-control d-none" id="python_question_template" name="python_question_template"
+                                           accept=".py,.ipynb" onchange="handleFileSelect(this, 'python_template')">
+                                    <label for="python_question_template" class="upload-label">
+                                        <div class="upload-icon" style="color: #3776ab;">
+                                            <i class="bi bi-code-slash"></i>
+                                        </div>
+                                        <h6>Python Question Template *</h6>
+                                        <p class="text-muted small mb-0">Template with questions for students</p>
+                                        <span class="file-name" id="python_template-filename">Click to upload .py or .ipynb</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <div class="upload-zone" id="python_answer-zone">
+                                    <input type="file" class="form-control d-none" id="python_answer_key_template" name="python_answer_key_template"
+                                           accept=".py,.ipynb" onchange="handleFileSelect(this, 'python_answer')">
+                                    <label for="python_answer_key_template" class="upload-label">
+                                        <div class="upload-icon answer">
+                                            <i class="bi bi-code-slash"></i>
+                                        </div>
+                                        <h6>Python Answer Key *</h6>
+                                        <p class="text-muted small mb-0">Template with correct answers</p>
+                                        <span class="file-name" id="python_answer-filename">Click to upload .py or .ipynb</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row" id="reference-rubrics-row">
                             <!-- Reference Materials -->
                             <div class="col-md-6 mb-3">
                                 <div class="upload-zone" id="reference-zone">
@@ -703,19 +742,23 @@
     });
     
     function validateForm() {
-        const questionPaper = document.getElementById('question_paper').files.length > 0 || 
+        const questionPaper = document.getElementById('question_paper').files.length > 0 ||
                              document.getElementById('question_paper_drive_id').value;
-        const answerKey = document.getElementById('answer_key').files.length > 0 || 
+        const answerKey = document.getElementById('answer_key').files.length > 0 ||
                          document.getElementById('answer_key_drive_id').value;
-        const rubrics = document.getElementById('rubrics').files.length > 0 || 
+        const rubrics = document.getElementById('rubrics').files.length > 0 ||
                        document.getElementById('rubrics_drive_id').value;
         const spreadsheetTemplate = document.getElementById('spreadsheet_student_template').files.length > 0;
         const spreadsheetAnswer = document.getElementById('spreadsheet_answer_key').files.length > 0;
         const spreadsheetQuestion = document.getElementById('spreadsheet_question_paper').files.length > 0;
+        const pythonTemplate = document.getElementById('python_question_template').files.length > 0;
+        const pythonAnswer = document.getElementById('python_answer_key_template').files.length > 0;
         const markingType = document.querySelector('input[name="marking_type"]:checked').value;
         const submitBtn = document.getElementById('submit-btn');
-        
-        if (markingType === 'spreadsheet') {
+
+        if (markingType === 'python') {
+            submitBtn.disabled = !(pythonTemplate && pythonAnswer);
+        } else if (markingType === 'spreadsheet') {
             submitBtn.disabled = !(spreadsheetTemplate && spreadsheetAnswer && spreadsheetQuestion);
         } else if (markingType === 'rubric') {
             submitBtn.disabled = !(questionPaper && rubrics);
@@ -726,18 +769,26 @@
     
     // Form validation
     document.getElementById('create-assignment-form').addEventListener('submit', function(e) {
-        const questionPaper = document.getElementById('question_paper').files.length > 0 || 
+        const questionPaper = document.getElementById('question_paper').files.length > 0 ||
                              document.getElementById('question_paper_drive_id').value;
-        const answerKey = document.getElementById('answer_key').files.length > 0 || 
+        const answerKey = document.getElementById('answer_key').files.length > 0 ||
                          document.getElementById('answer_key_drive_id').value;
-        const rubrics = document.getElementById('rubrics').files.length > 0 || 
+        const rubrics = document.getElementById('rubrics').files.length > 0 ||
                        document.getElementById('rubrics_drive_id').value;
         const spreadsheetTemplate = document.getElementById('spreadsheet_student_template').files.length > 0;
         const spreadsheetAnswer = document.getElementById('spreadsheet_answer_key').files.length > 0;
         const spreadsheetQuestion = document.getElementById('spreadsheet_question_paper').files.length > 0;
+        const pythonTemplate = document.getElementById('python_question_template').files.length > 0;
+        const pythonAnswer = document.getElementById('python_answer_key_template').files.length > 0;
         const markingType = document.querySelector('input[name="marking_type"]:checked').value;
-        
-        if (markingType === 'spreadsheet') {
+
+        if (markingType === 'python') {
+            if (!pythonTemplate || !pythonAnswer) {
+                e.preventDefault();
+                alert('For Python assignments please upload both a question template and an answer key (.py or .ipynb).');
+                return false;
+            }
+        } else if (markingType === 'spreadsheet') {
             if (!spreadsheetTemplate || !spreadsheetAnswer || !spreadsheetQuestion) {
                 e.preventDefault();
                 alert('For spreadsheet assignments please upload: Excel student template, Excel answer key, and Question paper (PDF).');
@@ -763,17 +814,23 @@
         radio.addEventListener('change', function() {
             const isRubric = this.value === 'rubric';
             const isSpreadsheet = this.value === 'spreadsheet';
-            updateMarkingTypeUI(isRubric, isSpreadsheet);
+            const isPython = this.value === 'python';
+            updateMarkingTypeUI(isRubric, isSpreadsheet, isPython);
             validateForm();
         });
     });
-    
-    function updateMarkingTypeUI(isRubric, isSpreadsheet) {
+
+    function updateMarkingTypeUI(isRubric, isSpreadsheet, isPython) {
         isSpreadsheet = !!isSpreadsheet;
+        isPython = !!isPython;
         const uploadStandard = document.getElementById('upload-docs-standard-rubric');
         const uploadSpreadsheet = document.getElementById('upload-docs-spreadsheet');
-        if (uploadStandard) uploadStandard.style.display = isSpreadsheet ? 'none' : 'flex';
+        const uploadPython = document.getElementById('upload-docs-python');
+        if (uploadStandard) uploadStandard.style.display = (isSpreadsheet || isPython) ? 'none' : 'flex';
         if (uploadSpreadsheet) uploadSpreadsheet.style.display = isSpreadsheet ? 'flex' : 'none';
+        if (uploadPython) uploadPython.style.display = isPython ? 'flex' : 'none';
+        const referenceRow = document.getElementById('reference-rubrics-row');
+        if (referenceRow) referenceRow.style.display = isPython ? 'none' : 'flex';
         ['spreadsheet_template', 'spreadsheet_answer', 'spreadsheet_question'].forEach(function(t) {
             const row = document.getElementById('summary-' + t + '-row');
             if (row) row.style.display = isSpreadsheet ? 'flex' : 'none';
@@ -784,11 +841,11 @@
         if (answerSummaryRow) answerSummaryRow.style.display = isSpreadsheet ? 'none' : 'flex';
         const awardMarksContainer = document.getElementById('award-marks-container');
         if (awardMarksContainer) {
-            awardMarksContainer.style.display = (isRubric || isSpreadsheet) ? 'none' : 'block';
+            awardMarksContainer.style.display = (isRubric || isSpreadsheet || isPython) ? 'none' : 'block';
             if (isRubric) document.getElementById('award_marks_yes').checked = true;
         }
         const releaseAnswerKeyContainer = document.getElementById('release-answer-key-container');
-        if (releaseAnswerKeyContainer) releaseAnswerKeyContainer.style.display = isSpreadsheet ? 'none' : 'block';
+        if (releaseAnswerKeyContainer) releaseAnswerKeyContainer.style.display = (isSpreadsheet || isPython) ? 'none' : 'block';
         // Update answer key section
         const answerKeyTitle = document.getElementById('answer-key-title');
         const answerKeyDesc = document.getElementById('answer-key-desc');
@@ -804,7 +861,9 @@
         
         // Update marking type summary
         const summaryMarkingType = document.getElementById('summary-marking-type');
-        if (isSpreadsheet && summaryMarkingType) {
+        if (isPython && summaryMarkingType) {
+            summaryMarkingType.innerHTML = '<span class="text-info">Python</span>';
+        } else if (isSpreadsheet && summaryMarkingType) {
             summaryMarkingType.innerHTML = '<span class="text-success">Spreadsheet</span>';
         } else if (isRubric) {
             // Rubric-based marking: answer key optional, rubrics required
@@ -849,10 +908,11 @@
     function updateSummaryAwardMarks() {
         const isRubric = document.getElementById('marking_rubric') && document.getElementById('marking_rubric').checked;
         const isSpreadsheet = document.getElementById('marking_spreadsheet') && document.getElementById('marking_spreadsheet').checked;
+        const isPython = document.getElementById('marking_python') && document.getElementById('marking_python').checked;
         const row = document.getElementById('summary-award-marks-row');
         const el = document.getElementById('summary-award-marks');
         if (!row || !el) return;
-        if (isRubric || isSpreadsheet) {
+        if (isRubric || isSpreadsheet || isPython) {
             row.style.display = 'none';
             return;
         }
@@ -867,7 +927,8 @@
     // Initial validation and UI (marking type + award marks)
     const initialRubric = document.getElementById('marking_rubric') && document.getElementById('marking_rubric').checked;
     const initialSpreadsheet = document.getElementById('marking_spreadsheet') && document.getElementById('marking_spreadsheet').checked;
-    updateMarkingTypeUI(!!initialRubric, !!initialSpreadsheet);
+    const initialPython = document.getElementById('marking_python') && document.getElementById('marking_python').checked;
+    updateMarkingTypeUI(!!initialRubric, !!initialSpreadsheet, !!initialPython);
     updateSummaryAwardMarks();
     validateForm();
     

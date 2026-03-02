@@ -799,6 +799,16 @@ def view_assignment(assignment_id):
             'google_drive_file_id': {'$exists': True}
         })
 
+    # Python assignments use the Python Lab view
+    if assignment.get('marking_type') == 'python':
+        return render_template('python_assignment_view.html',
+                             student=student,
+                             assignment=assignment,
+                             existing_submission=existing_submission,
+                             rejected_submission=rejected_submission,
+                             teacher=teacher,
+                             execute_timeout=PYTHON_INTERACTIVE_TIMEOUT)
+
     return render_template('assignment_view.html',
                          student=student,
                          assignment=assignment,
@@ -1816,6 +1826,12 @@ def student_submit_files():
             elif file.filename.lower().endswith(('.xlsx', '.xls')):
                 content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                 page_type = 'excel'
+            elif file.filename.lower().endswith('.ipynb'):
+                content_type = 'application/x-ipynb+json'
+                page_type = 'python'
+            elif file.filename.lower().endswith('.py'):
+                content_type = 'text/x-python'
+                page_type = 'python'
             else:
                 content_type = 'image/jpeg'
                 page_type = 'image'
@@ -1842,7 +1858,7 @@ def student_submit_files():
             'student_id': session['student_id'],
             'teacher_id': assignment['teacher_id'],
             'file_ids': file_ids,
-            'file_type': 'pdf' if file_type == 'pdf' else ('excel' if file_type == 'excel' else 'image'),
+            'file_type': 'pdf' if file_type == 'pdf' else ('excel' if file_type == 'excel' else ('python' if file_type == 'python' else 'image')),
             'page_count': len(files),
             'status': 'submitted',
             'submitted_at': datetime.utcnow(),
@@ -1862,8 +1878,11 @@ def student_submit_files():
         # Generate AI feedback (or spreadsheet evaluation)
         try:
             marking_type = assignment.get('marking_type', 'standard')
-            
-            if marking_type == 'spreadsheet':
+
+            if marking_type == 'python':
+                # Python assignments: teacher reviews manually (no AI marking for now)
+                marking_type = None  # signal we already handled — skip standard/rubric update below
+            elif marking_type == 'spreadsheet':
                 # Evaluate Excel submission against answer key; generate PDF report and commented Excel
                 answer_key_bytes = None
                 if assignment.get('spreadsheet_answer_key_id'):
@@ -2441,16 +2460,86 @@ def download_student_assignment_file(assignment_id, file_type):
 
         logger.info(f"Attempting to get file {file_id} from GridFS")
         file_data = fs.get(file_id)
+        file_name = assignment.get(file_name_field, 'document.pdf')
+        # Determine mime type from filename
+        if file_name and file_name.lower().endswith('.ipynb'):
+            dl_mimetype = 'application/x-ipynb+json'
+            dl_disposition = 'attachment'
+        elif file_name and file_name.lower().endswith('.py'):
+            dl_mimetype = 'text/x-python'
+            dl_disposition = 'attachment'
+        elif file_name and file_name.lower().endswith(('.xlsx', '.xls')):
+            dl_mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            dl_disposition = 'attachment'
+        else:
+            dl_mimetype = 'application/pdf'
+            dl_disposition = 'inline'
         return Response(
             file_data.read(),
-            mimetype='application/pdf',
+            mimetype=dl_mimetype,
             headers={
-                'Content-Disposition': safe_content_disposition('inline', assignment.get(file_name_field, 'document.pdf'))
+                'Content-Disposition': safe_content_disposition(dl_disposition, file_name)
             }
         )
     except Exception as e:
         logger.error(f"Error downloading file {assignment.get(file_id_field)}: {e}")
         return 'File not found', 404
+
+
+@app.route('/student/assignment/<assignment_id>/python-template')
+@login_required
+def student_python_template_cells(assignment_id):
+    """Return Python question template cells as JSON for the Python assignment view."""
+    import json as _json
+    assignment = Assignment.find_one({'assignment_id': assignment_id})
+    if not assignment or assignment.get('marking_type') != 'python':
+        return jsonify({'error': 'Not found'}), 404
+
+    student = Student.find_one({'student_id': session['student_id']})
+    teacher_ids = get_student_teacher_ids(session['student_id'])
+    if assignment['teacher_id'] not in teacher_ids or not can_student_access_assignment(student, assignment):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    template_id = assignment.get('python_question_template_id')
+    if not template_id:
+        return jsonify({'cells': [{'content': '# No template available\n'}]})
+
+    from gridfs import GridFS
+    from bson import ObjectId
+    fs = GridFS(db.db)
+    try:
+        if isinstance(template_id, str):
+            template_id = ObjectId(template_id)
+        file_data = fs.get(template_id)
+        raw = file_data.read()
+        file_name = assignment.get('python_question_template_name', '')
+
+        cells = []
+        if file_name.lower().endswith('.ipynb'):
+            nb = _json.loads(raw.decode('utf-8'))
+            for cell in nb.get('cells', []):
+                if cell.get('cell_type') == 'code':
+                    src = cell.get('source', '')
+                    if isinstance(src, list):
+                        src = ''.join(src)
+                    cells.append({'content': src})
+        else:
+            # .py file — split on # %% Cell markers or treat as single cell
+            text = raw.decode('utf-8')
+            import re
+            segments = re.split(r'^# %% Cell.*$', text, flags=re.MULTILINE)
+            for seg in segments:
+                trimmed = seg.strip()
+                if trimmed:
+                    cells.append({'content': trimmed})
+
+        if not cells:
+            cells = [{'content': raw.decode('utf-8', errors='replace').strip() or '# Empty template\n'}]
+
+        return jsonify({'cells': cells})
+    except Exception as e:
+        logger.error(f"Error reading Python template: {e}")
+        return jsonify({'error': 'Failed to load template'}), 500
 
 
 @app.route('/student/assignment/<assignment_id>/question-paper-page/<int:page_num>')
@@ -2969,8 +3058,18 @@ def handle_python_run(data):
     teacher_id = session.get('teacher_id')
     if student_id:
         if not _student_has_python_lab_access(student_id):
-            emit('python_error', {'cell_id': data.get('cell_id', ''), 'error': 'Access denied'})
-            return
+            # Also allow access for students with a valid Python assignment
+            assignment_id = data.get('assignment_id')
+            has_python_assignment = False
+            if assignment_id:
+                _pa = Assignment.find_one({'assignment_id': assignment_id, 'marking_type': 'python'})
+                if _pa:
+                    _st = Student.find_one({'student_id': student_id})
+                    if _st and _pa['teacher_id'] in get_student_teacher_ids(student_id) and can_student_access_assignment(_st, _pa):
+                        has_python_assignment = True
+            if not has_python_assignment:
+                emit('python_error', {'cell_id': data.get('cell_id', ''), 'error': 'Access denied'})
+                return
     elif teacher_id:
         if not _teacher_has_python_lab_access(teacher_id):
             emit('python_error', {'cell_id': data.get('cell_id', ''), 'error': 'Access denied'})
@@ -6086,6 +6185,42 @@ def create_assignment():
                                          teacher_modules=teacher_modules,
                                          is_assessment=is_assessment,
                                          error='Rubrics PDF is required for rubric-based marking')
+            elif marking_type == 'python':
+                # For Python: question template and answer key template (.py/.ipynb) are required
+                python_question_template = request.files.get('python_question_template')
+                python_answer_key_template = request.files.get('python_answer_key_template')
+                if not python_question_template or not python_question_template.filename:
+                    return render_template('teacher_create_assignment.html',
+                                         teacher=teacher,
+                                         classes=classes,
+                                         teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
+                                         error='Python question template (.py or .ipynb) is required')
+                if not python_question_template.filename.lower().endswith(('.py', '.ipynb')):
+                    return render_template('teacher_create_assignment.html',
+                                         teacher=teacher,
+                                         classes=classes,
+                                         teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
+                                         error='Python question template must be a .py or .ipynb file')
+                if not python_answer_key_template or not python_answer_key_template.filename:
+                    return render_template('teacher_create_assignment.html',
+                                         teacher=teacher,
+                                         classes=classes,
+                                         teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
+                                         error='Python answer key template (.py or .ipynb) is required')
+                if not python_answer_key_template.filename.lower().endswith(('.py', '.ipynb')):
+                    return render_template('teacher_create_assignment.html',
+                                         teacher=teacher,
+                                         classes=classes,
+                                         teaching_groups=teaching_groups,
+                                         teacher_modules=teacher_modules,
+                                         is_assessment=is_assessment,
+                                         error='Python answer key must be a .py or .ipynb file')
             elif marking_type == 'spreadsheet':
                 # For spreadsheet: question paper PDF, Excel template, and Excel answer key are required
                 spreadsheet_question_paper = request.files.get('spreadsheet_question_paper')
@@ -6138,8 +6273,28 @@ def create_assignment():
             total_marks = int(data.get('total_marks', 100))
             assignment_title = data.get('title', 'Untitled')
             
-            # Get file contents from Drive or uploads (or from spreadsheet-specific fields)
-            if marking_type == 'spreadsheet':
+            # Get file contents from Drive or uploads (or from spreadsheet/python-specific fields)
+            if marking_type == 'python':
+                python_question_template = request.files.get('python_question_template')
+                python_answer_key_template = request.files.get('python_answer_key_template')
+                python_question_template_content = python_question_template.read()
+                python_question_template_name = python_question_template.filename
+                python_answer_key_template_content = python_answer_key_template.read()
+                python_answer_key_template_name = python_answer_key_template.filename
+                # No PDF-related content for Python assignments
+                question_paper_content, question_paper_name = None, None
+                answer_key_content, answer_key_name = None, None
+                reference_materials_content, reference_materials_name = None, None
+                rubrics_content, rubrics_name = None, None
+                template_content = None
+                spreadsheet_answer_key_content = None
+                spreadsheet_student_template_name = None
+                spreadsheet_answer_key_name = None
+                question_paper_text = ""
+                answer_key_text = ""
+                reference_materials_text = ""
+                rubrics_text = ""
+            elif marking_type == 'spreadsheet':
                 spreadsheet_question_paper = request.files.get('spreadsheet_question_paper')
                 spreadsheet_student_template = request.files.get('spreadsheet_student_template')
                 spreadsheet_answer_key = request.files.get('spreadsheet_answer_key')
@@ -6179,8 +6334,8 @@ def create_assignment():
                 spreadsheet_student_template_name = None
                 spreadsheet_answer_key_name = None
             
-            # Extract text from PDFs for cost-effective AI processing (spreadsheet branch already set these above)
-            if marking_type != 'spreadsheet':
+            # Extract text from PDFs for cost-effective AI processing (spreadsheet/python branches already set these above)
+            if marking_type not in ('spreadsheet', 'python'):
                 question_paper_text = extract_text_from_pdf(question_paper_content) if question_paper_content else ""
                 answer_key_text = extract_text_from_pdf(answer_key_content) if answer_key_content else ""
                 reference_materials_text = extract_text_from_pdf(reference_materials_content) if reference_materials_content else ""
@@ -6234,6 +6389,29 @@ def create_assignment():
                     file_type='rubrics'
                 )
             
+            # Save Python assignment files when marking type is python
+            python_question_template_id = None
+            python_answer_key_template_id = None
+            if marking_type == 'python' and python_question_template_content and python_answer_key_template_content:
+                py_q_ext = python_question_template_name.rsplit('.', 1)[-1].lower()
+                py_q_ct = 'application/x-ipynb+json' if py_q_ext == 'ipynb' else 'text/x-python'
+                python_question_template_id = fs.put(
+                    python_question_template_content,
+                    filename=python_question_template_name or f"{assignment_id}_question.py",
+                    content_type=py_q_ct,
+                    assignment_id=assignment_id,
+                    file_type='python_question_template'
+                )
+                py_a_ext = python_answer_key_template_name.rsplit('.', 1)[-1].lower()
+                py_a_ct = 'application/x-ipynb+json' if py_a_ext == 'ipynb' else 'text/x-python'
+                python_answer_key_template_id = fs.put(
+                    python_answer_key_template_content,
+                    filename=python_answer_key_template_name or f"{assignment_id}_answer_key.py",
+                    content_type=py_a_ct,
+                    assignment_id=assignment_id,
+                    file_type='python_answer_key_template'
+                )
+
             # Save spreadsheet Excel files when marking type is spreadsheet
             spreadsheet_student_template_id = None
             spreadsheet_answer_key_id = None
@@ -6349,6 +6527,11 @@ def create_assignment():
                 'spreadsheet_student_template_name': spreadsheet_student_template_name if marking_type == 'spreadsheet' else None,
                 'spreadsheet_answer_key_id': spreadsheet_answer_key_id if marking_type == 'spreadsheet' else None,
                 'spreadsheet_answer_key_name': spreadsheet_answer_key_name if marking_type == 'spreadsheet' else None,
+                # Python assignment files (when marking_type == 'python')
+                'python_question_template_id': python_question_template_id if marking_type == 'python' else None,
+                'python_question_template_name': python_question_template_name if marking_type == 'python' else None,
+                'python_answer_key_template_id': python_answer_key_template_id if marking_type == 'python' else None,
+                'python_answer_key_template_name': python_answer_key_template_name if marking_type == 'python' else None,
                 # Extracted text for cost-effective AI processing
                 'question_paper_text': question_paper_text,
                 'answer_key_text': answer_key_text,
@@ -6606,6 +6789,50 @@ def edit_assignment(assignment_id):
                     update_data['spreadsheet_answer_key_id'] = spreadsheet_answer_key_id
                     update_data['spreadsheet_answer_key_name'] = spreadsheet_answer_key_file.filename
 
+            # Handle Python assignment files (only for python assignments)
+            if assignment.get('marking_type') == 'python':
+                python_question_template = request.files.get('python_question_template')
+                if python_question_template and python_question_template.filename:
+                    if python_question_template.filename.lower().endswith(('.py', '.ipynb')):
+                        if assignment.get('python_question_template_id'):
+                            try:
+                                fs.delete(assignment['python_question_template_id'])
+                            except:
+                                pass
+                        content = python_question_template.read()
+                        ext = python_question_template.filename.rsplit('.', 1)[-1].lower()
+                        ct = 'application/x-ipynb+json' if ext == 'ipynb' else 'text/x-python'
+                        fid = fs.put(
+                            content,
+                            filename=python_question_template.filename,
+                            content_type=ct,
+                            assignment_id=assignment_id,
+                            file_type='python_question_template'
+                        )
+                        update_data['python_question_template_id'] = fid
+                        update_data['python_question_template_name'] = python_question_template.filename
+
+                python_answer_key_template = request.files.get('python_answer_key_template')
+                if python_answer_key_template and python_answer_key_template.filename:
+                    if python_answer_key_template.filename.lower().endswith(('.py', '.ipynb')):
+                        if assignment.get('python_answer_key_template_id'):
+                            try:
+                                fs.delete(assignment['python_answer_key_template_id'])
+                            except:
+                                pass
+                        content = python_answer_key_template.read()
+                        ext = python_answer_key_template.filename.rsplit('.', 1)[-1].lower()
+                        ct = 'application/x-ipynb+json' if ext == 'ipynb' else 'text/x-python'
+                        fid = fs.put(
+                            content,
+                            filename=python_answer_key_template.filename,
+                            content_type=ct,
+                            assignment_id=assignment_id,
+                            file_type='python_answer_key_template'
+                        )
+                        update_data['python_answer_key_template_id'] = fid
+                        update_data['python_answer_key_template_name'] = python_answer_key_template.filename
+
             # Handle reference materials upload
             reference_materials = request.files.get('reference_materials')
             if reference_materials and reference_materials.filename:
@@ -6739,6 +6966,12 @@ def download_assignment_file(assignment_id, file_type):
         if file_name and (file_name.endswith('.xlsx') or file_name.endswith('.xls')):
             mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             disposition = 'attachment'
+        elif file_name and file_name.endswith('.ipynb'):
+            mimetype = 'application/x-ipynb+json'
+            disposition = 'attachment'
+        elif file_name and file_name.endswith('.py'):
+            mimetype = 'text/x-python'
+            disposition = 'attachment'
         else:
             mimetype = 'application/pdf'
             disposition = 'inline'
@@ -6797,7 +7030,15 @@ def delete_assignment(assignment_id):
                 fs.delete(assignment['answer_key_id'])
             except Exception as e:
                 logger.warning(f"Error deleting answer key: {e}")
-        
+
+        # Delete Python assignment files from GridFS
+        for field in ['python_question_template_id', 'python_answer_key_template_id']:
+            if assignment.get(field):
+                try:
+                    fs.delete(assignment[field])
+                except Exception:
+                    pass
+
         # Delete the assignment
         db.db.assignments.delete_one({'assignment_id': assignment_id})
         

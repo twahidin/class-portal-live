@@ -76,7 +76,7 @@
                             </div>
                         </div>
                         
-                        {% if assignment.marking_type != 'rubric' %}
+                        {% if assignment.marking_type not in ('rubric', 'python') %}
                         <div class="mb-3" id="award-marks-container">
                             <label class="form-label">Grading display</label>
                             <div class="form-check">
@@ -120,7 +120,7 @@
                             </div>
                         </div>
                         
-                        {% if assignment.marking_type != 'spreadsheet' %}
+                        {% if assignment.marking_type not in ('spreadsheet', 'python') %}
                         <div class="mb-3" id="release-answer-key-container">
                             <label class="form-label">Answer key visibility</label>
                             <div class="form-check">
@@ -246,6 +246,65 @@
                                     </label>
                                 </div>
                                 <small class="text-muted d-block mt-1">Instructions / questions</small>
+                            </div>
+                        </div>
+                        {% elif assignment.marking_type == 'python' %}
+                        <!-- Python assignment: question template + answer key template -->
+                        <div class="row">
+                            <!-- Python Question Template -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Python Question Template *</label>
+                                {% if assignment.python_question_template_id %}
+                                <div class="current-file mb-2">
+                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='python_question_template') }}"
+                                       class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-code-slash me-1"></i>
+                                        {{ assignment.python_question_template_name or 'question_template.py' }}
+                                    </a>
+                                </div>
+                                {% endif %}
+                                <div class="upload-zone {% if assignment.python_question_template_id %}has-file{% endif %}" id="python_template-zone">
+                                    <input type="file" class="form-control d-none" id="python_question_template" name="python_question_template"
+                                           accept=".py,.ipynb" onchange="handleFileSelect(this, 'python_template')">
+                                    <label for="python_question_template" class="upload-label">
+                                        <div class="upload-icon" style="color: #3776ab;">
+                                            <i class="bi bi-code-slash"></i>
+                                        </div>
+                                        <p class="mb-0 small">{% if assignment.python_question_template_id %}Replace file{% else %}Upload .py/.ipynb{% endif %}</p>
+                                        <span class="file-name" id="python_template-filename">
+                                            {% if assignment.python_question_template_id %}Click to replace{% else %}Click to upload{% endif %}
+                                        </span>
+                                    </label>
+                                </div>
+                                <small class="text-muted d-block mt-1">Template with questions for students</small>
+                            </div>
+
+                            <!-- Python Answer Key -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Python Answer Key *</label>
+                                {% if assignment.python_answer_key_template_id %}
+                                <div class="current-file mb-2">
+                                    <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='python_answer_key_template') }}"
+                                       class="btn btn-outline-success btn-sm">
+                                        <i class="bi bi-code-slash me-1"></i>
+                                        {{ assignment.python_answer_key_template_name or 'answer_key.py' }}
+                                    </a>
+                                </div>
+                                {% endif %}
+                                <div class="upload-zone {% if assignment.python_answer_key_template_id %}has-file{% endif %}" id="python_answer-zone">
+                                    <input type="file" class="form-control d-none" id="python_answer_key_template" name="python_answer_key_template"
+                                           accept=".py,.ipynb" onchange="handleFileSelect(this, 'python_answer')">
+                                    <label for="python_answer_key_template" class="upload-label">
+                                        <div class="upload-icon answer">
+                                            <i class="bi bi-code-slash"></i>
+                                        </div>
+                                        <p class="mb-0 small">{% if assignment.python_answer_key_template_id %}Replace file{% else %}Upload .py/.ipynb{% endif %}</p>
+                                        <span class="file-name" id="python_answer-filename">
+                                            {% if assignment.python_answer_key_template_id %}Click to replace{% else %}Click to upload{% endif %}
+                                        </span>
+                                    </label>
+                                </div>
+                                <small class="text-muted d-block mt-1">Template with correct answers</small>
                             </div>
                         </div>
                         {% else %}
