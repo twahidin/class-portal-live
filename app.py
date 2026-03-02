@@ -6284,6 +6284,7 @@ def create_assignment():
                 # No PDF-related content for Python assignments
                 question_paper_content, question_paper_name = None, None
                 answer_key_content, answer_key_name = None, None
+                reference_materials = None
                 reference_materials_content, reference_materials_name = None, None
                 rubrics_content, rubrics_name = None, None
                 template_content = None
