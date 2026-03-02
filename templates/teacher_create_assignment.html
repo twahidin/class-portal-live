@@ -693,18 +693,18 @@
         const zone = document.getElementById(type + '-zone');
         const filename = document.getElementById(type + '-filename');
         const summary = document.getElementById('summary-' + type);
-        
+
         if (input.files && input.files[0]) {
             const file = input.files[0];
             zone.classList.add('has-file');
             filename.textContent = file.name;
-            summary.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Uploaded</span>';
+            if (summary) summary.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Uploaded</span>';
         } else {
             zone.classList.remove('has-file');
-            filename.textContent = 'Click to upload PDF';
-            summary.innerHTML = '<span class="text-danger">Not uploaded</span>';
+            filename.textContent = 'Click to upload';
+            if (summary) summary.innerHTML = '<span class="text-danger">Not uploaded</span>';
         }
-        
+
         validateForm();
     }
     
@@ -714,27 +714,28 @@
     });
     
     // Drag and drop
-    ['question-zone', 'answer-zone', 'reference-zone', 'rubrics-zone'].forEach(zoneId => {
+    ['question-zone', 'answer-zone', 'reference-zone', 'rubrics-zone', 'python_template-zone', 'python_answer-zone'].forEach(zoneId => {
         const zone = document.getElementById(zoneId);
+        if (!zone) return;
         const input = zone.querySelector('input[type="file"]');
-        
+
         ['dragenter', 'dragover'].forEach(eventName => {
             zone.addEventListener(eventName, (e) => {
                 e.preventDefault();
                 zone.classList.add('dragover');
             });
         });
-        
+
         ['dragleave', 'drop'].forEach(eventName => {
             zone.addEventListener(eventName, (e) => {
                 e.preventDefault();
                 zone.classList.remove('dragover');
             });
         });
-        
+
         zone.addEventListener('drop', (e) => {
             const files = e.dataTransfer.files;
-            if (files.length && files[0].type === 'application/pdf') {
+            if (files.length) {
                 input.files = files;
                 input.dispatchEvent(new Event('change'));
             }
