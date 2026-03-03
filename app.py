@@ -7306,6 +7306,14 @@ def review_submission(submission_id):
                              student=student,
                              ai_feedback=ai_feedback,
                              page_count=page_count)
+    elif marking_type == 'python':
+        return render_template('teacher_review_python.html',
+                             teacher=teacher,
+                             submission=submission,
+                             assignment=assignment,
+                             student=student,
+                             ai_feedback=ai_feedback,
+                             page_count=page_count)
     else:
         return render_template('teacher_review.html',
                              teacher=teacher,
@@ -7392,6 +7400,194 @@ def view_submission_file(submission_id, file_index):
     except Exception as e:
         logger.error(f"Error serving file: {e}")
         return 'File not found', 404
+
+@app.route('/teacher/submission/<submission_id>/python-cells')
+@teacher_required
+def teacher_python_cells(submission_id):
+    """Return parsed Python notebook cells for teacher review."""
+    import json as _json
+    from gridfs import GridFS
+    from bson import ObjectId
+
+    submission = Submission.find_one({'submission_id': submission_id})
+    if not submission:
+        return jsonify({'error': 'Not found'}), 404
+
+    assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+    if not assignment or assignment['teacher_id'] != session['teacher_id']:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    file_ids = submission.get('file_ids', [])
+    if not file_ids:
+        return jsonify({'cells': [], 'answer_cells': []})
+
+    fs = GridFS(db.db)
+
+    def parse_notebook_cells(file_id):
+        """Parse .ipynb or .py file from GridFS into cell dicts."""
+        try:
+            fobj = fs.get(ObjectId(file_id) if isinstance(file_id, str) else file_id)
+            raw = fobj.read()
+            filename = getattr(fobj, 'filename', '') or ''
+            cells = []
+            if filename.lower().endswith('.ipynb'):
+                nb = _json.loads(raw.decode('utf-8'))
+                for idx, cell in enumerate(nb.get('cells', [])):
+                    if cell.get('cell_type') == 'code':
+                        src = cell.get('source', '')
+                        if isinstance(src, list):
+                            src = ''.join(src)
+                        # Extract outputs
+                        outputs_text = ''
+                        for out in cell.get('outputs', []):
+                            if out.get('output_type') == 'stream':
+                                text = out.get('text', '')
+                                if isinstance(text, list):
+                                    text = ''.join(text)
+                                outputs_text += text
+                            elif out.get('output_type') in ('execute_result', 'display_data'):
+                                data = out.get('data', {})
+                                text = data.get('text/plain', '')
+                                if isinstance(text, list):
+                                    text = ''.join(text)
+                                outputs_text += text
+                            elif out.get('output_type') == 'error':
+                                outputs_text += '\n'.join(out.get('traceback', []))
+                        cells.append({
+                            'index': len(cells) + 1,
+                            'source': src,
+                            'outputs': outputs_text
+                        })
+            else:
+                # .py file — split on # %% Cell markers
+                import re
+                text = raw.decode('utf-8')
+                segments = re.split(r'^# %% Cell.*$', text, flags=re.MULTILINE)
+                for seg in segments:
+                    trimmed = seg.strip()
+                    if trimmed:
+                        cells.append({
+                            'index': len(cells) + 1,
+                            'source': trimmed,
+                            'outputs': ''
+                        })
+            if not cells:
+                cells = [{'index': 1, 'source': raw.decode('utf-8', errors='replace').strip() or '# Empty file', 'outputs': ''}]
+            return cells
+        except Exception as e:
+            logger.error(f"Error parsing notebook cells: {e}")
+            return []
+
+    # Parse student submission cells
+    cells = parse_notebook_cells(file_ids[0])
+
+    # Parse answer key cells if available
+    answer_cells = []
+    answer_key_id = assignment.get('python_answer_key_template_id')
+    if answer_key_id:
+        try:
+            fobj = fs.get(ObjectId(answer_key_id) if isinstance(answer_key_id, str) else answer_key_id)
+            raw = fobj.read()
+            filename = getattr(fobj, 'filename', '') or ''
+            if filename.lower().endswith('.ipynb'):
+                nb = _json.loads(raw.decode('utf-8'))
+                for cell in nb.get('cells', []):
+                    if cell.get('cell_type') == 'code':
+                        src = cell.get('source', '')
+                        if isinstance(src, list):
+                            src = ''.join(src)
+                        answer_cells.append({
+                            'index': len(answer_cells) + 1,
+                            'source': src
+                        })
+            else:
+                import re
+                text = raw.decode('utf-8')
+                segments = re.split(r'^# %% Cell.*$', text, flags=re.MULTILINE)
+                for seg in segments:
+                    trimmed = seg.strip()
+                    if trimmed:
+                        answer_cells.append({
+                            'index': len(answer_cells) + 1,
+                            'source': trimmed
+                        })
+        except Exception as e:
+            logger.error(f"Error parsing answer key cells: {e}")
+
+    return jsonify({'cells': cells, 'answer_cells': answer_cells})
+
+
+@app.route('/submissions/<submission_id>/python-cells')
+@login_required
+def student_python_cells(submission_id):
+    """Return parsed Python notebook cells for student submission view."""
+    import json as _json
+    from gridfs import GridFS
+    from bson import ObjectId
+
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id']
+    })
+    if not submission:
+        return jsonify({'error': 'Not found'}), 404
+
+    file_ids = submission.get('file_ids', [])
+    if not file_ids:
+        return jsonify({'cells': []})
+
+    fs = GridFS(db.db)
+    try:
+        fobj = fs.get(ObjectId(file_ids[0]) if isinstance(file_ids[0], str) else file_ids[0])
+        raw = fobj.read()
+        filename = getattr(fobj, 'filename', '') or ''
+        cells = []
+        if filename.lower().endswith('.ipynb'):
+            nb = _json.loads(raw.decode('utf-8'))
+            for cell in nb.get('cells', []):
+                if cell.get('cell_type') == 'code':
+                    src = cell.get('source', '')
+                    if isinstance(src, list):
+                        src = ''.join(src)
+                    outputs_text = ''
+                    for out in cell.get('outputs', []):
+                        if out.get('output_type') == 'stream':
+                            text = out.get('text', '')
+                            if isinstance(text, list):
+                                text = ''.join(text)
+                            outputs_text += text
+                        elif out.get('output_type') in ('execute_result', 'display_data'):
+                            data = out.get('data', {})
+                            text = data.get('text/plain', '')
+                            if isinstance(text, list):
+                                text = ''.join(text)
+                            outputs_text += text
+                        elif out.get('output_type') == 'error':
+                            outputs_text += '\n'.join(out.get('traceback', []))
+                    cells.append({
+                        'index': len(cells) + 1,
+                        'source': src,
+                        'outputs': outputs_text
+                    })
+        else:
+            import re
+            text = raw.decode('utf-8')
+            segments = re.split(r'^# %% Cell.*$', text, flags=re.MULTILINE)
+            for seg in segments:
+                trimmed = seg.strip()
+                if trimmed:
+                    cells.append({
+                        'index': len(cells) + 1,
+                        'source': trimmed,
+                        'outputs': ''
+                    })
+        if not cells:
+            cells = [{'index': 1, 'source': raw.decode('utf-8', errors='replace').strip() or '# Empty file', 'outputs': ''}]
+        return jsonify({'cells': cells})
+    except Exception as e:
+        logger.error(f"Error reading Python submission cells: {e}")
+        return jsonify({'error': 'Failed to load cells'}), 500
+
 
 @app.route('/teacher/review/<submission_id>/save', methods=['POST'])
 @limiter.limit("200 per hour")  # generous limit for marking; auto-save fires often
@@ -8675,11 +8871,13 @@ def teacher_settings():
     classes = list(db.db.classes.find())
     all_students = list(Student.find({}).sort('name', 1))
     my_students = list(Student.find({'teachers': session['teacher_id']}).sort('name', 1))
-    return render_template('teacher_settings.html', 
-                         teacher=teacher, 
+    return render_template('teacher_settings.html',
+                         teacher=teacher,
                          classes=classes,
                          all_students=all_students,
-                         my_students=my_students)
+                         my_students=my_students,
+                         success=request.args.get('success'),
+                         error=request.args.get('error'))
 
 @app.route('/teacher/change_password', methods=['POST'])
 @teacher_required
@@ -8721,28 +8919,132 @@ def teacher_change_password():
 @app.route('/api/drive/service-account-info')
 @teacher_required
 def get_drive_service_account_info():
-    """Get Google Drive service account information for folder sharing"""
+    """Get Google Drive service account and OAuth information"""
     try:
-        from utils.google_drive import get_service_account_email, is_drive_configured
+        from utils.google_drive import get_service_account_email, is_drive_configured, is_oauth_configured
         import os
-        
+
         configured = is_drive_configured()
         email = get_service_account_email() if configured else None
-        
-        # Debug info
-        has_file_env = bool(os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE'))
-        has_json_env = bool(os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON'))
-        
-        debug_info = f"FILE_ENV: {has_file_env}, JSON_ENV: {has_json_env}"
-        
+
+        # OAuth status
+        oauth_configured = is_oauth_configured()
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        google_connected = bool(teacher and teacher.get('google_oauth_refresh_token'))
+        google_email = teacher.get('google_oauth_email', '') if teacher else ''
+
         return jsonify({
             'configured': configured,
             'email': email,
-            'message': 'Share your Google Drive folder with this email address and grant Editor access.' if email else f'Google Drive service account not configured. Debug: {debug_info}'
+            'oauth_configured': oauth_configured,
+            'google_connected': google_connected,
+            'google_email': google_email,
+            'message': 'Share your Google Drive folder with this email address and grant Editor access.' if email else 'Google Drive service account not configured.'
         })
     except Exception as e:
         logger.error(f"Error getting service account info: {e}")
         return jsonify({'error': str(e), 'configured': False}), 500
+
+@app.route('/auth/google/connect')
+@teacher_required
+def google_oauth_connect():
+    """Redirect teacher to Google OAuth consent screen"""
+    try:
+        from utils.google_drive import get_oauth_flow
+
+        base_url = os.getenv('WEB_URL', request.host_url.rstrip('/'))
+        redirect_uri = base_url.rstrip('/') + '/auth/google/callback'
+        flow = get_oauth_flow(redirect_uri)
+        if not flow:
+            return redirect(url_for('teacher_settings', error='Google OAuth not configured by administrator.'))
+
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            prompt='consent'
+        )
+
+        session['google_oauth_state'] = state
+        return redirect(authorization_url)
+    except Exception as e:
+        logger.error(f"Error initiating Google OAuth: {e}")
+        return redirect(url_for('teacher_settings', error='Failed to start Google authentication.'))
+
+@app.route('/auth/google/callback')
+@teacher_required
+def google_oauth_callback():
+    """Handle Google OAuth callback after consent"""
+    try:
+        from utils.google_drive import get_oauth_flow
+
+        # Verify state for CSRF protection
+        stored_state = session.pop('google_oauth_state', None)
+        if not stored_state or stored_state != request.args.get('state'):
+            return redirect(url_for('teacher_settings', error='OAuth state mismatch. Please try again.'))
+
+        if request.args.get('error'):
+            return redirect(url_for('teacher_settings', error=f'Google authorization denied: {request.args.get("error")}'))
+
+        base_url = os.getenv('WEB_URL', request.host_url.rstrip('/'))
+        redirect_uri = base_url.rstrip('/') + '/auth/google/callback'
+        flow = get_oauth_flow(redirect_uri)
+        if not flow:
+            return redirect(url_for('teacher_settings', error='Google OAuth not configured.'))
+
+        # Behind reverse proxy (Railway), request.url may be http:// even though the real URL is https://
+        authorization_response = request.url
+        if request.headers.get('X-Forwarded-Proto') == 'https' and authorization_response.startswith('http://'):
+            authorization_response = 'https://' + authorization_response[7:]
+        flow.fetch_token(authorization_response=authorization_response)
+        credentials = flow.credentials
+
+        if not credentials.refresh_token:
+            return redirect(url_for('teacher_settings', error='No refresh token received. Please try connecting again.'))
+
+        # Get user email from userinfo
+        from googleapiclient.discovery import build as google_build
+        oauth2_service = google_build('oauth2', 'v2', credentials=credentials)
+        user_info = oauth2_service.userinfo().get().execute()
+        google_email = user_info.get('email', '')
+
+        # Encrypt and store refresh token
+        encrypted_token = encrypt_api_key(credentials.refresh_token)
+        if not encrypted_token:
+            return redirect(url_for('teacher_settings', error='Failed to securely store credentials.'))
+
+        Teacher.update_one(
+            {'teacher_id': session['teacher_id']},
+            {'$set': {
+                'google_oauth_refresh_token': encrypted_token,
+                'google_oauth_email': google_email,
+                'updated_at': datetime.utcnow()
+            }}
+        )
+
+        logger.info(f"Teacher {session['teacher_id']} connected Google account: {google_email}")
+        return redirect(url_for('teacher_settings', success=f'Google account connected: {google_email}'))
+    except Exception as e:
+        logger.error(f"Error in Google OAuth callback: {e}")
+        return redirect(url_for('teacher_settings', error='Failed to complete Google authentication.'))
+
+@app.route('/auth/google/disconnect', methods=['POST'])
+@teacher_required
+def google_oauth_disconnect():
+    """Disconnect teacher's Google OAuth account"""
+    try:
+        Teacher.update_one(
+            {'teacher_id': session['teacher_id']},
+            {'$unset': {
+                'google_oauth_refresh_token': '',
+                'google_oauth_email': ''
+            },
+            '$set': {'updated_at': datetime.utcnow()}}
+        )
+
+        logger.info(f"Teacher {session['teacher_id']} disconnected Google account")
+        return redirect(url_for('teacher_settings', success='Google account disconnected.'))
+    except Exception as e:
+        logger.error(f"Error disconnecting Google OAuth: {e}")
+        return redirect(url_for('teacher_settings', error='Failed to disconnect Google account.'))
 
 @app.route('/teacher/assign_class', methods=['POST'])
 @teacher_required
