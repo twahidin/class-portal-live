@@ -1,6 +1,8 @@
 import os
 import logging
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload, MediaIoBaseDownload
@@ -11,6 +13,8 @@ logger = logging.getLogger(__name__)
 SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
+
+OAUTH_SCOPES = ['https://www.googleapis.com/auth/drive']
 
 
 def get_service_account_email() -> str:
@@ -83,12 +87,85 @@ def get_drive_service():
         logger.error(f"Error creating Drive service: {e}")
         return None
 
+def is_oauth_configured():
+    """Check if Google OAuth client credentials are configured"""
+    return bool(os.getenv('GOOGLE_OAUTH_CLIENT_ID') and os.getenv('GOOGLE_OAUTH_CLIENT_SECRET'))
+
+
+def get_oauth_flow(redirect_uri):
+    """Create OAuth flow for teacher Google account connection"""
+    client_id = os.getenv('GOOGLE_OAUTH_CLIENT_ID')
+    client_secret = os.getenv('GOOGLE_OAUTH_CLIENT_SECRET')
+    if not client_id or not client_secret:
+        return None
+
+    return Flow.from_client_config(
+        {'web': {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+            'token_uri': 'https://oauth2.googleapis.com/token',
+        }},
+        scopes=OAUTH_SCOPES,
+        redirect_uri=redirect_uri
+    )
+
+
+def get_drive_service_oauth(teacher):
+    """Get Drive service using teacher's OAuth credentials.
+    Returns (service, needs_reauth) tuple.
+    service is None if credentials missing/expired/revoked.
+    needs_reauth is True if teacher needs to re-authorize."""
+    from utils.auth import decrypt_api_key
+
+    encrypted_refresh = teacher.get('google_oauth_refresh_token')
+    if not encrypted_refresh:
+        return None, False
+
+    refresh_token = decrypt_api_key(encrypted_refresh)
+    if not refresh_token:
+        return None, True  # Token corrupted
+
+    client_id = os.getenv('GOOGLE_OAUTH_CLIENT_ID')
+    client_secret = os.getenv('GOOGLE_OAUTH_CLIENT_SECRET')
+    if not client_id or not client_secret:
+        return None, False
+
+    creds = Credentials(
+        token=None,  # Will be refreshed
+        refresh_token=refresh_token,
+        token_uri='https://oauth2.googleapis.com/token',
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=OAUTH_SCOPES
+    )
+
+    try:
+        service = build('drive', 'v3', credentials=creds)
+        # Test with a lightweight call to verify credentials work
+        service.about().get(fields='user').execute()
+        return service, False
+    except Exception as e:
+        logger.warning(f"OAuth credentials failed for teacher {teacher.get('teacher_id')}: {e}")
+        return None, True
+
+
 def get_teacher_drive_manager(teacher):
-    """Get a drive manager configured for a specific teacher's folder"""
+    """Get a drive manager configured for a specific teacher.
+    Prefers teacher's OAuth credentials; falls back to service account."""
+    if teacher:
+        # Try OAuth first
+        service, needs_reauth = get_drive_service_oauth(teacher)
+        if service:
+            folder_id = teacher.get('google_drive_folder_id') if teacher else None
+            return DriveManager(service, folder_id)
+        if needs_reauth:
+            logger.info(f"Teacher {teacher.get('teacher_id')} needs to re-authorize Google")
+
+    # Fall back to service account
     service = get_drive_service()
     if not service:
         return None
-    
     folder_id = teacher.get('google_drive_folder_id') if teacher else None
     return DriveManager(service, folder_id)
 
@@ -146,9 +223,8 @@ class DriveManager:
         except HttpError as e:
             if e.resp.status == 403 and ('storageQuotaExceeded' in str(e) or 'Service Accounts do not have storage quota' in str(e)):
                 logger.warning(
-                    "Google Drive: Service account has no storage quota. Use a folder inside a Shared Drive "
-                    "(https://developers.google.com/workspace/drive/api/guides/about-shareddrives) and share it with the "
-                    "service account, or use OAuth delegation (https://support.google.com/a/answer/7281227)."
+                    "Google Drive: Storage quota exceeded. The teacher should connect their Google account "
+                    "via Settings > Google Drive > Connect Google Account to use their own Drive storage."
                 )
                 return None
             logger.error(f"Error creating folder: {e}")
@@ -191,9 +267,8 @@ class DriveManager:
         except HttpError as e:
             if e.resp.status == 403 and ('storageQuotaExceeded' in str(e) or 'Service Accounts do not have storage quota' in str(e)):
                 logger.warning(
-                    "Google Drive: Service account has no storage quota. Use a folder inside a Shared Drive "
-                    "(https://developers.google.com/workspace/drive/api/guides/about-shareddrives) and share it with the "
-                    "service account, or use OAuth delegation (https://support.google.com/a/answer/7281227)."
+                    "Google Drive: Storage quota exceeded. The teacher should connect their Google account "
+                    "via Settings > Google Drive > Connect Google Account to use their own Drive storage."
                 )
                 return None
             logger.error(f"Error uploading file: {e}")
@@ -229,9 +304,8 @@ class DriveManager:
         except HttpError as e:
             if e.resp.status == 403 and ('storageQuotaExceeded' in str(e) or 'Service Accounts do not have storage quota' in str(e)):
                 logger.warning(
-                    "Google Drive: Service account has no storage quota. Use a folder inside a Shared Drive "
-                    "(https://developers.google.com/workspace/drive/api/guides/about-shareddrives) and share it with the "
-                    "service account, or use OAuth delegation (https://support.google.com/a/answer/7281227)."
+                    "Google Drive: Storage quota exceeded. The teacher should connect their Google account "
+                    "via Settings > Google Drive > Connect Google Account to use their own Drive storage."
                 )
                 return None
             logger.error(f"Error uploading content: {e}")
@@ -291,9 +365,8 @@ class DriveManager:
         except HttpError as e:
             if e.resp.status == 403 and ('storageQuotaExceeded' in str(e) or 'Service Accounts do not have storage quota' in str(e)):
                 logger.warning(
-                    "Google Drive: Service account has no storage quota. Use a folder inside a Shared Drive "
-                    "(https://developers.google.com/workspace/drive/api/guides/about-shareddrives) and share it with the "
-                    "service account, or use OAuth delegation (https://support.google.com/a/answer/7281227)."
+                    "Google Drive: Storage quota exceeded. The teacher should connect their Google account "
+                    "via Settings > Google Drive > Connect Google Account to use their own Drive storage."
                 )
                 return None
             logger.error(f"Error uploading and converting file: {e}")
