@@ -147,6 +147,30 @@
                 var c = cells.find(function(x) { return x.id === id; });
                 if (c) c.content = this.value;
             });
+            ta.addEventListener('keydown', function(e) {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    var start = this.selectionStart;
+                    var end = this.selectionEnd;
+                    var val = this.value;
+                    if (e.shiftKey) {
+                        var lineStart = val.lastIndexOf('\n', start - 1) + 1;
+                        var linePrefix = val.substring(lineStart, lineStart + 4);
+                        var spaces = 0;
+                        while (spaces < 4 && linePrefix[spaces] === ' ') spaces++;
+                        if (spaces > 0) {
+                            this.value = val.substring(0, lineStart) + val.substring(lineStart + spaces);
+                            this.selectionStart = this.selectionEnd = start - spaces;
+                        }
+                    } else {
+                        this.value = val.substring(0, start) + '    ' + val.substring(end);
+                        this.selectionStart = this.selectionEnd = start + 4;
+                    }
+                    var id = this.getAttribute('data-id');
+                    var c = cells.find(function(x) { return x.id === id; });
+                    if (c) c.content = this.value;
+                }
+            });
         });
     }
 
