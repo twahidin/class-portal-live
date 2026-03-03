@@ -5974,14 +5974,14 @@ Be specific and reference question numbers. Keep each item concise (1 sentence m
         if provider == 'anthropic':
             response = client.messages.create(
                 model=model,
-                max_tokens=2500,
+                max_tokens=16000,
                 messages=[{'role': 'user', 'content': prompt}]
             )
             content = response.content[0].text
         elif provider == 'openai':
             response = client.chat.completions.create(
                 model=model,
-                max_tokens=2500,
+                max_tokens=16000,
                 messages=[{'role': 'user', 'content': prompt}]
             )
             content = response.choices[0].message.content
