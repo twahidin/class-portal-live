@@ -7887,7 +7887,162 @@ def regenerate_ai_feedback(submission_id):
                     _update_profile_and_mastery_from_assignment(submission['student_id'], assignment, submission_after)
             return jsonify({'success': True, 'message': 'Spreadsheet evaluated successfully. View feedback via "View spreadsheet feedback".'})
         
-        if marking_type == 'rubric':
+        if marking_type == 'python':
+            # Python notebook: extract cell text and send as text (not images)
+            import json as _json
+            from utils.ai_marking import get_teacher_ai_service, make_ai_api_call, parse_ai_response, resolve_model_type
+
+            # Parse student notebook cells
+            student_cells = []
+            try:
+                raw = pages[0]['data']
+                # Try to detect if .ipynb by parsing as JSON
+                try:
+                    nb = _json.loads(raw.decode('utf-8'))
+                    for cell in nb.get('cells', []):
+                        if cell.get('cell_type') == 'code':
+                            src = cell.get('source', '')
+                            if isinstance(src, list):
+                                src = ''.join(src)
+                            outputs_text = ''
+                            for out in cell.get('outputs', []):
+                                if out.get('output_type') == 'stream':
+                                    text = out.get('text', '')
+                                    if isinstance(text, list):
+                                        text = ''.join(text)
+                                    outputs_text += text
+                                elif out.get('output_type') in ('execute_result', 'display_data'):
+                                    data_field = out.get('data', {})
+                                    text = data_field.get('text/plain', '')
+                                    if isinstance(text, list):
+                                        text = ''.join(text)
+                                    outputs_text += text
+                                elif out.get('output_type') == 'error':
+                                    outputs_text += '\n'.join(out.get('traceback', []))
+                            student_cells.append({'index': len(student_cells) + 1, 'source': src, 'outputs': outputs_text})
+                except (_json.JSONDecodeError, UnicodeDecodeError):
+                    # Fallback: .py file
+                    import re
+                    text = raw.decode('utf-8', errors='replace')
+                    segments = re.split(r'^# %% Cell.*$', text, flags=re.MULTILINE)
+                    for seg in segments:
+                        trimmed = seg.strip()
+                        if trimmed:
+                            student_cells.append({'index': len(student_cells) + 1, 'source': trimmed, 'outputs': ''})
+            except Exception as e:
+                logger.error(f"Error parsing Python submission: {e}")
+
+            if not student_cells:
+                return jsonify({'success': False, 'error': 'Could not parse any code cells from the notebook'}), 400
+
+            # Parse answer key cells if available
+            answer_key_text = ''
+            answer_key_id = assignment.get('python_answer_key_template_id')
+            if answer_key_id:
+                try:
+                    fobj = fs.get(ObjectId(answer_key_id) if isinstance(answer_key_id, str) else answer_key_id)
+                    ak_raw = fobj.read()
+                    ak_filename = getattr(fobj, 'filename', '') or ''
+                    ak_cells = []
+                    if ak_filename.lower().endswith('.ipynb'):
+                        ak_nb = _json.loads(ak_raw.decode('utf-8'))
+                        for cell in ak_nb.get('cells', []):
+                            if cell.get('cell_type') == 'code':
+                                src = cell.get('source', '')
+                                if isinstance(src, list):
+                                    src = ''.join(src)
+                                ak_cells.append(src)
+                    else:
+                        import re
+                        segments = re.split(r'^# %% Cell.*$', ak_raw.decode('utf-8'), flags=re.MULTILINE)
+                        ak_cells = [s.strip() for s in segments if s.strip()]
+                    if ak_cells:
+                        answer_key_text = '\n\n'.join(f'--- Answer Key Cell {i+1} ---\n{c}' for i, c in enumerate(ak_cells))
+                except Exception as e:
+                    logger.error(f"Error reading Python answer key: {e}")
+
+            # Build text-based prompt for AI
+            model_type = resolve_model_type(assignment, teacher, override_ai_model)
+            client, model_name, provider = get_teacher_ai_service(teacher, model_type)
+            if not client:
+                return jsonify({'success': False, 'error': f'AI service not available for {model_type}'}), 400
+
+            total_marks = assignment.get('total_marks', 100)
+            custom_instructions = ''
+            if assignment.get('feedback_instructions'):
+                custom_instructions += f"\nFEEDBACK STYLE: {assignment['feedback_instructions']}"
+            if assignment.get('grading_instructions'):
+                custom_instructions += f"\nGRADING INSTRUCTIONS: {assignment['grading_instructions']}"
+
+            system_prompt = f"""You are an experienced computing teacher marking a Python programming assignment.
+
+Assignment: {assignment.get('title', 'Python Assignment')}
+Subject: {assignment.get('subject', 'Computing')}
+Total Marks: {total_marks}
+{custom_instructions}
+
+IMPORTANT RULES:
+1. Evaluate each code cell for correctness, style, and completeness
+2. Compare against the answer key if provided
+3. Award partial marks where appropriate
+4. Be constructive and encouraging
+5. Note any runtime errors visible in the outputs
+6. Each cell should be treated as a separate question/task
+
+Respond ONLY with valid JSON in this exact format:
+{{
+    "questions": [
+        {{
+            "question_num": 1,
+            "student_answer": "brief description of what the student wrote",
+            "correct_answer": "expected code or approach from answer key",
+            "is_correct": true/false/null,
+            "marks_awarded": number or null,
+            "marks_total": number,
+            "feedback": "specific feedback about the code",
+            "improvement": "what to improve or empty string",
+            "needs_review": false
+        }}
+    ],
+    "total_marks": number or null,
+    "overall_feedback": "general feedback about the submission",
+    "confidence": "high/medium/low"
+}}"""
+
+            # Build student cells text
+            student_text = '\n\n'.join(
+                f'--- Cell {c["index"]} ---\n{c["source"]}'
+                + (f'\n[Output]: {c["outputs"]}' if c.get('outputs') else '')
+                for c in student_cells
+            )
+
+            content = [{"type": "text", "text": f"STUDENT SUBMISSION ({len(student_cells)} code cells):\n\n{student_text}"}]
+            if answer_key_text:
+                content.insert(0, {"type": "text", "text": f"ANSWER KEY:\n\n{answer_key_text}\n\n"})
+            content.append({"type": "text", "text": "\nAnalyze each cell and provide JSON feedback:"})
+
+            try:
+                response_text = make_ai_api_call(
+                    client=client,
+                    model_name=model_name,
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    messages_content=content,
+                    max_tokens=16384,
+                    assignment=assignment
+                )
+                ai_result = parse_ai_response(response_text)
+                ai_result['generated_at'] = datetime.utcnow().isoformat()
+                ai_result['raw_response'] = response_text
+            except Exception as e:
+                logger.error(f"Error in Python AI marking: {e}")
+                ai_result = {
+                    'error': str(e),
+                    'questions': [],
+                    'overall_feedback': f'Error generating feedback: {e}'
+                }
+
+        elif marking_type == 'rubric':
             rubrics_content = None
             if assignment.get('rubrics_id'):
                 try:
@@ -7908,7 +8063,7 @@ def regenerate_ai_feedback(submission_id):
         
         # Determine status: ai_reviewed if we got valid feedback, else keep submitted so teacher can retry
         has_error = ai_result.get('error') or (
-            marking_type == 'standard' and not ai_result.get('questions')
+            marking_type in ('standard', 'python') and not ai_result.get('questions')
         ) or (
             marking_type == 'rubric' and not ai_result.get('criteria') and not ai_result.get('errors')
         )
