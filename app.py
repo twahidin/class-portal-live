@@ -5968,20 +5968,20 @@ Respond in this exact JSON format:
     "question_notes": [{{"q_num": 1, "note": "short observation"}}]
 }}
 
-Be specific and reference question numbers. Keep each item concise (1-2 sentences max). Focus on actionable insights, not generic advice."""
+Be specific and reference question numbers. Keep each item concise (1 sentence max). Focus on actionable insights, not generic advice. Return ONLY valid JSON — no text before or after."""
 
     try:
         if provider == 'anthropic':
             response = client.messages.create(
                 model=model,
-                max_tokens=1500,
+                max_tokens=2500,
                 messages=[{'role': 'user', 'content': prompt}]
             )
             content = response.content[0].text
         elif provider == 'openai':
             response = client.chat.completions.create(
                 model=model,
-                max_tokens=1500,
+                max_tokens=2500,
                 messages=[{'role': 'user', 'content': prompt}]
             )
             content = response.choices[0].message.content
@@ -6005,7 +6005,15 @@ Be specific and reference question numbers. Keep each item concise (1-2 sentence
             if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
                 content = content[brace_start:brace_end + 1]
 
-        result = json.loads(content)
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError:
+            # AI sometimes produces unescaped newlines inside strings or trailing commas.
+            # Attempt repair: replace literal newlines inside strings with \\n, strip trailing commas before ] or }
+            import re as _re
+            fixed = _re.sub(r',\s*([}\]])', r'\1', content)           # trailing commas
+            fixed = _re.sub(r'(?<=": ")(.*?)(?=")', lambda m: m.group(0).replace('\n', ' '), fixed)  # newlines in values
+            result = json.loads(fixed)
         result['generated_at'] = datetime.utcnow().isoformat()
         return result
 
