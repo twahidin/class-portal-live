@@ -6136,6 +6136,28 @@ def generate_ai_class_summary(assignment, submissions, item_analysis, teacher):
     # Include topic/LO names from question_module_tags if available
     tags = assignment.get('question_module_tags', {})
 
+    # Extract question content from submission feedback so AI can identify concepts
+    question_content = {}
+    for sub in submissions:
+        feedback = sub.get('teacher_feedback') or sub.get('ai_feedback') or {}
+        q_list = feedback.get('questions', [])
+        if isinstance(q_list, dict):
+            q_list = list(q_list.values())
+        for q in q_list:
+            raw_num = q.get('question_num') or q.get('q_num', 0)
+            try:
+                q_num = int(raw_num)
+            except (TypeError, ValueError):
+                continue
+            if q_num and q_num not in question_content:
+                question_content[q_num] = {
+                    'correct_answer': (q.get('correct_answer') or '')[:300],
+                    'sample_student_answer': (q.get('student_answer') or '')[:200],
+                    'sample_feedback': (q.get('feedback') or '')[:200],
+                }
+        if len(question_content) >= 2:
+            break  # One good submission's feedback is enough for question content
+
     question_summary = []
     for q in item_analysis.get('questions', []):
         if q.get('fi') is not None:
@@ -6159,12 +6181,31 @@ def generate_ai_class_summary(assignment, submissions, item_analysis, teacher):
     improvements_text = ', '.join(f"{_q_label(i['question'])} ({i['percentage']}% incorrect)" for i in insights.get('improvements', []))
     misconceptions_text = '\n'.join(f"- {_q_label(m['question'])}: {m['sample_feedback']} ({m['affected_count']} students)" for m in insights.get('misconceptions', []))
 
-    topic_instruction = ''
-    if tags:
-        topic_instruction = '\nIMPORTANT: Questions have been tagged to learning objectives/topics. Reference these topic names in your analysis instead of just question numbers. For example, say "Students struggled with Binary Numbers (Q3)" not just "Students struggled on Q3".\n'
+    # Build question content section from feedback data
+    qcontent_lines = []
+    for q_num in sorted(question_content.keys()):
+        qc = question_content[q_num]
+        q_num_str = str(q_num)
+        lo_label = ''
+        if q_num_str in tags and tags[q_num_str].get('labels'):
+            lo_label = f" [LO: {', '.join(tags[q_num_str]['labels'])}]"
+        parts = [f"Q{q_num}{lo_label}:"]
+        if qc['correct_answer']:
+            parts.append(f"Expected answer: {qc['correct_answer']}")
+        if qc['sample_student_answer']:
+            parts.append(f"Sample student answer: {qc['sample_student_answer']}")
+        qcontent_lines.append(' | '.join(parts))
+
+    concept_instruction = """CRITICAL: For EVERY question, you MUST identify and name the specific concept, topic, or skill it tests.
+- If a question has a [LO: ...] tag, use that learning objective name.
+- If no LO tag exists, infer the concept from the question content (correct answer and student answers provided below).
+- NEVER say just "Q1 concept" or "the Q3 topic" — always name it explicitly, e.g. "binary-to-decimal conversion (Q3)", "use of selection statements (Q5)", "cell membrane structure (Q2)".
+- Format: "Concept Name (Q#)" throughout your entire response — in concepts_grasped, misconceptions, areas_needing_clarification, recommended_actions, and question_notes."""
 
     prompt = f"""You are an educational assessment analyst. Analyze this class assignment data and provide actionable insights for the teacher.
-{topic_instruction}
+
+{concept_instruction}
+
 Assignment: {assignment.get('title', 'Untitled')}
 Subject: {assignment.get('subject', 'Unknown')}
 Total Marks: {assignment.get('total_marks', 100)}
@@ -6173,6 +6214,9 @@ Total Students: {item_analysis.get('student_count', len(submissions))}
 Item Analysis (per question):
 {chr(10).join(question_summary) if question_summary else 'No per-question data available.'}
 
+Question Content (use this to identify what concept each question tests):
+{chr(10).join(qcontent_lines) if qcontent_lines else 'No question content available — infer concepts from the assignment title and subject.'}
+
 Areas of Strength: {strengths_text or 'None identified'}
 Areas Needing Improvement: {improvements_text or 'None identified'}
 Misconceptions Found:
@@ -6180,14 +6224,14 @@ Misconceptions Found:
 
 Respond in this exact JSON format:
 {{
-    "concepts_grasped": ["list 2-4 key concepts students understood well, based on high FI questions"],
-    "misconceptions": ["list 2-4 specific misconceptions with evidence from the data"],
-    "areas_needing_clarification": ["list 2-3 topics/concepts that need reteaching"],
-    "recommended_actions": ["list 3-5 concrete next steps for the teacher, e.g. reteach topic X, create practice on Y"],
-    "question_notes": [{{"q_num": 1, "topic": "Topic name if tagged", "note": "short observation"}}]
+    "concepts_grasped": ["list 2-4 key concepts students understood well — MUST name the specific concept, e.g. 'Binary number representation (Q1): Students demonstrate strong understanding with FI=0.85'"],
+    "misconceptions": ["list 2-4 specific misconceptions — MUST name the concept and what students got wrong, e.g. 'Two's complement overflow (Q3): Students confuse signed and unsigned ranges, with 60% giving the unsigned maximum instead'"],
+    "areas_needing_clarification": ["list 2-3 concepts that need reteaching — MUST name the specific topic, e.g. 'Hexadecimal-to-binary conversion needs reteaching based on low FI=0.35 on Q4'"],
+    "recommended_actions": ["list 3-5 concrete next steps referencing specific concepts, e.g. 'Reteach two's complement with worked examples focusing on the sign bit'"],
+    "question_notes": [{{"q_num": 1, "topic": "The specific concept this question tests", "note": "short observation about class performance on this concept"}}]
 }}
 
-Be specific and reference question numbers{' and topic names' if tags else ''}. Keep each item concise (1 sentence max). Focus on actionable insights, not generic advice. Return ONLY valid JSON — no text before or after."""
+Every bullet point MUST name the actual concept — never use generic labels like "Q1 concept" or "the Q3 topic". Keep each item concise (1-2 sentences). Focus on actionable insights, not generic advice. Return ONLY valid JSON — no text before or after."""
 
     try:
         if provider == 'anthropic':

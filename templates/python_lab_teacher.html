@@ -3,12 +3,10 @@
 {% block title %}Python Lab - Teacher Portal{% endblock %}
 
 {% block head %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.27.0/full/pyodide.js"></script>
 <style>
 .cell-card textarea { font-family: var(--bs-font-monospace); font-size: 0.9rem; }
 .pylab-output { max-height: 300px; overflow: auto; white-space: pre-wrap; word-wrap: break-word; }
-.pylab-input-field { background: transparent; border: none; border-bottom: 1px solid #6c9; color: #6c9; outline: none; font-family: var(--bs-font-monospace); font-size: 0.85rem; width: 60%; min-width: 120px; }
-.pylab-input-field:focus { border-bottom-color: #fff; color: #fff; }
 </style>
 {% endblock %}
 
@@ -22,7 +20,7 @@
     <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
         <div>
             <h1 class="mb-1"><i class="bi bi-code-slash me-2"></i>Python Lab</h1>
-            <p class="text-muted mb-0">Write and run Python code. <code>input()</code> works interactively. Max {{ execute_timeout }}s per run. <span class="text-muted small">iPad-friendly: curly quotes are auto-converted to straight quotes.</span></p>
+            <p class="text-muted mb-0">Write and run Python code in your browser. <code>input()</code> uses a popup dialog. <span class="text-muted small">iPad-friendly: curly quotes are auto-converted.</span></p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
             <div class="dropdown">
@@ -53,7 +51,9 @@
 <script>
 (function() {
     var executeTimeout = {{ execute_timeout }};
-    var socket = io({ transports: ['websocket', 'polling'] });
+    var pyodideReady = false;
+    var pyodide = null;
+    var currentOutputPre = null;
     var templates = [
         { name: 'Hello World', code: '# Hello World\nprint("Hello, Python Lab!")' },
         { name: 'Variables', code: '# Variables\nname = "Student"\nage = 16\nscore = 85.5\nprint(f"Name: {name}, Age: {age}, Score: {score}")' },
@@ -164,88 +164,97 @@
         if (pre) pre.scrollTop = pre.scrollHeight;
     }
 
-    function runCell(id) {
+    // --- Pyodide Engine ---
+
+    function fixQuotes(code) {
+        return code.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+    }
+
+    async function initPyodide() {
+        var banner = document.createElement('div');
+        banner.className = 'alert alert-info d-flex align-items-center mb-3';
+        banner.id = 'pyodide-loading';
+        banner.innerHTML = '<div class="spinner-border spinner-border-sm me-2" role="status"></div>' +
+            '<span>Loading Python engine... (first visit may take a few seconds)</span>';
+        container.parentElement.insertBefore(banner, container);
+        try {
+            pyodide = await loadPyodide({
+                stdout: function(line) {
+                    if (currentOutputPre) {
+                        currentOutputPre.textContent += line + '\n';
+                        autoScroll(currentOutputPre);
+                    }
+                },
+                stderr: function(line) {
+                    if (currentOutputPre) {
+                        currentOutputPre.textContent += line + '\n';
+                        autoScroll(currentOutputPre);
+                    }
+                }
+            });
+            pyodide.runPython(
+                'import builtins\n' +
+                'from js import prompt as _jp\n' +
+                'def _pi(p=""):\n' +
+                '    r = _jp(str(p) if p else "Enter input:")\n' +
+                '    if r is None: raise EOFError("Input cancelled")\n' +
+                '    print((str(p) if p else "") + str(r))\n' +
+                '    return r\n' +
+                'builtins.input = _pi\n'
+            );
+            pyodideReady = true;
+            banner.remove();
+        } catch(e) {
+            banner.className = 'alert alert-danger d-flex align-items-center mb-3';
+            banner.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>' +
+                '<span>Failed to load Python engine. Please refresh the page.</span>';
+        }
+    }
+
+    async function runCell(id) {
         var c = cells.find(function(x) { return x.id === id; });
         if (!c || runningCellId) return;
+        if (!pyodideReady) {
+            alert('Python engine is still loading. Please wait.');
+            return;
+        }
         c.running = true;
         c.output = '';
         runningCellId = id;
         renderCells();
-        socket.emit('python_run', { cell_id: id, code: c.content });
-    }
+        await new Promise(function(resolve) { setTimeout(resolve, 50); });
 
-    function stopCell(id) {
-        socket.emit('python_stop', { cell_id: id });
-    }
-
-    function finishCell(cellId) {
-        var c = cells.find(function(x) { return x.id === cellId; });
-        if (!c) return;
-        var pre = getOutputPre(cellId);
-        if (pre) c.output = pre.textContent;
+        currentOutputPre = getOutputPre(id);
+        var code = fixQuotes(c.content);
+        var timeoutWarning = setTimeout(function() {
+            if (currentOutputPre) {
+                currentOutputPre.textContent += '\n[Execution exceeded ' + executeTimeout + 's — if stuck, refresh the page]\n';
+                autoScroll(currentOutputPre);
+            }
+        }, executeTimeout * 1000);
+        try {
+            await pyodide.runPythonAsync(code);
+        } catch(e) {
+            if (currentOutputPre) {
+                currentOutputPre.textContent += String(e) + '\n';
+                autoScroll(currentOutputPre);
+            }
+        }
+        clearTimeout(timeoutWarning);
+        if (currentOutputPre) c.output = currentOutputPre.textContent;
+        currentOutputPre = null;
         c.running = false;
         runningCellId = null;
         renderCells();
-    }
-
-    // --- Socket.IO listeners ---
-
-    socket.on('python_output', function(data) {
-        var pre = getOutputPre(data.cell_id);
-        if (!pre) return;
-        pre.textContent += data.text;
-        autoScroll(pre);
-    });
-
-    socket.on('python_input_request', function(data) {
-        var pre = getOutputPre(data.cell_id);
-        if (!pre) return;
-        pre.textContent += data.prompt;
-        var area = pre.parentElement;
-        var inputRow = document.createElement('div');
-        inputRow.className = 'd-flex align-items-center bg-dark rounded px-2 py-1';
-        inputRow.innerHTML = '<span class="text-light me-1" style="font-size:0.85rem;font-family:var(--bs-font-monospace);">&gt;</span>';
-        var input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'pylab-input-field';
-        input.setAttribute('autocomplete', 'off');
-        input.setAttribute('autocorrect', 'off');
-        input.setAttribute('autocapitalize', 'off');
-        input.setAttribute('spellcheck', 'false');
-        inputRow.appendChild(input);
-        area.appendChild(inputRow);
-        input.focus();
-
-        input.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                var val = input.value;
-                pre.textContent += val + '\n';
-                inputRow.remove();
-                autoScroll(pre);
-                socket.emit('python_input', { cell_id: data.cell_id, value: val });
-            }
-        });
-    });
-
-    socket.on('python_done', function(data) {
-        finishCell(data.cell_id);
-        var c = cells.find(function(x) { return x.id === data.cell_id; });
-        if (c && !(c.output || '').trim()) {
+        if (!(c.output || '').trim()) {
             c.output = '(no output)';
             renderCells();
         }
-    });
+    }
 
-    socket.on('python_error', function(data) {
-        var c = cells.find(function(x) { return x.id === data.cell_id; });
-        if (c) {
-            c.output = 'Error: ' + (data.error || 'Unknown error');
-            c.running = false;
-        }
-        runningCellId = null;
-        renderCells();
-    });
+    function stopCell(id) {
+        alert('Cannot stop running code in browser mode. If stuck in an infinite loop, refresh the page.');
+    }
 
     // --- Cell management ---
 
@@ -377,6 +386,7 @@
     });
 
     renderCells();
+    initPyodide();
 })();
 </script>
 {% endblock %}
