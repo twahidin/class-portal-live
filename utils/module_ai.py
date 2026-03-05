@@ -129,17 +129,23 @@ def generate_modules_from_syllabus(
                 "text": f"[Document content for {subject} - upload PDF for full analysis]",
             })
 
-        system_prompt = f"""You are an expert curriculum designer. Analyze this syllabus/scheme of work and create a hierarchical module structure for {subject} ({year_level}).
+        system_prompt = f"""You are an expert curriculum designer. Analyze this syllabus/scheme of work and create a Learning Objective (LO) based module structure for {subject} ({year_level}).
 
-STRUCTURE RULES:
-1. The ROOT module represents the entire year/course
-2. First level children are major topics/units (e.g., "Algebra", "Geometry")
-3. Second level are sub-topics (e.g., "Linear Equations", "Quadratic Equations")
-4. Third level (leaves) are specific learning objectives that can be assessed
-5. Maximum depth: 4 levels (root + 3 levels)
-6. Each leaf module should be learnable in 1-2 hours
-7. Include estimated hours for each module
-8. Generate learning objectives for each module
+STRUCTURE (3 levels only — Subject → Topic → Learning Objective):
+1. ROOT: The entire subject/course (depth 0)
+2. TOPICS: Major topics or units from the syllabus (depth 1). Use the exact topic headings from the document.
+3. LEARNING OBJECTIVES (leaves): Individual, assessable learning outcomes (depth 2). Each LO is ONE specific thing a student should be able to do.
+
+CRITICAL RULES:
+- Leaf nodes MUST be individual learning objectives, NOT sub-topics or categories
+- Each leaf has an "lo_code" field — a hierarchical code like "1.1.1", "1.2.3", "2.1.1" etc.
+  - First number = topic number, second = section within topic, third = LO within section
+  - If the syllabus already uses numbering (e.g. "1.1.1", "1.2.4") or lettering (e.g. "a", "b", "c"), preserve those codes exactly
+- Each leaf "title" should be the LO statement (e.g. "Perform calculations using bits, bytes, kilobytes...")
+- Keep the title concise but complete — it IS the learning objective
+- Do NOT create a 4th level — if the syllabus has sub-items under an LO (e.g. "i. primary cell culture, ii. cell lines"), include them in the LO's description, not as children
+- Maximum depth: 3 levels (root + topics + LOs)
+- Include estimated hours for each node
 
 VISUALIZATION:
 - Assign colors that group related topics (hex codes like #667eea)
@@ -148,38 +154,37 @@ VISUALIZATION:
 Respond ONLY with valid JSON in this exact format (no markdown code fence):
 {{
     "root": {{
-        "title": "Mathematics Year 3",
-        "description": "Complete mathematics curriculum for Secondary 3",
+        "title": "{subject} ({year_level})",
+        "description": "Complete curriculum for {subject}",
         "estimated_hours": 150,
         "color": "#667eea",
         "icon": "bi-diagram-3",
         "children": [
             {{
-                "title": "Algebra",
+                "title": "1. Computer Architecture",
                 "description": "...",
-                "estimated_hours": 40,
+                "estimated_hours": 10,
                 "color": "#764ba2",
-                "icon": "bi-calculator",
-                "learning_objectives": ["Understand algebraic expressions", "..."],
+                "icon": "bi-cpu",
+                "lo_code": "1",
                 "children": [
                     {{
-                        "title": "Linear Equations",
-                        "description": "...",
-                        "estimated_hours": 10,
+                        "title": "Perform calculations using bits, bytes, kilobytes, megabytes...",
+                        "description": "Including kibibytes, mebibytes, gibibytes, tebibytes, pebibytes",
+                        "estimated_hours": 2,
                         "color": "#8b5cf6",
-                        "icon": "bi-graph-up",
-                        "learning_objectives": ["..."],
-                        "children": [
-                            {{
-                                "title": "Solving One-Variable Equations",
-                                "description": "...",
-                                "estimated_hours": 2,
-                                "color": "#a78bfa",
-                                "icon": "bi-book",
-                                "learning_objectives": ["..."],
-                                "is_leaf": true
-                            }}
-                        ]
+                        "icon": "bi-calculator",
+                        "lo_code": "1.1.1",
+                        "is_leaf": true
+                    }},
+                    {{
+                        "title": "Describe the function of key components of a computer system",
+                        "description": "Processor, main memory and secondary storage",
+                        "estimated_hours": 2,
+                        "color": "#8b5cf6",
+                        "icon": "bi-book",
+                        "lo_code": "1.1.2",
+                        "is_leaf": true
                     }}
                 ]
             }}
@@ -200,7 +205,7 @@ Ensure all topics from the syllabus are covered.
 Respond with valid JSON only (no markdown, no text outside the JSON). Escape any double quotes inside string values with backslash.""",
         })
 
-        # JSON schema for structured output (guarantees valid JSON from Claude Opus 4.5)
+        # JSON schema for structured output (guarantees valid JSON from Claude)
         module_schema = {
             "type": "object",
             "properties": {
@@ -212,6 +217,7 @@ Respond with valid JSON only (no markdown, no text outside the JSON). Escape any
                         "estimated_hours": {"type": "number"},
                         "color": {"type": "string"},
                         "icon": {"type": "string"},
+                        "lo_code": {"type": "string"},
                         "learning_objectives": {"type": "array", "items": {"type": "string"}},
                         "children": {"type": "array", "items": {"$ref": "#/$defs/module"}},
                         "is_leaf": {"type": "boolean"},
@@ -233,6 +239,7 @@ Respond with valid JSON only (no markdown, no text outside the JSON). Escape any
                         "estimated_hours": {"type": "number"},
                         "color": {"type": "string"},
                         "icon": {"type": "string"},
+                        "lo_code": {"type": "string"},
                         "learning_objectives": {"type": "array", "items": {"type": "string"}},
                         "children": {"type": "array", "items": {"$ref": "#/$defs/module"}},
                         "is_leaf": {"type": "boolean"},

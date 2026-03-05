@@ -5096,6 +5096,13 @@ def assignment_summary(assignment_id):
         return (3, -item['percentage'])
     student_submissions.sort(key=_sort_order)
     
+    # Load question-to-module tags and check if teacher has module trees for tagging
+    question_module_tags = assignment.get('question_module_tags', {})
+    has_module_trees = _teacher_has_module_access(session['teacher_id']) and bool(
+        Module.find_one({'teacher_id': session['teacher_id'], 'parent_id': None})
+    )
+    tags_generated_at = assignment.get('question_module_tags_generated_at')
+
     return render_template('teacher_assignment_summary.html',
                          teacher=teacher,
                          assignment=assignment,
@@ -5104,7 +5111,10 @@ def assignment_summary(assignment_id):
                          insights=insights,
                          item_analysis=item_analysis,
                          ai_class_summary=ai_class_summary,
-                         student_submissions=student_submissions)
+                         student_submissions=student_submissions,
+                         question_module_tags=question_module_tags,
+                         has_module_trees=has_module_trees,
+                         tags_generated_at=tags_generated_at)
 
 
 @app.route('/teacher/assignment/<assignment_id>/generate-class-summary', methods=['POST'])
@@ -5140,6 +5150,197 @@ def generate_class_summary_api(assignment_id):
     )
 
     return jsonify({'success': True, 'summary': summary})
+
+
+@app.route('/teacher/assignment/<assignment_id>/tag-questions-to-modules', methods=['POST'])
+@teacher_required
+def tag_questions_to_modules(assignment_id):
+    """Use LLM to tag each assignment question to module tree learning objectives."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+    # Load teacher's module trees
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'success': False, 'error': 'No module trees found. Create a module tree first.'}), 400
+    root_modules = list(
+        Module.find({'teacher_id': session['teacher_id'], 'parent_id': None}).sort('title', 1)
+    )
+    if not root_modules:
+        return jsonify({'success': False, 'error': 'No module trees found. Create a module tree first.'}), 400
+
+    # Build flat list of all modules with paths
+    def _flatten_tree(mod, path_parts=None):
+        """Recursively flatten module tree into list of {module_id, title, lo_code, path, is_leaf, depth}."""
+        path_parts = path_parts or []
+        current_path = path_parts + [mod.get('title', 'Untitled')]
+        entries = []
+        entry = {
+            'module_id': mod['module_id'],
+            'title': mod.get('title', 'Untitled'),
+            'lo_code': mod.get('lo_code', ''),
+            'path': ' > '.join(current_path),
+            'is_leaf': mod.get('is_leaf', False),
+            'depth': mod.get('depth', 0),
+        }
+        entries.append(entry)
+        for cid in mod.get('children_ids', []):
+            child = Module.find_one({'module_id': cid})
+            if child:
+                entries.extend(_flatten_tree(child, current_path))
+        return entries
+
+    all_modules = []
+    for root in root_modules:
+        all_modules.extend(_flatten_tree(root))
+
+    if not all_modules:
+        return jsonify({'success': False, 'error': 'Module trees are empty.'}), 400
+
+    # Build flat representation for the LLM
+    module_lines = []
+    for m in all_modules:
+        leaf_tag = ' [LEAF/LO]' if m['is_leaf'] else ''
+        lo_tag = f" (LO: {m['lo_code']})" if m['lo_code'] else ''
+        module_lines.append(f"{m['module_id']}: {m['path']}{lo_tag}{leaf_tag} (depth {m['depth']})")
+    module_tree_text = '\n'.join(module_lines)
+
+    # Extract question content from the question paper or AI feedback
+    question_content = ''
+
+    # Try extracting from question paper PDF
+    question_paper_bytes = _get_assignment_file_bytes(assignment, 'question_paper')
+    if question_paper_bytes:
+        from utils.module_ai import _extract_text_from_pdf
+        question_content = _extract_text_from_pdf(question_paper_bytes)
+
+    # Fallback: use AI feedback question data from submissions
+    if not question_content.strip():
+        submissions = list(Submission.find({
+            'assignment_id': assignment_id,
+            'status': {'$in': ['submitted', 'ai_reviewed', 'reviewed']}
+        }).limit(3))
+        question_parts = []
+        for sub in submissions:
+            af = sub.get('ai_feedback') or sub.get('teacher_feedback') or {}
+            questions = af.get('questions', [])
+            if isinstance(questions, dict):
+                # teacher_feedback format: {'1': {...}, '2': {...}}
+                for q_num, q_data in sorted(questions.items(), key=lambda x: str(x[0])):
+                    question_parts.append(f"Q{q_num}: marks_total={q_data.get('marks_total', '?')}")
+            elif isinstance(questions, list):
+                for q in questions:
+                    q_num = q.get('question_num') or q.get('question_number', '?')
+                    student_ans = (q.get('student_answer') or '')[:200]
+                    correct_ans = (q.get('correct_answer') or '')[:200]
+                    feedback = (q.get('improvement') or q.get('feedback') or '')[:200]
+                    question_parts.append(
+                        f"Q{q_num}: student_answer=\"{student_ans}\", correct_answer=\"{correct_ans}\", feedback=\"{feedback}\""
+                    )
+            if question_parts:
+                break
+        question_content = '\n'.join(question_parts) if question_parts else 'No question content available.'
+
+    # Call LLM to tag questions to modules
+    client, model, provider = get_teacher_ai_service(teacher)
+    if not client:
+        return jsonify({'success': False, 'error': 'No AI provider available. Configure an API key in Settings.'}), 400
+
+    prompt = f"""You are mapping exam/assignment questions to a curriculum module tree based on Learning Objectives.
+
+Assignment: {assignment.get('title', 'Untitled')}
+Subject: {assignment.get('subject', 'Unknown')}
+Total Marks: {assignment.get('total_marks', 100)}
+
+Questions from the paper:
+{question_content[:8000]}
+
+Module tree (with IDs and paths):
+{module_tree_text[:6000]}
+
+For each question number, identify which module(s) / learning objective(s) it tests.
+Prefer LEAF nodes (specific learning objectives) over parent nodes (broad categories).
+A question can map to multiple modules if it tests multiple concepts.
+
+Return ONLY valid JSON in this exact format:
+{{
+    "tags": {{
+        "1": {{"module_ids": ["MOD-XXX"], "labels": ["LO title"], "path": "Subject > Topic > LO title"}},
+        "2": {{"module_ids": ["MOD-YYY", "MOD-ZZZ"], "labels": ["LO title 1", "LO title 2"], "path": "Subject > Topic"}}
+    }}
+}}
+
+Rules:
+- Keys are question numbers as strings ("1", "2", etc.)
+- module_ids must be actual IDs from the module tree above (starting with MOD-)
+- labels are human-readable titles of the matched modules
+- path is the breadcrumb trail
+- If a question doesn't match any module, omit it from the output
+- Return ONLY valid JSON — no text before or after"""
+
+    try:
+        if provider == 'anthropic':
+            response = client.messages.create(
+                model=model, max_tokens=4000,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            content = response.content[0].text
+        elif provider == 'openai':
+            response = client.chat.completions.create(
+                model=model, max_tokens=4000,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            content = response.choices[0].message.content
+        elif provider == 'google':
+            response = client.generate_content(prompt)
+            content = response.text
+        else:
+            return jsonify({'success': False, 'error': f'Unsupported provider: {provider}'}), 400
+
+        # Parse JSON
+        content = content.strip()
+        import re
+        fence_match = re.search(r'```(?:json)?\s*\n?(.*?)```', content, re.DOTALL)
+        if fence_match:
+            content = fence_match.group(1).strip()
+        else:
+            brace_start = content.find('{')
+            brace_end = content.rfind('}')
+            if brace_start != -1 and brace_end != -1:
+                content = content[brace_start:brace_end + 1]
+
+        result = json.loads(content)
+        tags = result.get('tags', result)  # Handle both {"tags": {...}} and direct {...}
+
+        # Validate module_ids exist
+        valid_ids = {m['module_id'] for m in all_modules}
+        for q_num, tag_data in list(tags.items()):
+            if isinstance(tag_data, dict) and 'module_ids' in tag_data:
+                tag_data['module_ids'] = [mid for mid in tag_data['module_ids'] if mid in valid_ids]
+                if not tag_data['module_ids']:
+                    del tags[q_num]
+
+        # Store in assignment document
+        Assignment.update_one(
+            {'assignment_id': assignment_id},
+            {'$set': {
+                'question_module_tags': tags,
+                'question_module_tags_generated_at': datetime.utcnow(),
+            }}
+        )
+
+        return jsonify({'success': True, 'tags': tags})
+
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Failed to parse tag-questions JSON: {e}")
+        return jsonify({'success': False, 'error': 'Failed to parse AI response. Try again.'}), 500
+    except Exception as e:
+        logger.error(f"Error tagging questions to modules: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 def _build_feedback_summary_report(assignment, submissions, student_submissions_list, insights):
@@ -5932,20 +6133,38 @@ def generate_ai_class_summary(assignment, submissions, item_analysis, teacher):
     # Build context from item analysis and submission data
     insights = analyze_class_insights(submissions)
 
+    # Include topic/LO names from question_module_tags if available
+    tags = assignment.get('question_module_tags', {})
+
     question_summary = []
     for q in item_analysis.get('questions', []):
         if q.get('fi') is not None:
+            q_num_str = str(q['q_num'])
+            topic_label = ''
+            if q_num_str in tags and tags[q_num_str].get('labels'):
+                topic_label = f" [{', '.join(tags[q_num_str]['labels'])}]"
             question_summary.append(
-                f"Q{q['q_num']}: FI={q['fi']} ({q['fi_label']}), DI={q['di']} ({q['di_label']}), "
+                f"Q{q['q_num']}{topic_label}: FI={q['fi']} ({q['fi_label']}), DI={q['di']} ({q['di_label']}), "
                 f"Mean={q['mean_marks']}/{q['max_marks']}, Attempts={q['attempt_count']}"
             )
 
-    strengths_text = ', '.join(f"Q{s['question']} ({s['percentage']}% correct)" for s in insights.get('strengths', []))
-    improvements_text = ', '.join(f"Q{i['question']} ({i['percentage']}% incorrect)" for i in insights.get('improvements', []))
-    misconceptions_text = '\n'.join(f"- Q{m['question']}: {m['sample_feedback']} ({m['affected_count']} students)" for m in insights.get('misconceptions', []))
+    def _q_label(q_num):
+        """Return 'Q3 [Binary Numbers]' if tags exist, else 'Q3'."""
+        q_str = str(q_num)
+        if q_str in tags and tags[q_str].get('labels'):
+            return f"Q{q_num} [{', '.join(tags[q_str]['labels'])}]"
+        return f"Q{q_num}"
+
+    strengths_text = ', '.join(f"{_q_label(s['question'])} ({s['percentage']}% correct)" for s in insights.get('strengths', []))
+    improvements_text = ', '.join(f"{_q_label(i['question'])} ({i['percentage']}% incorrect)" for i in insights.get('improvements', []))
+    misconceptions_text = '\n'.join(f"- {_q_label(m['question'])}: {m['sample_feedback']} ({m['affected_count']} students)" for m in insights.get('misconceptions', []))
+
+    topic_instruction = ''
+    if tags:
+        topic_instruction = '\nIMPORTANT: Questions have been tagged to learning objectives/topics. Reference these topic names in your analysis instead of just question numbers. For example, say "Students struggled with Binary Numbers (Q3)" not just "Students struggled on Q3".\n'
 
     prompt = f"""You are an educational assessment analyst. Analyze this class assignment data and provide actionable insights for the teacher.
-
+{topic_instruction}
 Assignment: {assignment.get('title', 'Untitled')}
 Subject: {assignment.get('subject', 'Unknown')}
 Total Marks: {assignment.get('total_marks', 100)}
@@ -5965,10 +6184,10 @@ Respond in this exact JSON format:
     "misconceptions": ["list 2-4 specific misconceptions with evidence from the data"],
     "areas_needing_clarification": ["list 2-3 topics/concepts that need reteaching"],
     "recommended_actions": ["list 3-5 concrete next steps for the teacher, e.g. reteach topic X, create practice on Y"],
-    "question_notes": [{{"q_num": 1, "note": "short observation"}}]
+    "question_notes": [{{"q_num": 1, "topic": "Topic name if tagged", "note": "short observation"}}]
 }}
 
-Be specific and reference question numbers. Keep each item concise (1 sentence max). Focus on actionable insights, not generic advice. Return ONLY valid JSON — no text before or after."""
+Be specific and reference question numbers{' and topic names' if tags else ''}. Keep each item concise (1 sentence max). Focus on actionable insights, not generic advice. Return ONLY valid JSON — no text before or after."""
 
     try:
         if provider == 'anthropic':
@@ -9696,6 +9915,7 @@ def _save_module_tree(node, teacher_id, subject, year_level, parent_id=None, dep
         'position': position,
         'color': node.get('color', '#667eea'),
         'icon': node.get('icon', 'bi-book'),
+        'lo_code': node.get('lo_code', ''),
         'learning_objectives': node.get('learning_objectives', []),
         'estimated_hours': node.get('estimated_hours', 0),
         'created_at': datetime.utcnow(),
@@ -9800,23 +10020,123 @@ def _calculate_tree_mastery(root_module_id, student_id):
 def _update_profile_and_mastery_from_assignment(student_id, assignment, submission):
     """
     When an assignment is linked to a module and feedback has been sent, update the student's
-    module mastery and learning profile from the assignment score. Builds profile from every assignment.
+    module mastery and learning profile from the assignment score.
+
+    If question_module_tags exist on the assignment, uses per-question scores to update
+    individual module mastery (fine-grained). Otherwise falls back to overall assignment score.
     """
     # Support both legacy linked_module_id (scalar) and new linked_module_ids (array)
     module_ids = assignment.get('linked_module_ids') or []
     if not module_ids and assignment.get('linked_module_id'):
         module_ids = [assignment['linked_module_id']]
-    if not module_ids:
+
+    tags = assignment.get('question_module_tags', {})
+    if not module_ids and not tags:
         return
+
     total_marks = assignment.get('total_marks') or 100
     if total_marks <= 0:
         return
     display_marks, percentage = _submission_display_marks(submission, total_marks)
     if display_marks is None and percentage <= 0:
         return
+
+    # --- Per-question mastery from question_module_tags ---
+    if tags:
+        # Extract per-question marks from submission feedback
+        q_marks = {}  # {q_num_str: {'awarded': float, 'total': float}}
+        tf = submission.get('teacher_feedback') or {}
+        af = submission.get('ai_feedback') or {}
+        tf_questions = tf.get('questions', {})
+        af_questions = af.get('questions', [])
+
+        # Teacher feedback format: {'1': {'marks_awarded': 5, 'marks_total': 10}, ...}
+        if isinstance(tf_questions, dict) and tf_questions:
+            for q_num, q_data in tf_questions.items():
+                awarded = q_data.get('marks_awarded')
+                total = q_data.get('marks_total')
+                if awarded is not None and total:
+                    q_marks[str(q_num)] = {'awarded': float(awarded), 'total': float(total)}
+        # AI feedback format: [{'question_num': 1, 'marks': 5, 'marks_total': 10}, ...]
+        elif isinstance(af_questions, list) and af_questions:
+            for q in af_questions:
+                q_num = q.get('question_num') or q.get('question_number')
+                awarded = q.get('marks') or q.get('marks_awarded')
+                total = q.get('marks_total')
+                if q_num is not None and awarded is not None and total:
+                    q_marks[str(q_num)] = {'awarded': float(awarded), 'total': float(total)}
+
+        if q_marks:
+            # Aggregate marks per module_id
+            module_scores = {}  # {module_id: {'awarded': float, 'total': float}}
+            for q_num_str, tag_data in tags.items():
+                if q_num_str not in q_marks:
+                    continue
+                qm = q_marks[q_num_str]
+                for mid in tag_data.get('module_ids', []):
+                    if mid not in module_scores:
+                        module_scores[mid] = {'awarded': 0.0, 'total': 0.0}
+                    module_scores[mid]['awarded'] += qm['awarded']
+                    module_scores[mid]['total'] += qm['total']
+
+            # Update mastery per module
+            propagated_parents = set()
+            subject = assignment.get('subject') or 'General'
+            for mid, scores in module_scores.items():
+                if scores['total'] <= 0:
+                    continue
+                pct = scores['awarded'] / scores['total'] * 100
+                score_int = round(pct)
+                try:
+                    StudentModuleMastery.update_one(
+                        {'student_id': student_id, 'module_id': mid},
+                        {
+                            '$set': {
+                                'mastery_score': min(100, max(0, score_int)),
+                                'status': 'mastered' if score_int >= 100 else ('in_progress' if score_int > 0 else 'not_started'),
+                                'updated_at': datetime.utcnow(),
+                                'last_activity': datetime.utcnow(),
+                            },
+                            '$inc': {'time_spent_minutes': 1},
+                        },
+                        upsert=True,
+                    )
+                    module = Module.find_one({'module_id': mid})
+                    if module and module.get('parent_id') and module['parent_id'] not in propagated_parents:
+                        _propagate_mastery_to_parent(student_id, module['parent_id'])
+                        propagated_parents.add(module['parent_id'])
+
+                    # Update learning profile per module
+                    topic = module.get('title', 'Unknown') if module else 'Unknown'
+                    profile = StudentLearningProfile.find_one({'student_id': student_id, 'subject': subject})
+                    update_ops = {'$set': {'last_updated': datetime.utcnow()}}
+                    if pct >= 80:
+                        entry = {'topic': topic, 'confidence': pct / 100.0, 'recorded_at': datetime.utcnow().isoformat(), 'source': 'assignment'}
+                        if profile:
+                            update_ops.setdefault('$push', {})['strengths'] = entry
+                        else:
+                            update_ops.setdefault('$set', {})['strengths'] = [entry]
+                    elif pct < 50:
+                        entry = {'topic': topic, 'notes': f'Assignment score {round(pct)}%', 'recorded_at': datetime.utcnow().isoformat(), 'source': 'assignment'}
+                        if profile:
+                            update_ops.setdefault('$push', {})['weaknesses'] = entry
+                        else:
+                            update_ops.setdefault('$set', {})['weaknesses'] = [entry]
+                    if '$push' in update_ops or ('$set' in update_ops and any(k in update_ops['$set'] for k in ('strengths', 'weaknesses'))):
+                        StudentLearningProfile.update_one(
+                            {'student_id': student_id, 'subject': subject},
+                            update_ops,
+                            upsert=True,
+                        )
+                except Exception as e:
+                    logger.warning("Error updating per-question mastery for module %s: %s", mid, e)
+            return  # Per-question mastery handled; skip fallback
+
+    # --- Fallback: overall assignment score → linked modules ---
+    if not module_ids:
+        return
     for linked_module_id in module_ids:
         try:
-            # Update module mastery for the linked module: set to assignment score %
             score_int = round(percentage)
             StudentModuleMastery.update_one(
                 {'student_id': student_id, 'module_id': linked_module_id},
@@ -9831,12 +10151,10 @@ def _update_profile_and_mastery_from_assignment(student_id, assignment, submissi
                 },
                 upsert=True,
             )
-            # Optionally propagate to parent
             module = Module.find_one({'module_id': linked_module_id})
             if module and module.get('parent_id'):
                 _propagate_mastery_to_parent(student_id, module['parent_id'])
 
-            # Update learning profile (strengths/weaknesses) by subject
             subject = assignment.get('subject') or 'General'
             topic = assignment.get('title') or (module.get('title') if module else 'Assignment')
             profile = StudentLearningProfile.find_one({'student_id': student_id, 'subject': subject})
@@ -10026,6 +10344,8 @@ def module_tree_nodes_for_picker():
             'subject': m.get('subject', ''),
             'color': m.get('color', '#667eea'),
             'depth': m.get('depth', 0),
+            'lo_code': m.get('lo_code', ''),
+            'is_leaf': m.get('is_leaf', False),
             'children': m['children'],
         }
     trees = [build_picker_tree(r) for r in root_modules]
@@ -10088,6 +10408,8 @@ def update_module_node(module_id, node_id):
             update['subtitle'] = (data.get('subtitle') or '').strip()
         if 'color' in data:
             update['color'] = (data.get('color') or '').strip()
+        if 'lo_code' in data:
+            update['lo_code'] = (data.get('lo_code') or '').strip()
         Module.update_one({'module_id': node_id, 'teacher_id': session['teacher_id']}, {'$set': update})
         return jsonify({'success': True})
     except Exception as e:

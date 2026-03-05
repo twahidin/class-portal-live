@@ -113,9 +113,19 @@
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0"><i class="bi bi-clipboard2-data me-2"></i>Item Analysis</h5>
-            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#item-analysis-legend">
-                <i class="bi bi-question-circle me-1"></i>Legend
-            </button>
+            <div>
+                {% if has_module_trees %}
+                <button class="btn btn-sm {% if question_module_tags %}btn-outline-secondary{% else %}btn-primary{% endif %} me-2" onclick="tagQuestionsToModules()" id="tag-modules-btn">
+                    <i class="bi bi-diagram-3 me-1"></i>{% if question_module_tags %}Re-tag LOs{% else %}Tag to LOs{% endif %}
+                </button>
+                {% if tags_generated_at %}
+                <small class="text-muted me-2">Tagged: {{ tags_generated_at.strftime('%d %b %H:%M') if tags_generated_at.strftime is defined else tags_generated_at }}</small>
+                {% endif %}
+                {% endif %}
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#item-analysis-legend">
+                    <i class="bi bi-question-circle me-1"></i>Legend
+                </button>
+            </div>
         </div>
         <div class="collapse" id="item-analysis-legend">
             <div class="card-body border-bottom bg-light">
@@ -137,12 +147,18 @@
                 </div>
             </div>
         </div>
+        <!-- Tag loading spinner -->
+        <div class="text-center py-3 d-none" id="tag-loading">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span class="text-muted ms-2">Tagging questions to learning objectives...</span>
+        </div>
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-hover mb-0">
                     <thead class="table-light">
                         <tr>
                             <th>Question</th>
+                            <th>Learning Objective</th>
                             <th>FI</th>
                             <th>DI</th>
                             <th>Mean Score</th>
@@ -150,10 +166,20 @@
                             <th>Interpretation</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="item-analysis-body">
                         {% for q in item_analysis.questions %}
                         <tr>
                             <td><strong>Q{{ q.q_num }}</strong></td>
+                            <td class="topic-cell" data-qnum="{{ q.q_num }}">
+                                {% set q_str = q.q_num|string %}
+                                {% if question_module_tags and q_str in question_module_tags and question_module_tags[q_str].labels %}
+                                    {% for label in question_module_tags[q_str].labels %}
+                                    <span class="badge bg-info text-dark me-1" title="{{ question_module_tags[q_str].get('path', '') }}">{{ label }}</span>
+                                    {% endfor %}
+                                {% else %}
+                                <span class="text-muted">&mdash;</span>
+                                {% endif %}
+                            </td>
                             <td>
                                 {% if q.fi is not none %}
                                 <span class="badge bg-{{ q.fi_color }}{% if q.fi_color == 'warning' %} text-dark{% endif %}">{{ q.fi }}</span>
@@ -193,8 +219,13 @@
     </div>
     {% elif item_analysis and item_analysis.get('insufficient_data') %}
     <div class="card mb-4">
-        <div class="card-header">
+        <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0"><i class="bi bi-clipboard2-data me-2"></i>Item Analysis</h5>
+            {% if has_module_trees %}
+            <button class="btn btn-sm {% if question_module_tags %}btn-outline-secondary{% else %}btn-primary{% endif %}" onclick="tagQuestionsToModules()" id="tag-modules-btn-alt">
+                <i class="bi bi-diagram-3 me-1"></i>{% if question_module_tags %}Re-tag LOs{% else %}Tag to LOs{% endif %}
+            </button>
+            {% endif %}
         </div>
         <div class="card-body text-center text-muted py-4">
             <i class="bi bi-info-circle" style="font-size: 2rem;"></i>
@@ -274,6 +305,7 @@
                 <div class="col-md-6">
                     <div class="d-flex align-items-start">
                         <span class="badge bg-secondary me-2">Q{{ qn.q_num }}</span>
+                        {% if qn.topic %}<span class="badge bg-info text-dark me-2">{{ qn.topic }}</span>{% endif %}
                         <small>{{ qn.note }}</small>
                     </div>
                 </div>
@@ -297,6 +329,87 @@
             </div>
         </div>
     </div>
+
+    <!-- Module Performance Heatmap (only when question_module_tags exist and item_analysis has data) -->
+    {% if question_module_tags and item_analysis and item_analysis.questions %}
+    <div class="card mb-4" id="module-heatmap-card">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-grid-3x3-gap me-2"></i>LO Performance Heatmap</h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Learning Objective</th>
+                            <th>Questions</th>
+                            <th>Class Average</th>
+                            <th style="width: 30%;">Performance</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {# Build module performance data from tags + item analysis #}
+                        {% set ns = namespace(module_data={}) %}
+                        {% for q_num_str, tag_data in question_module_tags.items() %}
+                            {% for label in tag_data.get('labels', []) %}
+                                {% if label not in ns.module_data %}
+                                    {% set _ = ns.module_data.update({label: {'questions': [], 'total_marks': 0, 'sum_mean': 0, 'path': tag_data.get('path', '')}}) %}
+                                {% endif %}
+                                {% set _ = ns.module_data[label]['questions'].append(q_num_str) %}
+                                {# Find matching item_analysis question #}
+                                {% for q in item_analysis.questions %}
+                                    {% if q.q_num|string == q_num_str and q.mean_marks is not none %}
+                                        {% set _ = ns.module_data[label].update({'total_marks': ns.module_data[label]['total_marks'] + q.max_marks, 'sum_mean': ns.module_data[label]['sum_mean'] + q.mean_marks}) %}
+                                    {% endif %}
+                                {% endfor %}
+                            {% endfor %}
+                        {% endfor %}
+                        {% for label, mdata in ns.module_data.items() %}
+                        {% set avg = (mdata.sum_mean / mdata.total_marks * 100) if mdata.total_marks > 0 else 0 %}
+                        <tr>
+                            <td>
+                                <strong>{{ label }}</strong>
+                                {% if mdata.path %}<br><small class="text-muted">{{ mdata.path }}</small>{% endif %}
+                            </td>
+                            <td>
+                                {% for qn in mdata.questions %}
+                                <span class="badge bg-secondary me-1">Q{{ qn }}</span>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                <strong class="{% if avg >= 70 %}text-success{% elif avg >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                                    {{ "%.0f"|format(avg) }}%
+                                </strong>
+                            </td>
+                            <td>
+                                <div class="progress" style="height: 20px;">
+                                    <div class="progress-bar {% if avg >= 70 %}bg-success{% elif avg >= 50 %}bg-warning{% else %}bg-danger{% endif %}"
+                                         style="width: {{ avg }}%">
+                                        {{ "%.0f"|format(avg) }}%
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                {% if avg >= 70 %}
+                                <span class="badge bg-success">Strong</span>
+                                {% elif avg >= 50 %}
+                                <span class="badge bg-warning text-dark">Needs Review</span>
+                                {% else %}
+                                <span class="badge bg-danger">Reteach</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer text-muted small">
+            Performance grouped by tagged learning objectives. Based on class mean scores from Item Analysis.
+        </div>
+    </div>
+    {% endif %}
 
     <div class="row">
         <!-- Left Column: Score Distribution & Insights -->
@@ -366,8 +479,12 @@
                     <ul class="list-unstyled mb-4">
                         {% for item in insights.strengths %}
                         <li class="mb-2">
-                            <div class="d-flex align-items-center">
+                            <div class="d-flex align-items-center flex-wrap">
                                 <span class="badge bg-success me-2">Q{{ item.question }}</span>
+                                {% set qs = item.question|string %}
+                                {% if question_module_tags and qs in question_module_tags and question_module_tags[qs].labels %}
+                                <small class="text-muted me-2">{{ question_module_tags[qs].labels|join(', ') }}</small>
+                                {% endif %}
                                 {{ item.correct }}/{{ item.total }} correct ({{ item.percentage }}%)
                             </div>
                             <div class="progress mt-1" style="height: 6px;">
@@ -383,8 +500,12 @@
                     <ul class="list-unstyled mb-4">
                         {% for item in insights.improvements %}
                         <li class="mb-3">
-                            <div class="d-flex align-items-center">
+                            <div class="d-flex align-items-center flex-wrap">
                                 <span class="badge bg-danger me-2">Q{{ item.question }}</span>
+                                {% set qs = item.question|string %}
+                                {% if question_module_tags and qs in question_module_tags and question_module_tags[qs].labels %}
+                                <small class="text-muted me-2">{{ question_module_tags[qs].labels|join(', ') }}</small>
+                                {% endif %}
                                 {{ item.incorrect }}/{{ item.total }} need improvement ({{ item.percentage }}%)
                             </div>
                             <div class="progress mt-1" style="height: 6px;">
@@ -413,6 +534,10 @@
                             <div class="d-flex align-items-start">
                                 <span class="badge bg-warning text-dark me-2">Q{{ item.question }}</span>
                                 <div>
+                                    {% set qs = item.question|string %}
+                                    {% if question_module_tags and qs in question_module_tags and question_module_tags[qs].labels %}
+                                    <small class="fw-bold me-1">{{ question_module_tags[qs].labels|join(', ') }}</small> &mdash;
+                                    {% endif %}
                                     <small class="text-muted">{{ item.affected_count }} students affected</small>
                                     <p class="small mb-0 fst-italic">"{{ item.sample_feedback }}"</p>
                                 </div>
@@ -548,6 +673,50 @@ function filterStudents(status) {
     });
 }
 
+function tagQuestionsToModules() {
+    const btn = document.getElementById('tag-modules-btn') || document.getElementById('tag-modules-btn-alt');
+    const loading = document.getElementById('tag-loading');
+    if (btn) btn.disabled = true;
+    if (loading) loading.classList.remove('d-none');
+
+    fetch('{{ url_for("tag_questions_to_modules", assignment_id=assignment.assignment_id) }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (loading) loading.classList.add('d-none');
+        if (data.success) {
+            // Update topic cells in item analysis table
+            const tags = data.tags;
+            document.querySelectorAll('.topic-cell').forEach(cell => {
+                const qnum = cell.dataset.qnum;
+                if (tags[qnum] && tags[qnum].labels && tags[qnum].labels.length) {
+                    cell.innerHTML = tags[qnum].labels.map(l =>
+                        `<span class="badge bg-info text-dark me-1" title="${escapeHtml(tags[qnum].path || '')}">${escapeHtml(l)}</span>`
+                    ).join('');
+                }
+            });
+            // Update button text
+            if (btn) {
+                btn.innerHTML = '<i class="bi bi-diagram-3 me-1"></i>Re-tag LOs';
+                btn.className = btn.className.replace('btn-primary', 'btn-outline-secondary');
+                btn.disabled = false;
+            }
+            // Reload to show heatmap and updated insights
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to tag questions');
+            if (btn) btn.disabled = false;
+        }
+    })
+    .catch(err => {
+        if (loading) loading.classList.add('d-none');
+        alert('Network error. Please try again.');
+        if (btn) btn.disabled = false;
+    });
+}
+
 function generateClassSummary() {
     const content = document.getElementById('ai-summary-content');
     const loading = document.getElementById('summary-loading');
@@ -622,8 +791,10 @@ function renderSummary(s) {
     if (s.question_notes && s.question_notes.length) {
         html += '<hr><h6><i class="bi bi-card-text me-1"></i>Per-Question Notes</h6><div class="row g-2">';
         s.question_notes.forEach(qn => {
+            const topicBadge = qn.topic ? `<span class="badge bg-info text-dark me-2">${escapeHtml(qn.topic)}</span>` : '';
             html += `<div class="col-md-6"><div class="d-flex align-items-start">
                 <span class="badge bg-secondary me-2">Q${qn.q_num}</span>
+                ${topicBadge}
                 <small>${escapeHtml(qn.note)}</small>
             </div></div>`;
         });
