@@ -223,7 +223,7 @@
                         {% set is_rubric = assignment.marking_type == 'rubric' or (criteria and not questions) %}
 
                         {% if assignment.marking_type == 'spreadsheet' %}
-                        {# Spreadsheet assignment: show PDF report + commented Excel download links #}
+                        {# Spreadsheet assignment: download links + inline formula comparison #}
                         {% set spreadsheet_fb = ai_feedback.get('spreadsheet_feedback', {}) %}
                         <div class="mb-3">
                             <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
@@ -253,7 +253,70 @@
                                 {% if display_pct is not none %} ({{ "%.1f"|format(display_pct) }}%){% endif %}
                             </div>
                             {% endif %}
-                            {% if spreadsheet_fb %}
+
+                            {# Inline formula comparison table #}
+                            {% if spreadsheet_fb and spreadsheet_fb.get('questions') %}
+                            <div class="table-responsive mt-3">
+                                <table class="table table-bordered table-sm align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width: 60px;">Cell</th>
+                                            <th style="width: 25%;">Student's Formula</th>
+                                            <th style="width: 25%;">Expected Formula</th>
+                                            <th style="width: 70px;">Result</th>
+                                            <th>Feedback</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for q in spreadsheet_fb.get('questions', []) %}
+                                        <tr class="table-secondary">
+                                            <td colspan="4" class="fw-bold small">
+                                                Q{{ q.question_num }}: {{ q.get('description', '') }}
+                                                <span class="ms-2 badge {% if q.get('marks_awarded') == q.get('total_marks') %}bg-success{% elif q.get('marks_awarded', 0) > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                                    {{ q.get('marks_awarded', 0) }}/{{ q.get('total_marks', 0) }}
+                                                </span>
+                                            </td>
+                                            <td class="small">{{ q.get('feedback', '') }}</td>
+                                        </tr>
+                                        {% for c in q.get('cells', []) %}
+                                        {% set cell_correct = c.get('formula_correct') and c.get('value_correct') %}
+                                        {% set cell_marks = c.get('marks_awarded', 0) %}
+                                        {% set cell_total = c.get('marks_possible', 0) %}
+                                        <tr class="{% if cell_correct %}table-success{% elif cell_marks and cell_marks > 0 %}table-warning{% elif cell_total > 0 %}table-danger{% endif %}">
+                                            <td class="text-center fw-bold small">{{ c.get('cell_ref', '') }}</td>
+                                            <td class="small">
+                                                {% if c.get('student_formula') %}
+                                                <code class="text-dark">{{ c.student_formula }}</code>
+                                                {% else %}
+                                                <span class="text-muted fst-italic">no formula</span>
+                                                {% endif %}
+                                            </td>
+                                            <td class="small">
+                                                {% if c.get('expected_formula') %}
+                                                <code class="text-dark">{{ c.expected_formula }}</code>
+                                                {% else %}
+                                                <span class="text-muted fst-italic">no formula</span>
+                                                {% endif %}
+                                            </td>
+                                            <td class="text-center">
+                                                {% if cell_total > 0 %}
+                                                <span class="badge {% if cell_marks >= cell_total %}bg-success{% elif cell_marks > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                                    {{ cell_marks }}/{{ cell_total }}
+                                                </span>
+                                                {% elif cell_correct %}
+                                                <i class="bi bi-check-circle-fill text-success"></i>
+                                                {% else %}
+                                                <i class="bi bi-x-circle-fill text-danger"></i>
+                                                {% endif %}
+                                            </td>
+                                            <td class="small">{{ c.get('feedback', '') }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% elif spreadsheet_fb %}
                             {% set summary = spreadsheet_fb.get('summary') or spreadsheet_fb.get('overall_feedback') %}
                             {% if summary %}
                             <div class="alert alert-secondary">
@@ -277,15 +340,16 @@
                         </div>
 
                         {% elif assignment.marking_type == 'python' and questions %}
-                        {# Python assignment: cell-based feedback #}
+                        {# Python assignment: cell-based feedback with student answer comparison #}
                         {% set include_answer_key = submission.get('include_answer_key', False) %}
                         <div class="table-responsive">
                             <table class="table table-sm feedback-table">
                                 <thead class="table-light">
                                     <tr>
                                         <th style="width: 50px;">Cell</th>
+                                        <th style="width: 22%;">Student's Answer</th>
                                         {% if include_answer_key %}
-                                        <th style="width: 30%;">Answer Key</th>
+                                        <th style="width: 22%;">Answer Key</th>
                                         {% endif %}
                                         <th>Feedback</th>
                                         <th style="width: 70px;">Marks</th>
@@ -300,6 +364,14 @@
                                     <tr class="{% if marks_num is not none and marks_num >= marks_total_val %}table-success{% elif marks_num is not none and marks_num == 0 %}table-danger{% elif marks_num is not none %}table-warning{% endif %}">
                                         <td class="text-center">
                                             <strong><a href="#" class="python-cell-link" data-cell="{{ q.question_num }}" style="color: #6f42c1; text-decoration: none;">{{ q.question_num }}</a></strong>
+                                        </td>
+                                        <td class="small">
+                                            {% set student_answer = q.get('student_answer', '') %}
+                                            {% if student_answer %}
+                                            <pre class="mb-0 p-1 bg-light rounded small" style="font-size: 0.75rem; white-space: pre-wrap;">{{ student_answer }}</pre>
+                                            {% else %}
+                                            <span class="text-muted fst-italic">-</span>
+                                            {% endif %}
                                         </td>
                                         {% if include_answer_key %}
                                         <td class="small">

@@ -102,6 +102,11 @@
                         </a>
                         {% endif %}
                         {% endif %}
+                        {% if is_teacher %}
+                        <button type="button" class="btn btn-outline-warning btn-sm" id="btn-reevaluate">
+                            <i class="bi bi-arrow-repeat me-1"></i>Re-evaluate
+                        </button>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -123,57 +128,72 @@
             {% endif %}
             {% endif %}
 
-            <h6 class="fw-bold mb-2"><i class="bi bi-list-check me-2"></i>Question breakdown and comments</h6>
+            <h6 class="fw-bold mb-2"><i class="bi bi-list-check me-2"></i>Formula Comparison</h6>
             <div class="table-responsive">
-                <table class="table table-bordered table-sm">
+                <table class="table table-bordered table-sm align-middle">
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 60px;">Q#</th>
-                            <th style="width: 28%;">Description</th>
-                            <th style="width: 80px;">Marks</th>
+                            <th style="width: 60px;">Cell</th>
+                            <th style="width: 25%;">Student's Formula</th>
+                            <th style="width: 25%;">Expected Formula</th>
+                            <th style="width: 70px;">Result</th>
                             <th>Feedback</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for q in spreadsheet_feedback.get('questions', []) %}
                         {% set teacher_q = teacher_feedback.get('spreadsheet_questions', {}).get(q.question_num|string, {}) %}
-                        {% set display_feedback = teacher_q.get('feedback') or q.get('feedback', '') %}
-                        <tr>
-                            <td class="text-center fw-bold">{{ q.question_num }}</td>
-                            <td class="small">{{ q.get('description', '') }}</td>
-                            <td class="text-center">
-                                <span class="badge {% if q.get('marks_awarded') == q.get('total_marks') %}bg-success{% elif q.get('marks_awarded', 0) > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                        {# Question header row #}
+                        <tr class="table-secondary">
+                            <td colspan="4" class="fw-bold small">
+                                Q{{ q.question_num }}: {{ q.get('description', '') }}
+                                <span class="ms-2 badge {% if q.get('marks_awarded') == q.get('total_marks') %}bg-success{% elif q.get('marks_awarded', 0) > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
                                     {{ q.get('marks_awarded', 0) }}/{{ q.get('total_marks', 0) }}
                                 </span>
                             </td>
                             <td>
                                 {% if is_teacher %}
-                                <textarea class="form-control form-control-sm feedback-q-input" name="feedback_{{ q.question_num }}" data-q="{{ q.question_num }}" rows="2" placeholder="Feedback for this question...">{{ teacher_q.get('feedback') or q.get('feedback', '') }}</textarea>
+                                <textarea class="form-control form-control-sm feedback-q-input" name="feedback_{{ q.question_num }}" data-q="{{ q.question_num }}" rows="1" placeholder="Teacher feedback...">{{ teacher_q.get('feedback') or q.get('feedback', '') }}</textarea>
                                 {% else %}
-                                <div class="small">{{ display_feedback or '—' }}</div>
+                                {% set display_feedback = teacher_q.get('feedback') or q.get('feedback', '') %}
+                                <span class="small">{{ display_feedback or '' }}</span>
                                 {% endif %}
                             </td>
                         </tr>
-                        {% if q.get('cells') %}
-                        <tr class="table-light">
-                            <td></td>
-                            <td colspan="3" class="small py-2">
-                                <span class="text-muted">Cell-level feedback:</span>
-                                <ul class="mb-0 mt-1 ps-3">
-                                    {% set ns = namespace(any_incorrect=false) %}
-                                    {% for c in q.cells %}
-                                    {% if not c.get('formula_correct') or not c.get('value_correct') %}
-                                    {% set ns.any_incorrect = true %}
-                                    <li><strong>{{ c.get('cell_ref', '') }}</strong>: {{ c.get('feedback', '') }}</li>
-                                    {% endif %}
-                                    {% endfor %}
-                                    {% if not ns.any_incorrect %}
-                                    <li class="text-muted">All cells correct for this question.</li>
-                                    {% endif %}
-                                </ul>
+                        {% for c in q.get('cells', []) %}
+                        {% set cell_correct = c.get('formula_correct') and c.get('value_correct') %}
+                        {% set cell_marks = c.get('marks_awarded', 0) %}
+                        {% set cell_total = c.get('marks_possible', 0) %}
+                        <tr class="{% if cell_correct %}table-success{% elif cell_marks and cell_marks > 0 %}table-warning{% elif cell_total > 0 %}table-danger{% endif %}">
+                            <td class="text-center fw-bold small">{{ c.get('cell_ref', '') }}</td>
+                            <td class="small">
+                                {% if c.get('student_formula') %}
+                                <code class="text-dark">{{ c.student_formula }}</code>
+                                {% else %}
+                                <span class="text-muted fst-italic">no formula</span>
+                                {% endif %}
                             </td>
+                            <td class="small">
+                                {% if c.get('expected_formula') %}
+                                <code class="text-dark">{{ c.expected_formula }}</code>
+                                {% else %}
+                                <span class="text-muted fst-italic">no formula</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if cell_total > 0 %}
+                                <span class="badge {% if cell_marks >= cell_total %}bg-success{% elif cell_marks > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                    {{ cell_marks }}/{{ cell_total }}
+                                </span>
+                                {% elif cell_correct %}
+                                <i class="bi bi-check-circle-fill text-success"></i>
+                                {% else %}
+                                <i class="bi bi-x-circle-fill text-danger"></i>
+                                {% endif %}
+                            </td>
+                            <td class="small">{{ c.get('feedback', '') }}</td>
                         </tr>
-                        {% endif %}
+                        {% endfor %}
                         {% endfor %}
                     </tbody>
                 </table>
@@ -234,6 +254,32 @@
             alert('Network error. Please try again.');
         });
     });
+
+    var btnReeval = document.getElementById('btn-reevaluate');
+    if (btnReeval) {
+        btnReeval.addEventListener('click', function() {
+            if (!confirm('Re-evaluate this submission? This will re-run the spreadsheet evaluator and update the formula comparison data.')) return;
+            btnReeval.disabled = true;
+            btnReeval.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Re-evaluating...';
+            fetch('{{ url_for("regenerate_ai_feedback", submission_id=submission.submission_id) }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify({})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    btnReeval.disabled = false;
+                    btnReeval.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-evaluate';
+                    alert(data.error || 'Re-evaluation failed.');
+                }
+            }).catch(function() {
+                btnReeval.disabled = false;
+                btnReeval.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Re-evaluate';
+                alert('Network error. Please try again.');
+            });
+        });
+    }
 })();
 </script>
 {% endif %}

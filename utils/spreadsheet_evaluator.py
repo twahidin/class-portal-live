@@ -74,6 +74,10 @@ def _result_to_dict(result) -> Dict[str, Any]:
                 'cells': [
                     {
                         'cell_ref': c.cell_ref,
+                        'student_formula': c.student_formula,
+                        'expected_formula': c.expected_formula,
+                        'marks_awarded': c.marks_awarded,
+                        'marks_possible': c.marks_possible,
                         'feedback': c.feedback,
                         'formula_correct': c.formula_correct,
                         'value_correct': c.value_correct,
