@@ -261,7 +261,7 @@
                                             <a href="#" class="small text-decoration-none latex-preview-toggle" onclick="toggleLatexPreview(this); return false;">Preview LaTeX</a>
                                             <div class="latex-preview-box d-none p-2 mt-1 border rounded bg-white small"></div>
                                             {% if q.improvement %}
-                                            <small class="text-muted d-block mt-1">💡 {{ q.improvement }}</small>
+                                            <small class="text-muted d-block mt-1 latex-render">💡 {{ q.improvement|latex_safe }}</small>
                                             {% endif %}
                                         </td>
                                         <td class="marks-cell">
