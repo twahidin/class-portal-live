@@ -497,7 +497,7 @@
                                         </td>
                                         <td class="correction-cell">
                                             {% if correction_sent %}
-                                            <div class="small text-muted">{{ q_correction or '—' }}</div>
+                                            <div class="small text-muted">{{ (q_correction or '—')|latex_safe }}</div>
                                             {% else %}
                                             <textarea class="form-control form-control-sm correction-input" name="correction_q{{ q.question_num }}" rows="2" placeholder="Your correction or challenge...">{{ q_correction }}</textarea>
                                             {% endif %}
@@ -544,7 +544,7 @@
                                         </td>
                                         <td class="correction-cell">
                                             {% if correction_sent %}
-                                            <div class="small text-muted">{{ c_correction or '—' }}</div>
+                                            <div class="small text-muted">{{ (c_correction or '—')|latex_safe }}</div>
                                             {% else %}
                                             <textarea class="form-control form-control-sm correction-input rubric-criterion" data-criterion="{{ criterion.name }}" rows="2" placeholder="Your correction or challenge...">{{ c_correction }}</textarea>
                                             {% endif %}
@@ -593,7 +593,7 @@
                                         <td class="small">{{ (err.feedback or '—')|latex_safe }}</td>
                                         <td class="correction-cell">
                                             {% if correction_sent %}
-                                            <div class="small text-muted">{{ err_correction_text or '—' }}</div>
+                                            <div class="small text-muted">{{ (err_correction_text or '—')|latex_safe }}</div>
                                             {% else %}
                                             <textarea class="form-control form-control-sm correction-input rubric-error" data-error-index="{{ err_idx }}" rows="2" placeholder="Your correction or challenge...">{{ err_correction_text }}</textarea>
                                             {% endif %}
