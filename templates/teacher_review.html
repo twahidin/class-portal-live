@@ -2068,18 +2068,29 @@
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Formatting...';
 
-        // Gather all feedback texts
+        // Gather all text fields: feedback, student answers, answer keys
         const texts = {};
         document.querySelectorAll('.feedback-input').forEach(ta => {
             if (ta.value.trim()) texts[ta.name] = ta.value;
         });
         const overallFb = document.getElementById('overall-feedback');
         if (overallFb && overallFb.value.trim()) texts['overall'] = overallFb.value;
+        // Student answers (read-only display divs)
+        document.querySelectorAll('.student-answer-text').forEach(div => {
+            const row = div.closest('tr.feedback-row');
+            if (row && div.textContent.trim()) {
+                texts['student_' + row.dataset.question] = div.textContent.trim();
+            }
+        });
+        // Answer keys (hidden inputs)
+        document.querySelectorAll('.answer-key-input').forEach(inp => {
+            if (inp.value.trim()) texts[inp.name] = inp.value;
+        });
 
         if (Object.keys(texts).length === 0) {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-calculator me-1"></i>Format Math as LaTeX';
-            if (typeof showToast === 'function') showToast('Info', 'No feedback text to format');
+            if (typeof showToast === 'function') showToast('Info', 'No text to format');
             return;
         }
 
@@ -2097,6 +2108,22 @@
                 for (const [key, val] of Object.entries(data.results)) {
                     if (key === 'overall') {
                         overallFb.value = val;
+                    } else if (key.startsWith('student_')) {
+                        // Update student answer display div
+                        const qNum = key.replace('student_', '');
+                        const row = document.querySelector(`tr.feedback-row[data-question="${qNum}"]`);
+                        if (row) {
+                            const div = row.querySelector('.student-answer-text');
+                            if (div) { div.textContent = val; rerenderLatex(div); }
+                        }
+                    } else if (key.startsWith('answer_key_')) {
+                        // Update answer key hidden input + display div
+                        const inp = document.querySelector(`input[name="${key}"]`);
+                        if (inp) {
+                            inp.value = val;
+                            const displayDiv = inp.closest('td').querySelector('.answer-key-display');
+                            if (displayDiv) { displayDiv.textContent = val; rerenderLatex(displayDiv); }
+                        }
                     } else {
                         const ta = document.querySelector(`textarea[name="${key}"]`);
                         if (ta) ta.value = val;
