@@ -251,9 +251,11 @@
                                             </div>
                                         </td>
                                         <td>
-                                            <textarea class="form-control form-control-sm feedback-input" 
+                                            <textarea class="form-control form-control-sm feedback-input"
                                                       name="feedback_{{ q.question_num }}" rows="4"
                                                       placeholder="{% if q.needs_review %}Enter feedback...{% else %}{{ q.feedback }}{% endif %}">{{ teacher_q.get('feedback') or (q.feedback if not q.needs_review else '') }}</textarea>
+                                            <a href="#" class="small text-decoration-none latex-preview-toggle" onclick="toggleLatexPreview(this); return false;">Preview LaTeX</a>
+                                            <div class="latex-preview-box d-none p-2 mt-1 border rounded bg-white small"></div>
                                             {% if q.improvement %}
                                             <small class="text-muted d-block mt-1">💡 {{ q.improvement }}</small>
                                             {% endif %}
@@ -370,8 +372,10 @@
                             <span id="ai-feedback-error-reason">{% if ai_feedback.get('error') %}{{ ai_feedback.error }}{% else %}You can edit below or click "Regenerate AI Feedback" above to try again.{% endif %}</span>
                         </div>
                         {% endif %}
-                        <textarea class="form-control" id="overall-feedback" rows="3" 
+                        <textarea class="form-control" id="overall-feedback" rows="3"
                                   placeholder="Overall comments and suggestions...">{{ ai_feedback.overall_feedback if ai_feedback else '' }}</textarea>
+                        <a href="#" class="small text-decoration-none latex-preview-toggle" onclick="toggleLatexPreview(this); return false;">Preview LaTeX</a>
+                        <div class="latex-preview-box d-none p-2 mt-1 border rounded bg-white small"></div>
                     </div>
                 </div>
             </div>
@@ -2038,6 +2042,33 @@
             }
             btn.disabled = false;
         });
+    }
+
+    // LaTeX preview toggle for feedback textareas
+    function toggleLatexPreview(link) {
+        var previewDiv = link.nextElementSibling;
+        var textarea = link.previousElementSibling;
+        // Walk back to find the textarea if there's something in between
+        if (!textarea || textarea.tagName !== 'TEXTAREA') {
+            textarea = link.parentElement.querySelector('textarea');
+        }
+        if (previewDiv.classList.contains('d-none')) {
+            previewDiv.classList.remove('d-none');
+            previewDiv.textContent = textarea.value || '(empty)';
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(previewDiv, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false}
+                    ],
+                    throwOnError: false
+                });
+            }
+            link.textContent = 'Hide preview';
+        } else {
+            previewDiv.classList.add('d-none');
+            link.textContent = 'Preview LaTeX';
+        }
     }
 </script>
 {% endblock %}

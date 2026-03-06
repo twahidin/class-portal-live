@@ -276,7 +276,7 @@
                                                     {{ q.get('marks_awarded', 0) }}/{{ q.get('total_marks', 0) }}
                                                 </span>
                                             </td>
-                                            <td class="small">{{ q.get('feedback', '') }}</td>
+                                            <td class="small">{{ q.get('feedback', '')|latex_safe }}</td>
                                         </tr>
                                         {% for c in q.get('cells', []) %}
                                         {% set cell_correct = c.get('formula_correct') and c.get('value_correct') %}
@@ -309,7 +309,7 @@
                                                 <i class="bi bi-x-circle-fill text-danger"></i>
                                                 {% endif %}
                                             </td>
-                                            <td class="small">{{ c.get('feedback', '') }}</td>
+                                            <td class="small">{{ c.get('feedback', '')|latex_safe }}</td>
                                         </tr>
                                         {% endfor %}
                                         {% endfor %}
@@ -321,7 +321,7 @@
                             {% if summary %}
                             <div class="alert alert-secondary">
                                 <h6 class="mb-1"><i class="bi bi-chat-quote me-1"></i>Summary</h6>
-                                {{ summary }}
+                                {{ summary|latex_safe }}
                             </div>
                             {% endif %}
                             {% endif %}
@@ -335,7 +335,7 @@
                             </small>
                             {% set teacher_overall = teacher_feedback.get('overall_feedback') %}
                             {% if teacher_overall %}
-                            <p class="mt-2 mb-0 small">{{ teacher_overall }}</p>
+                            <p class="mt-2 mb-0 small">{{ teacher_overall|latex_safe }}</p>
                             {% endif %}
                         </div>
 
@@ -386,10 +386,10 @@
                                         <td>
                                             {% set feedback = teacher_q.get('feedback') or q.get('feedback', '') %}
                                             {% if feedback %}
-                                            <p class="mb-1">{{ feedback }}</p>
+                                            <p class="mb-1">{{ feedback|latex_safe }}</p>
                                             {% endif %}
                                             {% if q.get('improvement') %}
-                                            <small class="text-info"><i class="bi bi-lightbulb me-1"></i>{{ q.improvement }}</small>
+                                            <small class="text-info"><i class="bi bi-lightbulb me-1"></i>{{ q.improvement|latex_safe }}</small>
                                             {% endif %}
                                         </td>
                                         <td class="text-center">
@@ -447,7 +447,7 @@
                                         <td class="small">
                                             {% set answer_key = teacher_q.get('answer_key') or q.get('correct_answer', '') %}
                                             {% if answer_key %}
-                                            <div class="answer-key-text">{{ answer_key }}</div>
+                                            <div class="answer-key-text">{{ answer_key|latex_safe }}</div>
                                             {% endif %}
                                             {% if teacher_q.get('answer_key_image') %}
                                             <div class="mt-1">
@@ -463,12 +463,12 @@
                                         <td>
                                             {% set feedback = teacher_q.get('feedback') or q.get('feedback', '') %}
                                             {% if feedback %}
-                                            <p class="mb-1">{{ feedback }}</p>
+                                            <p class="mb-1">{{ feedback|latex_safe }}</p>
                                             {% endif %}
-                                            
+
                                             {% if q.get('improvement') %}
                                             <small class="text-info">
-                                                <i class="bi bi-lightbulb me-1"></i>{{ q.improvement }}
+                                                <i class="bi bi-lightbulb me-1"></i>{{ q.improvement|latex_safe }}
                                             </small>
                                             {% endif %}
                                         </td>
@@ -528,10 +528,10 @@
                                     <tr>
                                         <td class="fw-bold">{{ criterion.name }}</td>
                                         <td class="small">
-                                            {{ teacher_c.get('reasoning') or criterion.reasoning or '—' }}
+                                            {{ (teacher_c.get('reasoning') or criterion.reasoning or '—')|latex_safe }}
                                         </td>
                                         <td class="small">
-                                            {{ teacher_c.get('afi') or criterion.afi or '—' }}
+                                            {{ (teacher_c.get('afi') or criterion.afi or '—')|latex_safe }}
                                         </td>
                                         <td class="text-center">
                                             {% set m = teacher_c.get('marks') if teacher_c.get('marks') is not none else criterion.marks_awarded %}
@@ -556,7 +556,7 @@
                                     <tr>
                                         <td class="fw-bold">Overall</td>
                                         <td colspan="2">
-                                            {{ teacher_feedback.get('overall_feedback') or ai_feedback.get('overall_feedback') or '—' }}
+                                            {{ (teacher_feedback.get('overall_feedback') or ai_feedback.get('overall_feedback') or '—')|latex_safe }}
                                         </td>
                                         <td class="text-center fw-bold">
                                             {{ submission.get('teacher_feedback', {}).get('total_marks') or ai_feedback.total_marks or '—' }}/{{ assignment.total_marks or 100 }}
@@ -588,9 +588,9 @@
                                     {% set err_correction_text = err_correction_raw.get('text', err_correction_raw) if err_correction_raw is mapping else err_correction_raw %}
                                     <tr>
                                         <td class="small">{{ err.location or '—' }}</td>
-                                        <td class="small">{{ err.error or '—' }}</td>
-                                        <td class="small">{{ err.correction or '—' }}</td>
-                                        <td class="small">{{ err.feedback or '—' }}</td>
+                                        <td class="small">{{ (err.error or '—')|latex_safe }}</td>
+                                        <td class="small">{{ (err.correction or '—')|latex_safe }}</td>
+                                        <td class="small">{{ (err.feedback or '—')|latex_safe }}</td>
                                         <td class="correction-cell">
                                             {% if correction_sent %}
                                             <div class="small text-muted">{{ err_correction_text or '—' }}</div>
@@ -612,7 +612,7 @@
                         <div class="overall-feedback mt-4">
                             <h6><i class="bi bi-chat-quote me-2"></i>Overall Comments</h6>
                             <div class="alert alert-secondary">
-                                {{ overall }}
+                                {{ overall|latex_safe }}
                             </div>
                         </div>
                         {% endif %}

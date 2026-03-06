@@ -28,6 +28,8 @@ import uuid
 import json
 import base64
 import subprocess
+import re
+from markupsafe import Markup, escape
 import tempfile
 import queue
 import threading
@@ -130,6 +132,20 @@ def sgt_filter(dt):
         # Convert to Singapore time
         return dt.astimezone(SGT)
     return dt
+
+@app.template_filter('latex_safe')
+def latex_safe_filter(text):
+    """Escape HTML but preserve LaTeX $...$ and $$...$$ blocks for KaTeX rendering."""
+    if not text:
+        return text
+    parts = re.split(r'(\$\$[\s\S]+?\$\$|\$[^\$]+?\$)', str(text))
+    result = []
+    for part in parts:
+        if part.startswith('$'):
+            result.append(part)  # Keep LaTeX as-is
+        else:
+            result.append(str(escape(part)))  # Escape HTML in non-LaTeX
+    return Markup(''.join(result))
 
 # Initialize rate limiter (explicit storage avoids "no storage specified" warning)
 # Set RATELIMIT_STORAGE_URI=redis://... for production (e.g. Railway Redis)
@@ -1478,6 +1494,24 @@ def api_student_open_in_drive():
         logger.error(f"Error in open-in-drive: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def _should_auto_send_feedback(ai_result):
+    """Check if AI feedback is high enough quality to send directly to student."""
+    if not ai_result or ai_result.get('error'):
+        return False
+    # Low confidence = probably bad handwriting, don't auto-send
+    if ai_result.get('confidence') == 'low':
+        return False
+    # If more than half the questions need review, don't auto-send
+    questions = ai_result.get('questions', [])
+    if questions:
+        needs_review_count = sum(1 for q in questions if q.get('needs_review'))
+        if needs_review_count > len(questions) / 2:
+            return False
+    # Essay: wrong_submission or poor quality
+    if ai_result.get('submission_quality') in ('wrong_submission', 'poor'):
+        return False
+    return True
+
 @app.route('/api/student/submit-from-drive', methods=['POST'])
 @login_required
 @limiter.limit("10 per hour")
@@ -1655,7 +1689,7 @@ def api_student_submit_from_drive():
                             'spreadsheet_feedback_pdf_id': str(pdf_id),
                             'spreadsheet_feedback_excel_id': str(excel_id),
                         }
-                        if assignment.get('send_ai_feedback_immediately'):
+                        if assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                             update_fields['feedback_sent'] = True
                         Submission.update_one(
                             {'submission_id': submission_id},
@@ -1718,7 +1752,7 @@ def api_student_submit_from_drive():
                         'ai_feedback': ai_result,
                         'status': 'ai_reviewed'
                     }
-                    if assignment.get('send_ai_feedback_immediately') and not ai_result.get('error'):
+                    if assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                         update_fields['feedback_sent'] = True
                     Submission.update_one(
                         {'submission_id': submission_id},
@@ -1942,7 +1976,7 @@ def api_student_submit_drive_link():
                             'spreadsheet_feedback_pdf_id': str(pdf_id),
                             'spreadsheet_feedback_excel_id': str(excel_id),
                         }
-                        if assignment.get('send_ai_feedback_immediately'):
+                        if assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                             update_fields['feedback_sent'] = True
                         Submission.update_one({'submission_id': submission_id}, {'$set': update_fields})
                         if update_fields.get('feedback_sent'):
@@ -1990,7 +2024,7 @@ def api_student_submit_drive_link():
                     )
                 else:
                     update_fields = {'ai_feedback': ai_result, 'status': 'ai_reviewed'}
-                    if assignment.get('send_ai_feedback_immediately') and not ai_result.get('error'):
+                    if assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                         update_fields['feedback_sent'] = True
                     Submission.update_one({'submission_id': submission_id}, {'$set': update_fields})
                     if update_fields.get('feedback_sent'):
@@ -2281,7 +2315,7 @@ Respond ONLY with valid JSON in this exact format:
 
                         has_error = ai_result.get('error') or not ai_result.get('questions')
                         update_fields = {'ai_feedback': ai_result, 'status': 'ai_reviewed' if not has_error else 'submitted'}
-                        if not has_error and assignment.get('send_ai_feedback_immediately'):
+                        if not has_error and assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                             update_fields['feedback_sent'] = True
                         Submission.update_one({'submission_id': submission_id}, {'$set': update_fields})
                         if update_fields.get('feedback_sent'):
@@ -2347,7 +2381,7 @@ Respond ONLY with valid JSON in this exact format:
                             'spreadsheet_feedback_pdf_id': str(pdf_id),
                             'spreadsheet_feedback_excel_id': str(excel_id),
                         }
-                        if assignment.get('send_ai_feedback_immediately'):
+                        if assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                             update_fields['feedback_sent'] = True
                         Submission.update_one(
                             {'submission_id': submission_id},
@@ -2410,7 +2444,7 @@ Respond ONLY with valid JSON in this exact format:
                         'status': 'ai_reviewed'
                     }
                     # If assignment is set to send AI feedback straight away, student can see feedback without teacher review
-                    if assignment.get('send_ai_feedback_immediately') and not ai_result.get('error'):
+                    if assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                         update_fields['feedback_sent'] = True
                     Submission.update_one(
                         {'submission_id': submission_id},
@@ -8544,7 +8578,7 @@ def regenerate_ai_feedback(submission_id):
                 'spreadsheet_feedback_excel_id': str(excel_id),
                 'updated_at': datetime.utcnow(),
             }
-            if assignment.get('send_ai_feedback_immediately'):
+            if assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                 regen_update['feedback_sent'] = True
                 regen_update['status'] = 'reviewed'
                 regen_update['reviewed_at'] = datetime.utcnow()
@@ -8552,7 +8586,7 @@ def regenerate_ai_feedback(submission_id):
                 {'submission_id': submission_id},
                 {'$set': regen_update}
             )
-            if assignment.get('send_ai_feedback_immediately'):
+            if assignment.get('send_ai_feedback_immediately') and _should_auto_send_feedback(ai_result):
                 submission_after = Submission.find_one({'submission_id': submission_id})
                 if submission_after:
                     _update_profile_and_mastery_from_assignment(submission['student_id'], assignment, submission_after)

@@ -504,6 +504,18 @@ IMPORTANT RULES:
 6. If rubrics are provided, use them to evaluate subjective answers (essays, literature, etc.)
 7. If reference materials are provided, use them to verify factual accuracy and context
 8. ALWAYS extract and include the correct answer from the answer key for each question
+9. HANDWRITING TRANSCRIPTION RULES:
+   - IGNORE any words or text that have been crossed out, scribbled over, or struck through — treat them as deleted by the student
+   - A caret symbol (^) or an insertion mark between words indicates the student wants to INSERT text at that point — read the inserted word(s) as part of the sentence
+   - If a word is written above the line with an arrow or caret pointing to its position, include it in the transcription at that position
+   - Focus on the student's FINAL intended answer, not their drafts or corrections
+   - If the overall handwriting quality is so poor that you cannot confidently read MORE THAN HALF the content, set confidence to "low" and add review_notes explaining the difficulty
+
+FORMATTING RULES:
+- When providing feedback that includes mathematical expressions, chemical formulas, or scientific equations, use LaTeX notation wrapped in $ delimiters
+- Examples: $x^2 + 3x = 0$, $\\frac{{1}}{{2}}mv^2$, $H_2O$, $\\sum_{{i=1}}^{{n}} x_i$
+- Use $$ delimiters for standalone/display equations: $$E = mc^2$$
+- For plain text feedback (no math), do NOT use LaTeX notation
 
 Respond ONLY with valid JSON in this exact format:
 {{
@@ -522,8 +534,8 @@ Respond ONLY with valid JSON in this exact format:
     ],
     "total_marks": number or null,
     "overall_feedback": "general feedback",
-    "confidence": "high/medium/low",
-    "review_notes": "notes for teacher about unclear sections"
+    "confidence": "high/medium/low — set to 'low' if handwriting is mostly illegible or you are guessing at more than 30% of answers",
+    "review_notes": "REQUIRED if confidence is low — explain what was unclear and why teacher review is needed"
 }}"""
 
         # Add answer key - ALWAYS use PDF vision for accuracy (critical for marking)
@@ -1665,6 +1677,12 @@ IMPORTANT INSTRUCTIONS:
    - Unclear or awkward phrasing
    - Punctuation errors
    - Vocabulary misuse
+
+FORMATTING RULES:
+- When providing feedback that includes mathematical expressions, chemical formulas, or scientific equations, use LaTeX notation wrapped in $ delimiters
+- Examples: $x^2 + 3x = 0$, $\\frac{{1}}{{2}}mv^2$, $H_2O$
+- Use $$ delimiters for standalone/display equations: $$E = mc^2$$
+- For plain text feedback (no math), do NOT use LaTeX notation
 
 Respond ONLY with valid JSON in this exact format:
 {{
