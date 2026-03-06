@@ -1754,6 +1754,269 @@ def api_student_submit_from_drive():
         logger.error(f"Error in submit-from-drive: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/student/submit-drive-link', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def api_student_submit_drive_link():
+    """Submit an assignment by pasting a shared Google Drive link.
+    Downloads the file and processes it like a normal upload."""
+    from gridfs import GridFS
+    from bson import ObjectId
+    from utils.google_drive import extract_drive_file_id, get_teacher_drive_manager, get_drive_service, DriveManager
+
+    try:
+        data = request.get_json()
+        assignment_id = data.get('assignment_id') if data else None
+        drive_url = data.get('drive_url') if data else None
+        if not assignment_id or not drive_url:
+            return jsonify({'success': False, 'error': 'Missing assignment_id or drive_url'}), 400
+
+        # Extract file ID from URL
+        file_id = extract_drive_file_id(drive_url)
+        if not file_id:
+            return jsonify({'success': False, 'error': 'Invalid Google Drive URL. Please paste a valid sharing link.'}), 400
+
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        if not assignment:
+            return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+        student = Student.find_one({'student_id': session['student_id']})
+        if not student:
+            return jsonify({'success': False, 'error': 'Student not found'}), 404
+
+        # Authorization
+        teacher_ids = get_student_teacher_ids(session['student_id'])
+        if assignment.get('teacher_id') not in teacher_ids:
+            return jsonify({'success': False, 'error': 'Access denied'}), 403
+        if not can_student_access_assignment(student, assignment):
+            return jsonify({'success': False, 'error': 'Access denied'}), 403
+
+        teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
+        if not teacher:
+            return jsonify({'success': False, 'error': 'Teacher not found'}), 404
+
+        # Block if already submitted
+        existing = Submission.find_one(
+            {'assignment_id': assignment_id, 'student_id': session['student_id']},
+            sort=[('submitted_at', -1), ('created_at', -1)]
+        )
+        if existing and existing.get('status') in ['submitted', 'ai_reviewed', 'reviewed']:
+            if existing.get('submitted_via') == 'manual':
+                return jsonify({'success': False, 'error': 'This assignment was submitted by your teacher. You cannot resubmit unless the teacher rejects it.'}), 400
+            return jsonify({'success': False, 'error': 'Already submitted. You cannot resubmit unless the teacher rejects it.'}), 400
+
+        # Get a Drive manager to download the shared file
+        drive_manager = get_teacher_drive_manager(teacher)
+        if not drive_manager:
+            service = get_drive_service()
+            if service:
+                drive_manager = DriveManager(service)
+            else:
+                return jsonify({'success': False, 'error': 'Google Drive is not configured. Contact your teacher.'}), 500
+
+        # Download file from Drive
+        try:
+            file_bytes, content_type, filename = drive_manager.download_shared_file(file_id)
+        except Exception as e:
+            logger.error(f"Error downloading Drive file: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': 'Failed to download the file from Google Drive. Make sure the file is shared as "Anyone with the link can view".'}), 400
+
+        if not file_bytes:
+            return jsonify({'success': False, 'error': 'Could not download the file. Make sure the file is shared as "Anyone with the link can view".'}), 400
+
+        # Validate file type
+        allowed_types = {
+            'application/pdf': ('pdf', 'pdf'),
+            'image/jpeg': ('image', 'jpg'),
+            'image/png': ('image', 'png'),
+            'image/gif': ('image', 'gif'),
+            'image/webp': ('image', 'webp'),
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ('excel', 'xlsx'),
+            'application/vnd.ms-excel': ('excel', 'xls'),
+        }
+        file_info = allowed_types.get(content_type)
+        if not file_info:
+            return jsonify({'success': False, 'error': f'Unsupported file type: {content_type}. Only PDF, images, and Excel files are accepted.'}), 400
+
+        page_type, file_ext = file_info
+
+        # Store in GridFS
+        fs = GridFS(db.db)
+
+        if existing:
+            submission_id = existing['submission_id']
+            for old_fid in existing.get('file_ids', []):
+                try:
+                    fs.delete(ObjectId(old_fid))
+                except Exception as e:
+                    logger.warning(f"Error deleting old submission file {old_fid}: {e}")
+        else:
+            submission_id = generate_submission_id()
+
+        stored_file_id = fs.put(
+            file_bytes,
+            filename=f"{submission_id}_drive_link.{file_ext}",
+            content_type=content_type,
+            submission_id=submission_id,
+            page_num=1
+        )
+        file_ids = [str(stored_file_id)]
+
+        pages = [{
+            'type': page_type,
+            'data': file_bytes,
+            'page_num': 1
+        }]
+
+        # Create or update submission
+        submission_data = {
+            'submission_id': submission_id,
+            'assignment_id': assignment_id,
+            'student_id': session['student_id'],
+            'teacher_id': assignment['teacher_id'],
+            'file_ids': file_ids,
+            'file_type': page_type,
+            'page_count': 1,
+            'status': 'submitted',
+            'submitted_at': datetime.utcnow(),
+            'submitted_via': 'google_drive_link',
+            'drive_link_url': drive_url,
+            'created_at': existing['created_at'] if existing else datetime.utcnow()
+        }
+        if existing:
+            Submission.update_one(
+                {'submission_id': submission_id},
+                {'$set': submission_data, '$unset': {'rejection_reason': '', 'rejected_at': '', 'rejected_by': ''}}
+            )
+        else:
+            Submission.insert_one(submission_data)
+
+        # AI marking pipeline
+        try:
+            marking_type = assignment.get('marking_type', 'standard')
+
+            if marking_type == 'spreadsheet':
+                answer_key_bytes = None
+                if assignment.get('spreadsheet_answer_key_id'):
+                    try:
+                        ans_file = fs.get(assignment['spreadsheet_answer_key_id'])
+                        answer_key_bytes = ans_file.read()
+                    except Exception as e:
+                        logger.warning(f"Could not read spreadsheet answer key: {e}")
+                student_bytes = file_bytes if page_type == 'excel' else None
+                if not answer_key_bytes or not student_bytes:
+                    ai_result = {'error': 'Missing answer key or Excel submission'}
+                else:
+                    from utils.spreadsheet_evaluator import (
+                        evaluate_spreadsheet_submission,
+                        generate_pdf_report as generate_spreadsheet_pdf,
+                        generate_commented_excel,
+                    )
+                    student_name = student.get('name') or session.get('student_name') or 'Student'
+                    result_dict = evaluate_spreadsheet_submission(
+                        answer_key_bytes=answer_key_bytes,
+                        student_bytes=student_bytes,
+                        student_name=student_name,
+                        student_filename=f"{submission_id}_drive_link.xlsx",
+                    )
+                    if result_dict is None:
+                        ai_result = {'error': 'Spreadsheet evaluation failed'}
+                    else:
+                        pdf_bytes = generate_spreadsheet_pdf(result_dict)
+                        excel_bytes = generate_commented_excel(student_bytes, result_dict)
+                        pdf_id = fs.put(pdf_bytes, filename=f"{submission_id}_feedback_report.pdf",
+                                        content_type='application/pdf', submission_id=submission_id,
+                                        file_type='spreadsheet_feedback_pdf')
+                        excel_id = fs.put(excel_bytes, filename=f"{submission_id}_feedback_commented.xlsx",
+                                          content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                          submission_id=submission_id, file_type='spreadsheet_feedback_excel')
+                        ai_result = {
+                            'spreadsheet_feedback': result_dict,
+                            'marks_awarded': result_dict.get('marks_awarded'),
+                            'total_marks': result_dict.get('total_marks'),
+                            'percentage': result_dict.get('percentage'),
+                        }
+                        update_fields = {
+                            'ai_feedback': ai_result, 'status': 'ai_reviewed',
+                            'final_marks': result_dict.get('marks_awarded'),
+                            'spreadsheet_feedback_pdf_id': str(pdf_id),
+                            'spreadsheet_feedback_excel_id': str(excel_id),
+                        }
+                        if assignment.get('send_ai_feedback_immediately'):
+                            update_fields['feedback_sent'] = True
+                        Submission.update_one({'submission_id': submission_id}, {'$set': update_fields})
+                        if update_fields.get('feedback_sent'):
+                            submission_after = Submission.find_one({'submission_id': submission_id})
+                            if submission_after:
+                                _update_profile_and_mastery_from_assignment(session['student_id'], assignment, submission_after)
+                        marking_type = None  # already handled
+
+            elif marking_type == 'rubric':
+                from utils.ai_marking import analyze_essay_with_rubrics
+                rubrics_content = None
+                if assignment.get('rubrics_id'):
+                    try:
+                        rubrics_file = fs.get(assignment['rubrics_id'])
+                        rubrics_content = rubrics_file.read()
+                    except:
+                        pass
+                ai_result = analyze_essay_with_rubrics(pages, assignment, rubrics_content, teacher)
+            else:
+                from utils.ai_marking import analyze_submission_images
+                answer_key_content = None
+                if assignment.get('answer_key_id'):
+                    try:
+                        answer_file = fs.get(assignment['answer_key_id'])
+                        answer_key_content = answer_file.read()
+                    except:
+                        pass
+                ai_result = analyze_submission_images(pages, assignment, answer_key_content, teacher)
+
+            if marking_type is not None:
+                is_413 = ai_result.get('error_code') == 'request_too_large' or (
+                    ai_result.get('error') and ('413' in str(ai_result.get('error')) or 'request_too_large' in str(ai_result.get('error')).lower())
+                )
+                if is_413:
+                    rejection_reason = (
+                        "Your submission was too large to process. Please resubmit with fewer or smaller images."
+                    )
+                    Submission.update_one(
+                        {'submission_id': submission_id},
+                        {'$set': {
+                            'ai_feedback': ai_result, 'status': 'rejected',
+                            'rejection_reason': rejection_reason,
+                            'rejected_at': datetime.utcnow(), 'rejected_by': 'system_413'
+                        }}
+                    )
+                else:
+                    update_fields = {'ai_feedback': ai_result, 'status': 'ai_reviewed'}
+                    if assignment.get('send_ai_feedback_immediately') and not ai_result.get('error'):
+                        update_fields['feedback_sent'] = True
+                    Submission.update_one({'submission_id': submission_id}, {'$set': update_fields})
+                    if update_fields.get('feedback_sent'):
+                        submission_after = Submission.find_one({'submission_id': submission_id})
+                        if submission_after:
+                            _update_profile_and_mastery_from_assignment(session['student_id'], assignment, submission_after)
+        except Exception as e:
+            logger.error(f"AI feedback error for Drive link submission: {e}", exc_info=True)
+
+        # Notify teacher
+        submission_doc = Submission.find_one({'submission_id': submission_id})
+        try:
+            notify_submission_ready(submission_doc or {'submission_id': submission_id}, assignment, student, teacher)
+        except Exception as e:
+            logger.warning(f"Notification error: {e}")
+
+        return jsonify({
+            'success': True,
+            'submission_id': submission_id,
+            'redirect': url_for('view_submission', submission_id=submission_id)
+        })
+
+    except Exception as e:
+        logger.error(f"Error in submit-drive-link: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/student/submit', methods=['POST'])
 @login_required
 @limiter.limit("10 per hour")
@@ -1880,8 +2143,153 @@ def student_submit_files():
             marking_type = assignment.get('marking_type', 'standard')
 
             if marking_type == 'python':
-                # Python assignments: teacher reviews manually (no AI marking for now)
-                marking_type = None  # signal we already handled — skip standard/rubric update below
+                # Python assignments: run AI marking on notebook cells
+                import json as _json
+                from utils.ai_marking import get_teacher_ai_service, make_ai_api_call, parse_ai_response, resolve_model_type
+
+                student_cells = []
+                try:
+                    raw = pages[0]['data']
+                    try:
+                        nb = _json.loads(raw.decode('utf-8'))
+                        for cell in nb.get('cells', []):
+                            if cell.get('cell_type') == 'code':
+                                src = cell.get('source', '')
+                                if isinstance(src, list):
+                                    src = ''.join(src)
+                                outputs_text = ''
+                                for out in cell.get('outputs', []):
+                                    if out.get('output_type') == 'stream':
+                                        text = out.get('text', '')
+                                        if isinstance(text, list):
+                                            text = ''.join(text)
+                                        outputs_text += text
+                                    elif out.get('output_type') in ('execute_result', 'display_data'):
+                                        data_field = out.get('data', {})
+                                        text = data_field.get('text/plain', '')
+                                        if isinstance(text, list):
+                                            text = ''.join(text)
+                                        outputs_text += text
+                                    elif out.get('output_type') == 'error':
+                                        outputs_text += '\n'.join(out.get('traceback', []))
+                                student_cells.append({'index': len(student_cells) + 1, 'source': src, 'outputs': outputs_text})
+                    except (_json.JSONDecodeError, UnicodeDecodeError):
+                        import re as _re
+                        text = raw.decode('utf-8', errors='replace')
+                        segments = _re.split(r'^# %% Cell.*$', text, flags=_re.MULTILINE)
+                        for seg in segments:
+                            trimmed = seg.strip()
+                            if trimmed:
+                                student_cells.append({'index': len(student_cells) + 1, 'source': trimmed, 'outputs': ''})
+                except Exception as e:
+                    logger.error(f"Error parsing Python submission: {e}")
+
+                if student_cells:
+                    answer_key_text = ''
+                    answer_key_id = assignment.get('python_answer_key_template_id')
+                    if answer_key_id:
+                        try:
+                            from bson import ObjectId as _ObjId
+                            fobj = fs.get(_ObjId(answer_key_id) if isinstance(answer_key_id, str) else answer_key_id)
+                            ak_raw = fobj.read()
+                            ak_filename = getattr(fobj, 'filename', '') or ''
+                            ak_cells = []
+                            if ak_filename.lower().endswith('.ipynb'):
+                                ak_nb = _json.loads(ak_raw.decode('utf-8'))
+                                for cell in ak_nb.get('cells', []):
+                                    if cell.get('cell_type') == 'code':
+                                        src = cell.get('source', '')
+                                        if isinstance(src, list):
+                                            src = ''.join(src)
+                                        ak_cells.append(src)
+                            else:
+                                import re as _re
+                                segments = _re.split(r'^# %% Cell.*$', ak_raw.decode('utf-8'), flags=_re.MULTILINE)
+                                ak_cells = [s.strip() for s in segments if s.strip()]
+                            if ak_cells:
+                                answer_key_text = '\n\n'.join(f'--- Answer Key Cell {i+1} ---\n{c}' for i, c in enumerate(ak_cells))
+                        except Exception as e:
+                            logger.error(f"Error reading Python answer key: {e}")
+
+                    model_type = resolve_model_type(assignment, teacher)
+                    client, model_name, provider = get_teacher_ai_service(teacher, model_type)
+                    if client:
+                        total_marks = assignment.get('total_marks', 100)
+                        custom_instructions = ''
+                        if assignment.get('feedback_instructions'):
+                            custom_instructions += f"\nFEEDBACK STYLE: {assignment['feedback_instructions']}"
+                        if assignment.get('grading_instructions'):
+                            custom_instructions += f"\nGRADING INSTRUCTIONS: {assignment['grading_instructions']}"
+
+                        system_prompt = f"""You are an experienced computing teacher marking a Python programming assignment.
+
+Assignment: {assignment.get('title', 'Python Assignment')}
+Subject: {assignment.get('subject', 'Computing')}
+Total Marks: {total_marks}
+{custom_instructions}
+
+IMPORTANT RULES:
+1. Evaluate each code cell for correctness, style, and completeness
+2. Compare against the answer key if provided
+3. Award partial marks where appropriate
+4. Be constructive and encouraging
+5. Note any runtime errors visible in the outputs
+6. Each cell should be treated as a separate question/task
+
+Respond ONLY with valid JSON in this exact format:
+{{
+    "questions": [
+        {{
+            "question_num": 1,
+            "student_answer": "brief description of what the student wrote",
+            "correct_answer": "expected code or approach from answer key",
+            "is_correct": true/false/null,
+            "marks_awarded": number or null,
+            "marks_total": number,
+            "feedback": "specific feedback about the code",
+            "improvement": "what to improve or empty string",
+            "needs_review": false
+        }}
+    ],
+    "total_marks": number or null,
+    "overall_feedback": "general feedback about the submission",
+    "confidence": "high/medium/low"
+}}"""
+
+                        student_text = '\n\n'.join(
+                            f'--- Cell {c["index"]} ---\n{c["source"]}'
+                            + (f'\n[Output]: {c["outputs"]}' if c.get('outputs') else '')
+                            for c in student_cells
+                        )
+
+                        content = [{"type": "text", "text": f"STUDENT SUBMISSION ({len(student_cells)} code cells):\n\n{student_text}"}]
+                        if answer_key_text:
+                            content.insert(0, {"type": "text", "text": f"ANSWER KEY:\n\n{answer_key_text}\n\n"})
+                        content.append({"type": "text", "text": "\nAnalyze each cell and provide JSON feedback:"})
+
+                        try:
+                            response_text = make_ai_api_call(
+                                client=client, model_name=model_name, provider=provider,
+                                system_prompt=system_prompt, messages_content=content,
+                                max_tokens=16384, assignment=assignment
+                            )
+                            ai_result = parse_ai_response(response_text)
+                            ai_result['generated_at'] = datetime.utcnow().isoformat()
+                        except Exception as e:
+                            logger.error(f"Error in Python AI marking: {e}")
+                            ai_result = {'error': str(e), 'questions': [], 'overall_feedback': f'Error generating feedback: {e}'}
+
+                        has_error = ai_result.get('error') or not ai_result.get('questions')
+                        update_fields = {'ai_feedback': ai_result, 'status': 'ai_reviewed' if not has_error else 'submitted'}
+                        if not has_error and assignment.get('send_ai_feedback_immediately'):
+                            update_fields['feedback_sent'] = True
+                        Submission.update_one({'submission_id': submission_id}, {'$set': update_fields})
+                        if update_fields.get('feedback_sent'):
+                            submission_after = Submission.find_one({'submission_id': submission_id})
+                            if submission_after:
+                                _update_profile_and_mastery_from_assignment(session['student_id'], assignment, submission_after)
+
+                marking_type = None  # already handled
             elif marking_type == 'spreadsheet':
                 # Evaluate Excel submission against answer key; generate PDF report and commented Excel
                 answer_key_bytes = None

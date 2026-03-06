@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
@@ -168,6 +169,31 @@ def get_teacher_drive_manager(teacher):
         return None
     folder_id = teacher.get('google_drive_folder_id') if teacher else None
     return DriveManager(service, folder_id)
+
+def extract_drive_file_id(url):
+    """Extract a Google Drive file ID from various URL formats.
+
+    Supported formats:
+    - https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+    - https://docs.google.com/document/d/FILE_ID/edit
+    - https://docs.google.com/spreadsheets/d/FILE_ID/edit
+    - https://docs.google.com/presentation/d/FILE_ID/edit
+    - https://drive.google.com/open?id=FILE_ID
+
+    Returns the file ID string, or None if not a valid Drive URL.
+    """
+    if not url:
+        return None
+    # /d/FILE_ID pattern (covers file/d/, document/d/, spreadsheets/d/, presentation/d/)
+    match = re.search(r'/d/([a-zA-Z0-9_-]{10,})', url)
+    if match:
+        return match.group(1)
+    # ?id=FILE_ID pattern
+    match = re.search(r'[?&]id=([a-zA-Z0-9_-]{10,})', url)
+    if match:
+        return match.group(1)
+    return None
+
 
 class DriveManager:
     def __init__(self, service, folder_id=None):
@@ -583,6 +609,66 @@ class DriveManager:
         except Exception as e:
             logger.error(f"Error getting file content: {e}")
             return None
+
+    def download_shared_file(self, file_id: str):
+        """Download a publicly shared file from Google Drive.
+
+        For Google Docs/Sheets/Presentations, exports as PDF.
+        For regular files (PDF, images, etc.), downloads directly.
+
+        Args:
+            file_id: Google Drive file ID
+
+        Returns:
+            (file_bytes, content_type, filename) tuple, or (None, None, None) on error
+        """
+        try:
+            metadata = self.service.files().get(
+                fileId=file_id,
+                fields='name,mimeType,size',
+                supportsAllDrives=True
+            ).execute()
+
+            mime_type = metadata.get('mimeType', '')
+            filename = metadata.get('name', 'download')
+
+            google_doc_types = {
+                'application/vnd.google-apps.document': 'application/pdf',
+                'application/vnd.google-apps.spreadsheet': 'application/pdf',
+                'application/vnd.google-apps.presentation': 'application/pdf',
+            }
+
+            if mime_type in google_doc_types:
+                export_mime = google_doc_types[mime_type]
+                request = self.service.files().export_media(
+                    fileId=file_id, mimeType=export_mime
+                )
+                # Adjust filename extension
+                base = filename.rsplit('.', 1)[0] if '.' in filename else filename
+                filename = f"{base}.pdf"
+                content_type = export_mime
+            else:
+                request = self.service.files().get_media(
+                    fileId=file_id, supportsAllDrives=True
+                )
+                content_type = mime_type
+
+            file_content = io.BytesIO()
+            downloader = MediaIoBaseDownload(file_content, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+
+            file_content.seek(0)
+            return file_content.read(), content_type, filename
+
+        except HttpError as e:
+            logger.error(f"Error downloading shared file {file_id}: {e}")
+            return None, None, None
+        except Exception as e:
+            logger.error(f"Error downloading shared file {file_id}: {e}")
+            return None, None, None
+
 
 def upload_assignment_file(file_path: str, assignment: dict, teacher: dict) -> dict:
     """
