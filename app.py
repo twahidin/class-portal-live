@@ -11890,6 +11890,22 @@ def sync_existing_assignments_to_drive():
         logger.error(f"Error syncing to Drive: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/teacher/format-latex', methods=['POST'])
+@teacher_required
+def api_teacher_format_latex():
+    """Convert plain-text math to LaTeX $...$ notation in feedback fields."""
+    from utils.ai_marking import format_text_as_latex_batch, resolve_model_type
+    data = request.get_json()
+    texts = data.get('texts', {})
+    assignment_id = data.get('assignment_id')
+
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    assignment = Assignment.find_one({'assignment_id': assignment_id}) if assignment_id else None
+    model_type = resolve_model_type(assignment, teacher) if assignment else 'anthropic'
+
+    results = format_text_as_latex_batch(texts, teacher, model_type)
+    return jsonify({'success': True, 'results': results})
+
 @app.route('/api/teacher/get_students', methods=['GET'])
 @teacher_required
 def teacher_get_students():

@@ -2058,3 +2058,65 @@ The new_corrections array is optional. If you spot additional errors in the sele
     except Exception as e:
         logger.error(f"Error re-evaluating single item: {e}")
         return {'error': str(e)}
+
+
+def format_text_as_latex_batch(texts: dict, teacher=None, model_type='anthropic') -> dict:
+    """Convert plain-text math to LaTeX $...$ notation for multiple text fields in one AI call.
+
+    Args:
+        texts: Dict of {field_key: plain_text} to convert
+        teacher: Teacher document for AI service resolution
+        model_type: AI provider to use
+
+    Returns:
+        Dict of {field_key: latex_formatted_text}
+    """
+    client, model_name, provider = get_teacher_ai_service(teacher, model_type)
+    if not client:
+        return texts
+
+    # Build batch prompt with tagged fields
+    entries = []
+    keys = []
+    for key, text in texts.items():
+        if text and text.strip():
+            entries.append(f"[{key}]\n{text}\n[/{key}]")
+            keys.append(key)
+
+    if not entries:
+        return texts
+
+    system_prompt = """You reformat text to add LaTeX notation around mathematical expressions.
+
+RULES:
+- Wrap mathematical expressions in $...$ delimiters for inline math
+- Use $$...$$ for standalone display equations
+- Do NOT change any wording — only add LaTeX delimiters and notation
+- Convert patterns like: x^2 → $x^2$, dy/dx → $\\frac{dy}{dx}$, sqrt(x) → $\\sqrt{x}$, 1/2 mv^2 → $\\frac{1}{2}mv^2$
+- Leave non-math text completely unchanged
+- If a field has no math, return it unchanged
+- Return each field in the SAME [tag]...[/tag] format"""
+
+    prompt_text = "Reformat these fields with LaTeX math notation:\n\n" + "\n\n".join(entries)
+
+    try:
+        response = make_ai_api_call(
+            client=client, model_name=model_name, provider=provider,
+            system_prompt=system_prompt,
+            messages_content=[{"type": "text", "text": prompt_text}],
+            max_tokens=4000
+        )
+
+        # Parse response back into dict
+        results = dict(texts)  # copy original as fallback
+        if response:
+            for key in keys:
+                pattern = rf'\[{re.escape(key)}\]\s*([\s\S]*?)\s*\[/{re.escape(key)}\]'
+                match = re.search(pattern, response)
+                if match:
+                    results[key] = match.group(1).strip()
+        return results
+
+    except Exception as e:
+        logger.error(f"Error formatting text as LaTeX: {e}")
+        return texts

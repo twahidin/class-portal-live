@@ -177,6 +177,10 @@
                                 onclick="openRemarkModal()">
                             <i class="bi bi-pencil-square me-1"></i>Remark with another model
                         </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="formatAllMath()" id="format-math-btn"
+                                title="Use AI to wrap math expressions in LaTeX notation for proper rendering">
+                            <i class="bi bi-calculator me-1"></i>Format Math as LaTeX
+                        </button>
                     </div>
                 </div>
                 <div class="card-body p-0" style="height: calc(100vh - 250px); overflow: auto;">
@@ -225,13 +229,13 @@
                                             {% if q.student_answer == 'UNCLEAR' or q.needs_review %}
                                             <span class="text-muted fst-italic">Unclear/Empty</span>
                                             {% else %}
-                                            <div class="student-answer-text">{{ q.student_answer }}</div>
+                                            <div class="student-answer-text latex-render">{{ q.student_answer|latex_safe }}</div>
                                             {% endif %}
                                         </td>
                                         <td class="small">
-                                            <textarea class="form-control form-control-sm answer-key-input" 
-                                                      name="answer_key_{{ q.question_num }}" rows="3"
-                                                      placeholder="Enter correct answer or 'Refer to answer key for diagram'">{{ teacher_q.get('answer_key') or q.correct_answer or '' }}</textarea>
+                                            <div class="answer-key-display latex-render small p-2 border rounded bg-light" style="min-height: 2.5em; white-space: pre-wrap;">{{ (teacher_q.get('answer_key') or q.correct_answer or '')|latex_safe }}</div>
+                                            <input type="hidden" class="answer-key-input" name="answer_key_{{ q.question_num }}"
+                                                   value="{{ teacher_q.get('answer_key') or q.correct_answer or '' }}">
                                             <div class="answer-key-image-container mt-2" id="answer-key-image-{{ q.question_num }}">
                                                 {% if teacher_q.get('answer_key_image') %}
                                                 <div class="position-relative d-inline-block">
@@ -1562,7 +1566,8 @@
             // Update student answer display
             const answerCell = row.querySelector('.student-answer-cell');
             if (answerCell && reevalResult.student_answer) {
-                answerCell.innerHTML = `<div class="student-answer-text">${escapeHtml(reevalResult.student_answer)}</div>`;
+                answerCell.innerHTML = `<div class="student-answer-text latex-render">${escapeHtml(reevalResult.student_answer)}</div>`;
+                rerenderLatex(answerCell);
             }
 
             // Update feedback
@@ -2042,6 +2047,71 @@
             }
             btn.disabled = false;
         });
+    }
+
+    // Re-render KaTeX on a specific element (for dynamic content updates)
+    function rerenderLatex(element) {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(element, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false}
+                ],
+                throwOnError: false
+            });
+        }
+    }
+
+    // Format all feedback textareas with LaTeX math notation via AI
+    async function formatAllMath() {
+        const btn = document.getElementById('format-math-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Formatting...';
+
+        // Gather all feedback texts
+        const texts = {};
+        document.querySelectorAll('.feedback-input').forEach(ta => {
+            if (ta.value.trim()) texts[ta.name] = ta.value;
+        });
+        const overallFb = document.getElementById('overall-feedback');
+        if (overallFb && overallFb.value.trim()) texts['overall'] = overallFb.value;
+
+        if (Object.keys(texts).length === 0) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-calculator me-1"></i>Format Math as LaTeX';
+            if (typeof showToast === 'function') showToast('Info', 'No feedback text to format');
+            return;
+        }
+
+        try {
+            const resp = await fetch('/api/teacher/format-latex', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    texts: texts,
+                    assignment_id: '{{ assignment.assignment_id }}'
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                for (const [key, val] of Object.entries(data.results)) {
+                    if (key === 'overall') {
+                        overallFb.value = val;
+                    } else {
+                        const ta = document.querySelector(`textarea[name="${key}"]`);
+                        if (ta) ta.value = val;
+                    }
+                }
+                if (typeof showToast === 'function') showToast('Success', 'Math expressions formatted with LaTeX');
+            } else {
+                if (typeof showToast === 'function') showToast('Error', data.error || 'Failed to format math');
+            }
+        } catch (err) {
+            if (typeof showToast === 'function') showToast('Error', 'Failed to format math');
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-calculator me-1"></i>Format Math as LaTeX';
     }
 
     // LaTeX preview toggle for feedback textareas
