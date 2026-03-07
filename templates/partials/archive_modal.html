@@ -1,0 +1,198 @@
+<!-- Archive to Google Drive Modal -->
+<div class="modal fade" id="archiveModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-cloud-arrow-up me-2"></i>Archive to Google Drive</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Step 1: Input -->
+                <div id="archive-step-input">
+                    <p class="text-muted mb-3">
+                        Upload all submission files to your Google Drive folder for backup.
+                        After archiving, you can delete files from the server to free storage space.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Google Drive Folder URL or ID</label>
+                        <input type="text" class="form-control" id="archive-folder-input"
+                               placeholder="https://drive.google.com/drive/folders/... or folder ID">
+                        <div class="form-text">
+                            Paste the URL of the Google Drive folder where files should be archived.
+                            The service account must have Editor access to this folder.
+                        </div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="archive-include-feedback" checked>
+                        <label class="form-check-label" for="archive-include-feedback">
+                            Include feedback PDFs for reviewed submissions
+                        </label>
+                    </div>
+                    <button class="btn btn-primary" id="archive-start-btn" onclick="startArchive()">
+                        <i class="bi bi-cloud-arrow-up me-1"></i>Start Archive
+                    </button>
+                </div>
+
+                <!-- Step 2: Progress -->
+                <div id="archive-step-progress" style="display:none;">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary mb-3" role="status"></div>
+                        <h5>Archiving to Google Drive...</h5>
+                        <p class="text-muted" id="archive-progress-text">Preparing files...</p>
+                    </div>
+                </div>
+
+                <!-- Step 3: Results -->
+                <div id="archive-step-results" style="display:none;">
+                    <div class="alert alert-success" id="archive-success-alert">
+                        <i class="bi bi-check-circle me-2"></i>
+                        <span id="archive-result-summary"></span>
+                    </div>
+                    <div class="alert alert-warning" id="archive-errors-alert" style="display:none;">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <span id="archive-error-summary"></span>
+                    </div>
+                    <div class="table-responsive" id="archive-results-table" style="display:none; max-height:300px; overflow-y:auto;">
+                        <table class="table table-sm">
+                            <thead><tr><th>Student</th><th>Files</th><th>Status</th></tr></thead>
+                            <tbody id="archive-results-body"></tbody>
+                        </table>
+                    </div>
+                    <hr>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-danger" id="archive-delete-btn" onclick="deleteArchivedFiles()">
+                            <i class="bi bi-trash me-1"></i>Delete Archived Files from Server
+                        </button>
+                        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                    <div class="form-text mt-2 text-danger">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        Deleting will permanently remove files from the server. Make sure the Google Drive archive is complete.
+                    </div>
+                </div>
+
+                <!-- Step 4: Delete confirmation -->
+                <div id="archive-step-deleting" style="display:none;">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-danger mb-3" role="status"></div>
+                        <h5>Deleting files from server...</h5>
+                    </div>
+                </div>
+
+                <!-- Step 5: Delete results -->
+                <div id="archive-step-deleted" style="display:none;">
+                    <div class="alert alert-info">
+                        <i class="bi bi-check-circle me-2"></i>
+                        <span id="archive-deleted-summary"></span>
+                    </div>
+                    <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let _archiveEndpoint = '';
+let _archivedSubmissionIds = [];
+
+function openArchiveModal(endpoint) {
+    _archiveEndpoint = endpoint;
+    _archivedSubmissionIds = [];
+    // Reset to step 1
+    document.getElementById('archive-step-input').style.display = '';
+    document.getElementById('archive-step-progress').style.display = 'none';
+    document.getElementById('archive-step-results').style.display = 'none';
+    document.getElementById('archive-step-deleting').style.display = 'none';
+    document.getElementById('archive-step-deleted').style.display = 'none';
+    document.getElementById('archive-folder-input').value = '';
+    new bootstrap.Modal(document.getElementById('archiveModal')).show();
+}
+
+async function startArchive() {
+    const folderInput = document.getElementById('archive-folder-input').value.trim();
+    if (!folderInput) { alert('Please enter a Google Drive folder URL or ID.'); return; }
+
+    const includeFeedback = document.getElementById('archive-include-feedback').checked;
+
+    // Show progress
+    document.getElementById('archive-step-input').style.display = 'none';
+    document.getElementById('archive-step-progress').style.display = '';
+
+    try {
+        const res = await fetch(_archiveEndpoint, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({folder_url: folderInput, include_feedback: includeFeedback})
+        });
+        const data = await res.json();
+
+        document.getElementById('archive-step-progress').style.display = 'none';
+        document.getElementById('archive-step-results').style.display = '';
+
+        if (data.success || data.archived_count > 0) {
+            document.getElementById('archive-result-summary').textContent =
+                `Archived ${data.archived_count || 0} submission(s), ${data.total_mb || 0} MB uploaded to Google Drive.`;
+            _archivedSubmissionIds = data.archived_submissions || [];
+
+            // Show results table
+            if (_archivedSubmissionIds.length > 0) {
+                const tbody = document.getElementById('archive-results-body');
+                tbody.innerHTML = '';
+                (data.details || []).forEach(d => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `<td>${d.student_name || 'Unknown'}</td><td>${d.files_uploaded || 0}</td><td><span class="badge bg-success">Archived</span></td>`;
+                    tbody.appendChild(row);
+                });
+                document.getElementById('archive-results-table').style.display = '';
+            }
+
+            document.getElementById('archive-delete-btn').style.display = _archivedSubmissionIds.length > 0 ? '' : 'none';
+        } else {
+            document.getElementById('archive-success-alert').className = 'alert alert-danger';
+            document.getElementById('archive-result-summary').textContent = data.error || 'Archive failed.';
+            document.getElementById('archive-delete-btn').style.display = 'none';
+        }
+
+        if (data.errors && data.errors.length > 0) {
+            document.getElementById('archive-errors-alert').style.display = '';
+            document.getElementById('archive-error-summary').textContent =
+                `${data.errors.length} error(s): ${data.errors.slice(0, 3).join('; ')}`;
+        }
+    } catch (e) {
+        document.getElementById('archive-step-progress').style.display = 'none';
+        document.getElementById('archive-step-results').style.display = '';
+        document.getElementById('archive-success-alert').className = 'alert alert-danger';
+        document.getElementById('archive-result-summary').textContent = 'Archive request failed. Check your connection.';
+        document.getElementById('archive-delete-btn').style.display = 'none';
+    }
+}
+
+async function deleteArchivedFiles() {
+    if (!_archivedSubmissionIds.length) return;
+    if (!confirm(`Delete ${_archivedSubmissionIds.length} archived submission file(s) from the server? This cannot be undone.`)) return;
+
+    document.getElementById('archive-step-results').style.display = 'none';
+    document.getElementById('archive-step-deleting').style.display = '';
+
+    try {
+        const res = await fetch('/api/teacher/archive/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({submission_ids: _archivedSubmissionIds})
+        });
+        const data = await res.json();
+
+        document.getElementById('archive-step-deleting').style.display = 'none';
+        document.getElementById('archive-step-deleted').style.display = '';
+        document.getElementById('archive-deleted-summary').textContent =
+            data.success
+                ? `Deleted ${data.deleted_count || 0} submission file(s), freed ${data.freed_mb || 0} MB of server storage.`
+                : (data.error || 'Delete failed.');
+    } catch (e) {
+        document.getElementById('archive-step-deleting').style.display = 'none';
+        document.getElementById('archive-step-deleted').style.display = '';
+        document.getElementById('archive-deleted-summary').textContent = 'Delete request failed.';
+    }
+}
+</script>

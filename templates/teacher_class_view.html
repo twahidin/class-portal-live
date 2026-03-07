@@ -32,9 +32,14 @@
             <p class="text-muted mb-0">{{ subtitle }}</p>
             {% endif %}
         </div>
-        <span class="badge bg-{% if is_teaching_group %}info{% else %}primary{% endif %} fs-6">
-            {{ students|length }} students
-        </span>
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-success btn-sm" onclick="openArchiveModal('/api/teacher/archive/class/{{ class_id }}')">
+                <i class="bi bi-cloud-arrow-up me-1"></i>Archive to Drive
+            </button>
+            <span class="badge bg-{% if is_teaching_group %}info{% else %}primary{% endif %} fs-6">
+                {{ students|length }} students
+            </span>
+        </div>
     </div>
 
     <!-- Assignment Filter Card: form submit loads statuses server-side (no API) -->
@@ -419,4 +424,5 @@
         });
     }
 </script>
+{% include 'partials/archive_modal.html' %}
 {% endblock %}

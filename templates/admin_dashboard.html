@@ -115,6 +115,11 @@
                 <i class="bi bi-file-earmark-pdf me-1"></i>Reports & Tools
             </button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="storage-tab" data-bs-toggle="tab" data-bs-target="#storage" type="button">
+                <i class="bi bi-hdd me-1"></i>Storage
+            </button>
+        </li>
     </ul>
 
     <!-- Tab Content -->
@@ -1284,6 +1289,66 @@
                                 <li>Merge class assignments and teacher associations</li>
                             </ul>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Storage Tab -->
+        <div class="tab-pane fade" id="storage" role="tabpanel">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-hdd me-2"></i>Server Storage Usage</h5>
+                    <button class="btn btn-sm btn-outline-primary" onclick="loadStorageData()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="storage-loading" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="text-muted mt-2">Loading storage data...</p>
+                    </div>
+                    <div id="storage-summary" style="display:none;" class="mb-4">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h4 class="mb-0" id="storage-total-assigned">-</h4>
+                                        <small class="text-muted">Total Assigned to Teachers</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h4 class="mb-0" id="storage-total-gridfs">-</h4>
+                                        <small class="text-muted">Total GridFS Size</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card bg-light">
+                                    <div class="card-body text-center">
+                                        <h4 class="mb-0" id="storage-teacher-count">-</h4>
+                                        <small class="text-muted">Teachers</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-responsive" id="storage-table-container" style="display:none;">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Teacher</th>
+                                    <th>Used</th>
+                                    <th>Limit</th>
+                                    <th style="min-width:200px;">Usage</th>
+                                    <th style="min-width:150px;">Set Limit (MB)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="storage-table-body"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -3938,5 +4003,82 @@
             showResult('import-result', 'Import failed', 'danger');
         }
     };
+
+    // ================== STORAGE TAB ==================
+
+    // Auto-load storage data when storage tab is shown
+    document.getElementById('storage-tab')?.addEventListener('shown.bs.tab', () => loadStorageData());
+
+    async function loadStorageData() {
+        document.getElementById('storage-loading').style.display = '';
+        document.getElementById('storage-summary').style.display = 'none';
+        document.getElementById('storage-table-container').style.display = 'none';
+        try {
+            const res = await fetch('/api/admin/storage');
+            const data = await res.json();
+            if (!data.success) { alert(data.error); return; }
+
+            document.getElementById('storage-total-assigned').textContent = data.total_used_mb + ' MB';
+            document.getElementById('storage-total-gridfs').textContent = data.total_gridfs_mb + ' MB';
+            document.getElementById('storage-teacher-count').textContent = data.teachers.length;
+
+            const tbody = document.getElementById('storage-table-body');
+            tbody.innerHTML = '';
+            data.teachers.forEach(t => {
+                const barColor = t.percentage >= 90 ? 'bg-danger' : t.percentage >= 80 ? 'bg-warning' : 'bg-success';
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${t.name}</strong><br><small class="text-muted">${t.teacher_id}</small></td>
+                    <td>${t.used_mb} MB</td>
+                    <td>${t.limit_mb} MB</td>
+                    <td>
+                        <div class="progress" style="height:20px;">
+                            <div class="progress-bar ${barColor}" style="width:${Math.min(t.percentage, 100)}%">${t.percentage}%</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control" value="${t.limit_mb}" min="50" step="50" data-teacher-id="${t.teacher_id}">
+                            <button class="btn btn-outline-primary" onclick="setStorageLimit(this)">Set</button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            document.getElementById('storage-loading').style.display = 'none';
+            document.getElementById('storage-summary').style.display = '';
+            document.getElementById('storage-table-container').style.display = '';
+        } catch (e) {
+            document.getElementById('storage-loading').innerHTML = '<p class="text-danger">Failed to load storage data.</p>';
+        }
+    }
+
+    async function setStorageLimit(btn) {
+        const input = btn.previousElementSibling;
+        const teacherId = input.dataset.teacherId;
+        const limitMb = parseFloat(input.value);
+        if (!limitMb || limitMb < 0) { alert('Invalid limit'); return; }
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/admin/storage/set-limit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({teacher_id: teacherId, limit_mb: limitMb})
+            });
+            const data = await res.json();
+            if (data.success) {
+                btn.textContent = 'Saved!';
+                setTimeout(() => { btn.textContent = 'Set'; btn.disabled = false; }, 1500);
+                loadStorageData();
+            } else {
+                alert(data.error);
+                btn.disabled = false;
+            }
+        } catch (e) {
+            alert('Failed to set limit');
+            btn.disabled = false;
+        }
+    }
 </script>
 {% endblock %}

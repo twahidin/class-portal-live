@@ -1546,6 +1546,11 @@ def api_student_submit_from_drive():
         if not teacher:
             return jsonify({'success': False, 'error': 'Teacher not found'}), 404
 
+        # Check teacher storage limit
+        storage_ok, _, _, _ = _check_teacher_storage(assignment['teacher_id'])
+        if not storage_ok:
+            return jsonify({'success': False, 'error': "Your teacher's storage is full. Please contact your teacher to archive old submissions."}), 400
+
         # Find the draft submission with a Drive file
         existing = Submission.find_one({
             'assignment_id': assignment_id,
@@ -1829,6 +1834,11 @@ def api_student_submit_drive_link():
         if not teacher:
             return jsonify({'success': False, 'error': 'Teacher not found'}), 404
 
+        # Check teacher storage limit
+        storage_ok, _, _, _ = _check_teacher_storage(assignment['teacher_id'])
+        if not storage_ok:
+            return jsonify({'success': False, 'error': "Your teacher's storage is full. Please contact your teacher to archive old submissions."}), 400
+
         # Block if already submitted
         existing = Submission.find_one(
             {'assignment_id': assignment_id, 'student_id': session['student_id']},
@@ -2073,7 +2083,12 @@ def student_submit_files():
         
         student = Student.find_one({'student_id': session['student_id']})
         teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
-        
+
+        # Check teacher storage limit
+        storage_ok, _, _, storage_msg = _check_teacher_storage(assignment['teacher_id'])
+        if not storage_ok:
+            return jsonify({'error': "Your teacher's storage is full. Please contact your teacher to archive old submissions."}), 400
+
         from bson import ObjectId
         is_rubric_resubmit = request.form.get('is_rubric_resubmit') == '1'
         marking_type = assignment.get('marking_type', 'standard')
@@ -2606,10 +2621,14 @@ def view_student_submission_file(submission_id, file_index):
         'submission_id': submission_id,
         'student_id': session['student_id']
     })
-    
+
     if not submission:
         return 'Not found', 404
-    
+
+    # Check if files were archived and deleted
+    if submission.get('storage_deleted'):
+        return 'This submission has been archived to Google Drive and files were removed from the server.', 410
+
     # Support marked copy (for assessments)
     variant = request.args.get('variant')
     if variant == 'marked_copy':
@@ -5109,6 +5128,7 @@ def view_class(class_id):
 
     return render_template('teacher_class_view.html',
                          teacher=teacher,
+                         class_id=class_id,
                          title=title,
                          subtitle=subtitle,
                          students=students,
@@ -5167,6 +5187,7 @@ def view_teaching_group(group_id):
 
     return render_template('teacher_class_view.html',
                          teacher=teacher,
+                         class_id=group.get('class_id', group_id),
                          title=title,
                          subtitle=subtitle,
                          students=students,
@@ -8037,12 +8058,16 @@ def view_submission_file(submission_id, file_index):
     submission = Submission.find_one({'submission_id': submission_id})
     if not submission:
         return 'Not found', 404
-    
+
+    # Check if files were archived and deleted
+    if submission.get('storage_deleted'):
+        return 'This submission has been archived to Google Drive and files were removed from the server.', 410
+
     # Verify teacher access
     assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
     if not assignment or assignment['teacher_id'] != session['teacher_id']:
         return 'Unauthorized', 403
-    
+
     # Support marked copy (for assessments)
     variant = request.args.get('variant')
     if variant == 'marked_copy':
@@ -10036,6 +10061,448 @@ def teacher_remove_student():
         
     except Exception as e:
         logger.error(f"Error removing student: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# STORAGE MANAGEMENT - Teacher storage usage tracking and limits
+# ============================================================================
+
+def _calculate_teacher_storage(teacher_id):
+    """Calculate total GridFS storage used by a teacher's assignments and submissions.
+    Returns total bytes used."""
+    from bson import ObjectId
+
+    # Get all assignment IDs for this teacher
+    assignments = list(Assignment.find({'teacher_id': teacher_id}, {'assignment_id': 1, 'question_paper_file_id': 1, 'answer_key_file_id': 1}))
+    assignment_ids = [a['assignment_id'] for a in assignments]
+
+    if not assignment_ids:
+        return 0
+
+    # Collect all GridFS ObjectIds
+    gridfs_ids = set()
+
+    # Assignment-level files (question papers, answer keys)
+    for a in assignments:
+        for field in ('question_paper_file_id', 'answer_key_file_id'):
+            fid = a.get(field)
+            if fid:
+                try:
+                    gridfs_ids.add(ObjectId(fid))
+                except Exception:
+                    pass
+
+    # Submission files
+    submissions = list(Submission.find(
+        {'assignment_id': {'$in': assignment_ids}},
+        {'file_ids': 1, 'marked_copy_file_ids': 1}
+    ))
+    for sub in submissions:
+        for field in ('file_ids', 'marked_copy_file_ids'):
+            for fid in sub.get(field, []):
+                try:
+                    gridfs_ids.add(ObjectId(fid))
+                except Exception:
+                    pass
+
+    if not gridfs_ids:
+        return 0
+
+    # Single aggregation on fs.files
+    pipeline = [
+        {'$match': {'_id': {'$in': list(gridfs_ids)}}},
+        {'$group': {'_id': None, 'total': {'$sum': '$length'}}}
+    ]
+    result = list(db.db.fs.files.aggregate(pipeline))
+    return result[0]['total'] if result else 0
+
+
+def _check_teacher_storage(teacher_id):
+    """Check if teacher is within storage limit.
+    Returns (ok, used_bytes, limit_bytes, message)."""
+    teacher = Teacher.find_one({'teacher_id': teacher_id})
+    limit_bytes = (teacher or {}).get('storage_limit_bytes', 500 * 1024 * 1024)
+    used_bytes = _calculate_teacher_storage(teacher_id)
+    percentage = (used_bytes / limit_bytes * 100) if limit_bytes > 0 else 0
+
+    if percentage >= 100:
+        return False, used_bytes, limit_bytes, "Storage limit reached. Please archive old submissions to free space."
+    elif percentage >= 80:
+        return True, used_bytes, limit_bytes, f"Storage is {percentage:.0f}% full. Consider archiving old submissions."
+    return True, used_bytes, limit_bytes, ""
+
+
+@app.route('/api/teacher/storage')
+@teacher_required
+def api_teacher_storage():
+    """Return teacher's storage usage and limit."""
+    try:
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        if not teacher:
+            return jsonify({'error': 'Teacher not found'}), 404
+
+        used_bytes = _calculate_teacher_storage(session['teacher_id'])
+        limit_bytes = teacher.get('storage_limit_bytes', 500 * 1024 * 1024)
+        percentage = (used_bytes / limit_bytes * 100) if limit_bytes > 0 else 0
+
+        return jsonify({
+            'success': True,
+            'used_bytes': used_bytes,
+            'limit_bytes': limit_bytes,
+            'used_mb': round(used_bytes / (1024 * 1024), 1),
+            'limit_mb': round(limit_bytes / (1024 * 1024), 1),
+            'percentage': round(percentage, 1)
+        })
+    except Exception as e:
+        logger.error(f"Error getting teacher storage: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/storage')
+@admin_required
+def api_admin_storage():
+    """Return per-teacher storage breakdown for admin dashboard."""
+    try:
+        teachers = list(Teacher.find({}))
+        teacher_storage = []
+        total_used = 0
+
+        for t in teachers:
+            used = _calculate_teacher_storage(t['teacher_id'])
+            limit = t.get('storage_limit_bytes', 500 * 1024 * 1024)
+            total_used += used
+            teacher_storage.append({
+                'teacher_id': t['teacher_id'],
+                'name': t.get('name', t['teacher_id']),
+                'used_bytes': used,
+                'limit_bytes': limit,
+                'used_mb': round(used / (1024 * 1024), 1),
+                'limit_mb': round(limit / (1024 * 1024), 1),
+                'percentage': round((used / limit * 100) if limit > 0 else 0, 1)
+            })
+
+        # Total GridFS size
+        pipeline = [{'$group': {'_id': None, 'total': {'$sum': '$length'}}}]
+        total_result = list(db.db.fs.files.aggregate(pipeline))
+        total_gridfs = total_result[0]['total'] if total_result else 0
+
+        return jsonify({
+            'success': True,
+            'teachers': teacher_storage,
+            'total_used_bytes': total_used,
+            'total_used_mb': round(total_used / (1024 * 1024), 1),
+            'total_gridfs_bytes': total_gridfs,
+            'total_gridfs_mb': round(total_gridfs / (1024 * 1024), 1)
+        })
+    except Exception as e:
+        logger.error(f"Error getting admin storage: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/storage/set-limit', methods=['POST'])
+@admin_required
+def api_admin_set_storage_limit():
+    """Set storage limit for a specific teacher."""
+    try:
+        data = request.get_json()
+        teacher_id = data.get('teacher_id')
+        limit_mb = data.get('limit_mb', 500)
+
+        if not teacher_id:
+            return jsonify({'error': 'teacher_id required'}), 400
+
+        limit_bytes = int(float(limit_mb) * 1024 * 1024)
+        Teacher.update_one(
+            {'teacher_id': teacher_id},
+            {'$set': {'storage_limit_bytes': limit_bytes}}
+        )
+        return jsonify({'success': True, 'limit_bytes': limit_bytes, 'limit_mb': limit_mb})
+    except Exception as e:
+        logger.error(f"Error setting storage limit: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# ARCHIVE TO GOOGLE DRIVE
+# ============================================================================
+
+def _archive_submissions_to_drive(submissions, drive_manager, parent_folder_id, include_feedback=True):
+    """Archive a list of submissions to Google Drive. Returns (archived_ids, details, errors, total_bytes)."""
+    from gridfs import GridFS
+    from bson import ObjectId
+    import datetime
+
+    fs = GridFS(db.db)
+    archived_ids = []
+    details = []
+    errors = []
+    total_bytes = 0
+
+    for sub in submissions:
+        if sub.get('storage_deleted'):
+            continue
+        try:
+            student = Student.find_one({'student_id': sub['student_id']})
+            student_name = student.get('name', sub['student_id']) if student else sub['student_id']
+            files_uploaded = 0
+
+            # Upload original submission files
+            for i, fid in enumerate(sub.get('file_ids', [])):
+                try:
+                    f = fs.get(ObjectId(fid))
+                    content = f.read()
+                    total_bytes += len(content)
+                    ext = '.pdf' if (f.content_type or '').startswith('application/pdf') else '.jpg'
+                    name = f"{student_name}_{sub['submission_id']}_page{i+1}{ext}"
+                    result = drive_manager.upload_content(content, name, f.content_type or 'application/octet-stream', parent_folder_id)
+                    if result:
+                        files_uploaded += 1
+                except Exception as e:
+                    errors.append(f"File {fid} for {student_name}: {e}")
+
+            # Upload marked copies
+            for i, fid in enumerate(sub.get('marked_copy_file_ids', [])):
+                try:
+                    f = fs.get(ObjectId(fid))
+                    content = f.read()
+                    total_bytes += len(content)
+                    ext = '.pdf' if (f.content_type or '').startswith('application/pdf') else '.jpg'
+                    name = f"{student_name}_{sub['submission_id']}_marked{i+1}{ext}"
+                    result = drive_manager.upload_content(content, name, f.content_type or 'application/octet-stream', parent_folder_id)
+                    if result:
+                        files_uploaded += 1
+                except Exception as e:
+                    errors.append(f"Marked copy {fid} for {student_name}: {e}")
+
+            # Upload feedback PDF for reviewed submissions
+            if include_feedback and sub.get('status') in ('reviewed', 'approved') and sub.get('feedback'):
+                try:
+                    from utils.pdf_generator import generate_review_pdf
+                    assignment = Assignment.find_one({'assignment_id': sub['assignment_id']})
+                    if assignment:
+                        pdf_bytes = generate_review_pdf(sub, assignment, student)
+                        if pdf_bytes:
+                            name = f"{student_name}_{sub['submission_id']}_feedback.pdf"
+                            result = drive_manager.upload_content(pdf_bytes, name, 'application/pdf', parent_folder_id)
+                            if result:
+                                files_uploaded += 1
+                except Exception as e:
+                    errors.append(f"Feedback PDF for {student_name}: {e}")
+
+            # Mark as archived
+            Submission.update_one(
+                {'submission_id': sub['submission_id']},
+                {'$set': {
+                    'archived': True,
+                    'archived_at': datetime.datetime.utcnow(),
+                    'archive_drive_folder_id': parent_folder_id
+                }}
+            )
+            archived_ids.append(sub['submission_id'])
+            details.append({'student_name': student_name, 'files_uploaded': files_uploaded, 'submission_id': sub['submission_id']})
+
+        except Exception as e:
+            errors.append(f"Submission {sub.get('submission_id', '?')}: {e}")
+
+    return archived_ids, details, errors, total_bytes
+
+
+@app.route('/api/teacher/archive/assignment/<assignment_id>', methods=['POST'])
+@teacher_required
+def archive_assignment_to_drive(assignment_id):
+    """Archive all submissions for an assignment to Google Drive."""
+    try:
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        if not assignment or assignment['teacher_id'] != session['teacher_id']:
+            return jsonify({'error': 'Assignment not found or unauthorized'}), 404
+
+        data = request.get_json()
+        folder_url = data.get('folder_url', '')
+        include_feedback = data.get('include_feedback', True)
+
+        from utils.google_drive import extract_drive_folder_id, get_teacher_drive_manager
+        folder_id = extract_drive_folder_id(folder_url)
+        if not folder_id:
+            return jsonify({'error': 'Invalid Google Drive folder URL or ID'}), 400
+
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        drive_manager = get_teacher_drive_manager(teacher)
+        if not drive_manager:
+            return jsonify({'error': 'Could not connect to Google Drive. Check your Google Drive settings.'}), 500
+
+        # Verify folder access
+        ok, err_msg = drive_manager.verify_folder_access(folder_id)
+        if not ok:
+            return jsonify({'error': f'Cannot access folder: {err_msg}'}), 400
+
+        # Create assignment subfolder
+        subfolder_name = f"{assignment.get('title', assignment_id)} ({assignment_id})"
+        subfolder_id = drive_manager.find_or_create_folder(subfolder_name, folder_id)
+        if not subfolder_id:
+            return jsonify({'error': 'Failed to create subfolder in Google Drive'}), 500
+
+        # Get all submissions (skip already storage-deleted ones)
+        submissions = list(Submission.find({
+            'assignment_id': assignment_id,
+            'storage_deleted': {'$ne': True}
+        }))
+
+        archived_ids, details, errors, total_bytes = _archive_submissions_to_drive(
+            submissions, drive_manager, subfolder_id, include_feedback
+        )
+
+        return jsonify({
+            'success': True,
+            'archived_count': len(archived_ids),
+            'archived_submissions': archived_ids,
+            'details': details,
+            'total_mb': round(total_bytes / (1024 * 1024), 1),
+            'errors': errors[:20]
+        })
+
+    except Exception as e:
+        logger.error(f"Error archiving assignment {assignment_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/teacher/archive/class/<class_id>', methods=['POST'])
+@teacher_required
+def archive_class_to_drive(class_id):
+    """Archive all submissions for all assignments targeting a class."""
+    try:
+        data = request.get_json()
+        folder_url = data.get('folder_url', '')
+        include_feedback = data.get('include_feedback', True)
+
+        from utils.google_drive import extract_drive_folder_id, get_teacher_drive_manager
+        folder_id = extract_drive_folder_id(folder_url)
+        if not folder_id:
+            return jsonify({'error': 'Invalid Google Drive folder URL or ID'}), 400
+
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        drive_manager = get_teacher_drive_manager(teacher)
+        if not drive_manager:
+            return jsonify({'error': 'Could not connect to Google Drive. Check your Google Drive settings.'}), 500
+
+        ok, err_msg = drive_manager.verify_folder_access(folder_id)
+        if not ok:
+            return jsonify({'error': f'Cannot access folder: {err_msg}'}), 400
+
+        # Find assignments for this class belonging to this teacher
+        assignments = list(Assignment.find({
+            'teacher_id': session['teacher_id'],
+            '$or': [
+                {'target_class_id': class_id},
+                {'target_classes': class_id}
+            ]
+        }))
+
+        if not assignments:
+            return jsonify({'error': 'No assignments found for this class'}), 404
+
+        all_archived_ids = []
+        all_details = []
+        all_errors = []
+        total_bytes = 0
+
+        for assignment in assignments:
+            # Create subfolder per assignment
+            subfolder_name = f"{assignment.get('title', assignment['assignment_id'])} ({assignment['assignment_id']})"
+            subfolder_id = drive_manager.find_or_create_folder(subfolder_name, folder_id)
+            if not subfolder_id:
+                all_errors.append(f"Failed to create folder for {assignment.get('title')}")
+                continue
+
+            submissions = list(Submission.find({
+                'assignment_id': assignment['assignment_id'],
+                'storage_deleted': {'$ne': True}
+            }))
+
+            archived_ids, details, errors, bytes_uploaded = _archive_submissions_to_drive(
+                submissions, drive_manager, subfolder_id, include_feedback
+            )
+            all_archived_ids.extend(archived_ids)
+            all_details.extend(details)
+            all_errors.extend(errors)
+            total_bytes += bytes_uploaded
+
+        return jsonify({
+            'success': True,
+            'archived_count': len(all_archived_ids),
+            'archived_submissions': all_archived_ids,
+            'details': all_details,
+            'total_mb': round(total_bytes / (1024 * 1024), 1),
+            'assignments_processed': len(assignments),
+            'errors': all_errors[:20]
+        })
+
+    except Exception as e:
+        logger.error(f"Error archiving class {class_id}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/teacher/archive/delete', methods=['POST'])
+@teacher_required
+def delete_archived_files():
+    """Delete archived submission files from GridFS to free server storage."""
+    try:
+        from gridfs import GridFS
+        from bson import ObjectId
+        import datetime
+
+        data = request.get_json()
+        submission_ids = data.get('submission_ids', [])
+        if not submission_ids:
+            return jsonify({'error': 'No submission IDs provided'}), 400
+
+        fs = GridFS(db.db)
+        deleted_count = 0
+        freed_bytes = 0
+
+        for sid in submission_ids:
+            sub = Submission.find_one({'submission_id': sid})
+            if not sub:
+                continue
+            # Safety: only delete if archived and belongs to this teacher's assignment
+            if not sub.get('archived'):
+                continue
+            assignment = Assignment.find_one({'assignment_id': sub['assignment_id']})
+            if not assignment or assignment['teacher_id'] != session['teacher_id']:
+                continue
+
+            # Sum file sizes and delete from GridFS
+            for field in ('file_ids', 'marked_copy_file_ids'):
+                for fid in sub.get(field, []):
+                    try:
+                        file_obj = db.db.fs.files.find_one({'_id': ObjectId(fid)})
+                        if file_obj:
+                            freed_bytes += file_obj.get('length', 0)
+                        fs.delete(ObjectId(fid))
+                    except Exception as e:
+                        logger.warning(f"Error deleting GridFS file {fid}: {e}")
+
+            # Mark submission as storage-deleted
+            Submission.update_one(
+                {'submission_id': sid},
+                {'$set': {
+                    'file_ids': [],
+                    'marked_copy_file_ids': [],
+                    'storage_deleted': True,
+                    'storage_deleted_at': datetime.datetime.utcnow()
+                }}
+            )
+            deleted_count += 1
+
+        return jsonify({
+            'success': True,
+            'deleted_count': deleted_count,
+            'freed_bytes': freed_bytes,
+            'freed_mb': round(freed_bytes / (1024 * 1024), 1)
+        })
+
+    except Exception as e:
+        logger.error(f"Error deleting archived files: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

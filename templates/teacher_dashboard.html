@@ -68,7 +68,26 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- Storage Usage Bar -->
+    <div class="card mb-4" id="storage-bar-card" style="display:none;">
+        <div class="card-body py-2 d-flex align-items-center gap-3">
+            <i class="bi bi-hdd text-muted"></i>
+            <div class="flex-grow-1">
+                <div class="d-flex justify-content-between mb-1">
+                    <small class="text-muted">Server Storage</small>
+                    <small class="text-muted" id="storage-text">Loading...</small>
+                </div>
+                <div class="progress" style="height: 8px;">
+                    <div class="progress-bar" id="storage-progress" role="progressbar" style="width: 0%"></div>
+                </div>
+            </div>
+            <a href="{{ url_for('teacher_settings') }}" class="btn btn-sm btn-outline-secondary" title="Manage storage">
+                <i class="bi bi-gear"></i>
+            </a>
+        </div>
+    </div>
+
     <!-- Quick Actions -->
     <div class="row g-4 mb-5">
         <div class="col-md-4">
@@ -225,4 +244,29 @@
         color: #333;
     }
 </style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load storage bar
+fetch('/api/teacher/storage')
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) return;
+        const card = document.getElementById('storage-bar-card');
+        const bar = document.getElementById('storage-progress');
+        const text = document.getElementById('storage-text');
+        card.style.display = '';
+        text.textContent = `${data.used_mb} MB / ${data.limit_mb} MB (${data.percentage}%)`;
+        bar.style.width = Math.min(data.percentage, 100) + '%';
+        if (data.percentage >= 90) {
+            bar.className = 'progress-bar bg-danger';
+        } else if (data.percentage >= 80) {
+            bar.className = 'progress-bar bg-warning';
+        } else {
+            bar.className = 'progress-bar bg-success';
+        }
+    })
+    .catch(() => {});
+</script>
 {% endblock %}

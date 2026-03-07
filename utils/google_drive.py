@@ -195,6 +195,30 @@ def extract_drive_file_id(url):
     return None
 
 
+def extract_drive_folder_id(url_or_id):
+    """Extract a Google Drive folder ID from a URL or raw ID.
+
+    Supported formats:
+    - https://drive.google.com/drive/folders/FOLDER_ID
+    - https://drive.google.com/drive/folders/FOLDER_ID?resourcekey=...
+    - https://drive.google.com/drive/u/0/folders/FOLDER_ID
+    - Raw folder ID string
+
+    Returns the folder ID string, or None if not valid.
+    """
+    if not url_or_id:
+        return None
+    url_or_id = url_or_id.strip()
+    # Folder URL pattern
+    match = re.search(r'/folders/([a-zA-Z0-9_-]{10,})', url_or_id)
+    if match:
+        return match.group(1)
+    # Raw ID (alphanumeric + dash + underscore, min 10 chars, no slashes)
+    if re.match(r'^[a-zA-Z0-9_-]{10,}$', url_or_id):
+        return url_or_id
+    return None
+
+
 class DriveManager:
     def __init__(self, service, folder_id=None):
         self.service = service
