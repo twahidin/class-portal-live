@@ -33,14 +33,8 @@
                     </p>
                 </div>
                 <div class="btn-group">
-                    <a href="{{ url_for('manual_submission', assignment_id=assignment.assignment_id) }}" class="btn btn-outline-primary">
-                        <i class="bi bi-file-earmark-plus me-1"></i>Manual submission
-                    </a>
-                    <a href="{{ url_for('feedback_summary_report', assignment_id=assignment.assignment_id) }}" class="btn btn-outline-primary">
-                        <i class="bi bi-clipboard-data me-1"></i>Generate feedback & summary report
-                    </a>
-                    <a href="{{ url_for('download_assignment_report', assignment_id=assignment.assignment_id) }}" class="btn btn-primary">
-                        <i class="bi bi-download me-1"></i>Download PDF Report
+                    <a href="{{ url_for('download_assignment_report', assignment_id=assignment.assignment_id) }}" class="btn btn-primary" onclick="return confirmDownloadReport()">
+                        <i class="bi bi-download me-1"></i>Download Assignment Summary Report
                     </a>
                     <button class="btn btn-outline-success" onclick="openArchiveModal('/api/teacher/archive/assignment/{{ assignment.assignment_id }}')">
                         <i class="bi bi-archive me-1"></i>Archive
@@ -640,6 +634,69 @@
             </div>
         </div>
     </div>
+
+    <!-- Score Heatmap -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-grid-3x3-gap me-2"></i>Score Heatmap</h5>
+            <div>
+                <span class="badge bg-success">100%</span>
+                <span class="badge bg-warning text-dark">50–99%</span>
+                <span class="badge bg-danger">&lt;50%</span>
+                <span class="badge bg-secondary">no data</span>
+            </div>
+        </div>
+        <div class="card-body p-0 overflow-auto">
+            {% if report.heatmap_question_labels and report.heatmap_rows %}
+            <table class="table table-bordered table-sm mb-0 heatmap-table">
+                <thead class="table-light sticky-top">
+                    <tr>
+                        <th>Student</th>
+                        {% for q in report.heatmap_question_labels %}
+                        <th class="text-center">Q{{ q }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report.heatmap_rows %}
+                    <tr>
+                        <td>
+                            <strong>{{ row.student.name }}</strong>
+                            <br><small class="text-muted">{{ row.student.student_id }}</small>
+                        </td>
+                        {% for cell in row.cells %}
+                        <td class="text-center {{ cell.css }}" title="{% if cell.pct is not none %}{{ "%.0f"|format(cell.pct) }}%{% else %}—{% endif %}">{{ cell.label }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="p-4 text-muted mb-0">No per-question data available for heatmap. Review more submissions to see question-level scores.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Students Needing Particular Attention -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Students Needing Particular Attention</h5>
+        </div>
+        <div class="card-body">
+            {% if report.students_needing_attention %}
+            <ul class="list-group list-group-flush">
+                {% for s in report.students_needing_attention %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <span>{{ s.student.name }} <small class="text-muted">({{ s.student.student_id }})</small></span>
+                    <span class="badge {% if s.percentage < 50 %}bg-danger{% else %}bg-warning text-dark{% endif %}">{{ "%.0f"|format(s.percentage) }}%</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-muted mb-0">No students flagged from current scores.</p>
+            {% endif %}
+        </div>
+    </div>
 </div>
 
 <style>
@@ -647,6 +704,11 @@
     background: white;
     z-index: 10;
 }
+.heatmap-table td, .heatmap-table th { min-width: 3rem; }
+.heatmap-full { background-color: #d4edda !important; }
+.heatmap-partial { background-color: #fff3cd !important; }
+.heatmap-low { background-color: #f8d7da !important; }
+.heatmap-missing { background-color: #e9ecef !important; }
 </style>
 {% endblock %}
 
@@ -811,6 +873,13 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function confirmDownloadReport() {
+    {% if not ai_class_summary %}
+    return confirm('AI Class Summary has not been generated yet. The report will not include it. Continue?');
+    {% endif %}
+    return true;
 }
 </script>
 {% include 'partials/archive_modal.html' %}

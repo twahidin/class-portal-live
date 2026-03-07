@@ -5566,6 +5566,9 @@ def assignment_summary(assignment_id):
     )
     tags_generated_at = assignment.get('question_module_tags_generated_at')
 
+    # Build feedback summary report (heatmap, attention list, etc.)
+    report = _build_feedback_summary_report(assignment, submissions, student_submissions, insights)
+
     return render_template('teacher_assignment_summary.html',
                          teacher=teacher,
                          assignment=assignment,
@@ -5577,7 +5580,8 @@ def assignment_summary(assignment_id):
                          student_submissions=student_submissions,
                          question_module_tags=question_module_tags,
                          has_module_trees=has_module_trees,
-                         tags_generated_at=tags_generated_at)
+                         tags_generated_at=tags_generated_at,
+                         report=report)
 
 
 @app.route('/teacher/assignment/<assignment_id>/generate-class-summary', methods=['POST'])
