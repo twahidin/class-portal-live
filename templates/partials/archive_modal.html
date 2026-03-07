@@ -13,6 +13,11 @@
                         Upload all submission files to your Google Drive folder for backup.
                         After archiving, you can delete files from the server to free storage space.
                     </p>
+                    <div class="alert alert-info py-2 small">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Requires Google Account connected in <a href="{{ url_for('teacher_settings') }}">Settings > Google Drive</a>.
+                        Files are uploaded to your own Google Drive storage.
+                    </div>
                     <div class="mb-3">
                         <label class="form-label fw-bold">Google Drive Folder URL or ID</label>
                         <input type="text" class="form-control" id="archive-folder-input"

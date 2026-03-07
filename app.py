@@ -10321,15 +10321,15 @@ def archive_assignment_to_drive(assignment_id):
         folder_url = data.get('folder_url', '')
         include_feedback = data.get('include_feedback', True)
 
-        from utils.google_drive import extract_drive_folder_id, get_teacher_drive_manager
+        from utils.google_drive import extract_drive_folder_id, get_teacher_oauth_drive_manager
         folder_id = extract_drive_folder_id(folder_url)
         if not folder_id:
             return jsonify({'error': 'Invalid Google Drive folder URL or ID'}), 400
 
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
-        drive_manager = get_teacher_drive_manager(teacher)
+        drive_manager, drive_err = get_teacher_oauth_drive_manager(teacher)
         if not drive_manager:
-            return jsonify({'error': 'Could not connect to Google Drive. Check your Google Drive settings.'}), 500
+            return jsonify({'error': drive_err}), 400
 
         # Verify folder access
         ok, err_msg = drive_manager.verify_folder_access(folder_id)
@@ -10375,15 +10375,15 @@ def archive_class_to_drive(class_id):
         folder_url = data.get('folder_url', '')
         include_feedback = data.get('include_feedback', True)
 
-        from utils.google_drive import extract_drive_folder_id, get_teacher_drive_manager
+        from utils.google_drive import extract_drive_folder_id, get_teacher_oauth_drive_manager
         folder_id = extract_drive_folder_id(folder_url)
         if not folder_id:
             return jsonify({'error': 'Invalid Google Drive folder URL or ID'}), 400
 
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
-        drive_manager = get_teacher_drive_manager(teacher)
+        drive_manager, drive_err = get_teacher_oauth_drive_manager(teacher)
         if not drive_manager:
-            return jsonify({'error': 'Could not connect to Google Drive. Check your Google Drive settings.'}), 500
+            return jsonify({'error': drive_err}), 400
 
         ok, err_msg = drive_manager.verify_folder_access(folder_id)
         if not ok:

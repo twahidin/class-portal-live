@@ -170,6 +170,21 @@ def get_teacher_drive_manager(teacher):
     folder_id = teacher.get('google_drive_folder_id') if teacher else None
     return DriveManager(service, folder_id)
 
+def get_teacher_oauth_drive_manager(teacher):
+    """Get a drive manager using ONLY the teacher's OAuth credentials (no service account fallback).
+    Returns (DriveManager, error_message) tuple. DriveManager is None on failure."""
+    if not teacher:
+        return None, "Teacher not found."
+    if not teacher.get('google_oauth_refresh_token'):
+        return None, "Google account not connected. Go to Settings > Google Drive > Connect Google Account first."
+    service, needs_reauth = get_drive_service_oauth(teacher)
+    if not service:
+        if needs_reauth:
+            return None, "Google authorization expired. Go to Settings > Google Drive > Connect Google Account to re-authorize."
+        return None, "Could not connect to Google Drive with your account."
+    return DriveManager(service), None
+
+
 def extract_drive_file_id(url):
     """Extract a Google Drive file ID from various URL formats.
 
