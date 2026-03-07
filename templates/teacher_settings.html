@@ -237,84 +237,6 @@
                     </div>
                 </div>
                 
-                <!-- Google Drive -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-google me-2"></i>Google Drive Integration</h5>
-                    </div>
-                    <div class="card-body">
-                        <p class="text-muted">
-                            Configure a Google Drive folder to browse source files and auto-upload assignments, submissions, and feedback.
-                        </p>
-
-                        <!-- Google Account Connection Status (loaded via JS) -->
-                        <div id="google-drive-status">
-                            <div class="d-flex align-items-center">
-                                <div class="spinner-border spinner-border-sm me-2" role="status">
-                                    <span class="visually-hidden">Loading...</span>
-                                </div>
-                                <span class="text-muted">Loading Google Drive status...</span>
-                            </div>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label">Google Drive Folder ID</label>
-                            <input type="text" class="form-control" name="google_drive_source_folder_id"
-                                   value="{{ teacher.google_drive_source_folder_id or '' }}"
-                                   placeholder="e.g., 1aBcDeFgHiJkLmNoPqRsTuVwXyZ">
-                            <small class="text-muted">
-                                This folder is used for <strong>browsing</strong> source files (question papers, answer keys) when creating assignments,
-                                and for <strong>auto-uploading</strong> assignment files, student submissions, and feedback PDFs.
-                                <br>Find this in the URL when viewing the folder: <code>drive.google.com/drive/folders/[FOLDER_ID]</code>
-                            </small>
-                        </div>
-
-                        {% if teacher.google_drive_source_folder_id %}
-                        <div class="alert alert-success">
-                            <i class="bi bi-check-circle me-1"></i>Google Drive folder configured (browse + auto-upload)
-                        </div>
-
-                        <!-- Sync Existing Assignments -->
-                        <div class="mb-3">
-                            <button type="button" class="btn btn-outline-primary" id="syncDriveBtn" onclick="syncExistingToDrive()">
-                                <i class="bi bi-cloud-upload me-1"></i>Sync Existing Assignments to Drive
-                            </button>
-                            <small class="text-muted d-block mt-1">
-                                Back up all existing assignments, submissions, and feedback to Google Drive.
-                                Already-synced items are skipped.
-                            </small>
-                            <div id="syncDriveResult" class="mt-2" style="display:none;"></div>
-                        </div>
-                        {% endif %}
-
-                        <!-- Setup Instructions -->
-                        <div class="mt-3">
-                            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#driveSetupHelp">
-                                <i class="bi bi-question-circle me-1"></i>Setup Instructions
-                            </button>
-                            <div class="collapse mt-2" id="driveSetupHelp">
-                                <div class="card card-body bg-light small">
-                                    <div id="setup-instructions-oauth">
-                                        <h6 class="fw-bold">Setup Instructions:</h6>
-                                        <ol class="mb-3">
-                                            <li>Click <strong>"Connect Google Account"</strong> above and grant access</li>
-                                            <li>Create a folder in your Google Drive (e.g. "Class Portal")</li>
-                                            <li>Upload your question papers, answer keys, and reference materials to this folder</li>
-                                            <li>Copy the Folder ID from the URL (drive.google.com/drive/folders/<strong>[FOLDER_ID]</strong>)</li>
-                                            <li>Paste it in the "Google Drive Folder ID" field above and click Save</li>
-                                        </ol>
-                                    </div>
-                                    <h6 class="fw-bold">What happens automatically:</h6>
-                                    <ul class="mb-0">
-                                        <li><strong>Browse:</strong> Select source files from this folder when creating assignments</li>
-                                        <li><strong>Upload:</strong> Assignment files, student submissions, and feedback PDFs are auto-uploaded to an <code>Assignments/</code> subfolder</li>
-                                        <li>Files already in Drive are referenced (not copied)</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
                 
                 <div class="d-grid">
                     <button type="submit" class="btn btn-primary btn-lg">
@@ -481,10 +403,6 @@
                         Configure API keys for multiple LLM providers (Anthropic, OpenAI, DeepSeek, Google Gemini). Set a default model that will be used for all assignments, or choose a specific model when creating each assignment. You can also provide additional instructions for feedback and grading per assignment.
                     </p>
                     
-                    <h6>Google Drive</h6>
-                    <p class="small text-muted">
-                        Connect your Google account to browse files, auto-upload assignments, and archive submissions to your Drive.
-                    </p>
                 </div>
             </div>
         </div>
@@ -542,113 +460,6 @@
 
 {% block scripts %}
 <script>
-    // Load Google Drive connection status
-    async function loadDriveStatus() {
-        const statusDiv = document.getElementById('google-drive-status');
-        try {
-            const response = await fetch('/api/drive/service-account-info');
-            const data = await response.json();
-            let html = '';
-
-            if (data.oauth_configured) {
-                if (data.google_connected && data.google_email) {
-                    html += `
-                        <div class="alert alert-success mb-3">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <i class="bi bi-google me-1"></i>
-                                    <strong>Connected:</strong> ${data.google_email}
-                                </div>
-                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="disconnectGoogle()">
-                                    <i class="bi bi-x-circle me-1"></i>Disconnect
-                                </button>
-                            </div>
-                            <small class="text-muted d-block mt-1">Files are auto-uploaded to this Google account's Drive.</small>
-                        </div>
-                    `;
-                } else {
-                    html += `
-                        <div class="alert alert-info mb-3">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <i class="bi bi-google me-1"></i>
-                                    Optionally connect your Google account for auto-uploading files to Drive.
-                                </div>
-                                <a href="/auth/google/connect" class="btn btn-sm btn-primary">
-                                    <i class="bi bi-box-arrow-in-right me-1"></i>Connect Google Account
-                                </a>
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-            // If OAuth not configured, just skip the section — Drive folder ID still works for browsing
-
-            statusDiv.innerHTML = html;
-        } catch (e) {
-            statusDiv.innerHTML = `
-                <div class="alert alert-warning mb-3">
-                    <i class="bi bi-exclamation-triangle me-1"></i>Could not load Google Drive status.
-                </div>
-            `;
-        }
-    }
-
-    function disconnectGoogle() {
-        if (!confirm('Disconnect your Google account? Files will no longer be uploaded to your Drive.')) return;
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = '/auth/google/disconnect';
-        document.body.appendChild(form);
-        form.submit();
-    }
-
-
-    // Load on page load
-    loadDriveStatus();
-
-    // Sync existing assignments to Google Drive
-    async function syncExistingToDrive() {
-        const btn = document.getElementById('syncDriveBtn');
-        const resultDiv = document.getElementById('syncDriveResult');
-
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Syncing...';
-        resultDiv.style.display = 'none';
-
-        try {
-            const response = await fetch('/api/teacher/drive/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await response.json();
-
-            if (data.success) {
-                let html = '<div class="alert alert-success mb-0"><i class="bi bi-check-circle me-1"></i><strong>Sync complete!</strong><ul class="mb-0 mt-1">';
-                html += `<li>${data.synced_assignments} assignment(s) synced</li>`;
-                html += `<li>${data.synced_submissions} submission(s) uploaded</li>`;
-                html += `<li>${data.synced_feedback} feedback PDF(s) uploaded</li>`;
-                html += `<li>${data.skipped} assignment(s) already synced</li>`;
-                html += '</ul>';
-                if (data.errors && data.errors.length > 0) {
-                    html += `<hr class="my-2"><small class="text-warning"><strong>${data.errors.length} error(s):</strong><ul class="mb-0">`;
-                    data.errors.forEach(e => html += `<li>${e}</li>`);
-                    html += '</ul></small>';
-                }
-                html += '</div>';
-                resultDiv.innerHTML = html;
-            } else {
-                resultDiv.innerHTML = `<div class="alert alert-danger mb-0"><i class="bi bi-exclamation-circle me-1"></i>${data.error || 'Sync failed'}</div>`;
-            }
-        } catch (e) {
-            resultDiv.innerHTML = '<div class="alert alert-danger mb-0"><i class="bi bi-exclamation-circle me-1"></i>Network error — please try again.</div>';
-        }
-
-        resultDiv.style.display = 'block';
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Sync Existing Assignments to Drive';
-    }
-
     // Change Password
     document.getElementById('change-password-btn').addEventListener('click', async () => {
         const currentPassword = document.getElementById('current_password').value;
