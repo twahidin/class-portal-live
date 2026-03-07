@@ -10218,142 +10218,119 @@ def api_admin_set_storage_limit():
 
 
 # ============================================================================
-# ARCHIVE TO GOOGLE DRIVE
+# ARCHIVE — Download ZIP + Delete from Server
 # ============================================================================
 
-def _archive_submissions_to_drive(submissions, drive_manager, parent_folder_id, include_feedback=True):
-    """Archive a list of submissions to Google Drive. Returns (archived_ids, details, errors, total_bytes)."""
+def _build_submission_zip(submissions, include_feedback=True):
+    """Build a ZIP archive of submission files. Returns (zip_bytes, submission_ids, details, errors)."""
+    import zipfile
+    import io
     from gridfs import GridFS
     from bson import ObjectId
-    import datetime
 
     fs = GridFS(db.db)
+    buf = io.BytesIO()
     archived_ids = []
     details = []
     errors = []
-    total_bytes = 0
 
-    for sub in submissions:
-        if sub.get('storage_deleted'):
-            continue
-        try:
-            student = Student.find_one({'student_id': sub['student_id']})
-            student_name = student.get('name', sub['student_id']) if student else sub['student_id']
-            files_uploaded = 0
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for sub in submissions:
+            if sub.get('storage_deleted'):
+                continue
+            try:
+                student = Student.find_one({'student_id': sub['student_id']})
+                student_name = (student.get('name', sub['student_id']) if student else sub['student_id']).replace('/', '_')
+                files_added = 0
 
-            # Upload original submission files
-            for i, fid in enumerate(sub.get('file_ids', [])):
-                try:
-                    f = fs.get(ObjectId(fid))
-                    content = f.read()
-                    total_bytes += len(content)
-                    ext = '.pdf' if (f.content_type or '').startswith('application/pdf') else '.jpg'
-                    name = f"{student_name}_{sub['submission_id']}_page{i+1}{ext}"
-                    result = drive_manager.upload_content(content, name, f.content_type or 'application/octet-stream', parent_folder_id)
-                    if result:
-                        files_uploaded += 1
-                except Exception as e:
-                    errors.append(f"File {fid} for {student_name}: {e}")
+                # Original submission files
+                for i, fid in enumerate(sub.get('file_ids', [])):
+                    try:
+                        f = fs.get(ObjectId(fid))
+                        content = f.read()
+                        ext = '.pdf' if (f.content_type or '').startswith('application/pdf') else '.jpg'
+                        zf.writestr(f"{student_name}/{student_name}_page{i+1}{ext}", content)
+                        files_added += 1
+                    except Exception as e:
+                        errors.append(f"File {fid} for {student_name}: {e}")
 
-            # Upload marked copies
-            for i, fid in enumerate(sub.get('marked_copy_file_ids', [])):
-                try:
-                    f = fs.get(ObjectId(fid))
-                    content = f.read()
-                    total_bytes += len(content)
-                    ext = '.pdf' if (f.content_type or '').startswith('application/pdf') else '.jpg'
-                    name = f"{student_name}_{sub['submission_id']}_marked{i+1}{ext}"
-                    result = drive_manager.upload_content(content, name, f.content_type or 'application/octet-stream', parent_folder_id)
-                    if result:
-                        files_uploaded += 1
-                except Exception as e:
-                    errors.append(f"Marked copy {fid} for {student_name}: {e}")
+                # Marked copies
+                for i, fid in enumerate(sub.get('marked_copy_file_ids', [])):
+                    try:
+                        f = fs.get(ObjectId(fid))
+                        content = f.read()
+                        ext = '.pdf' if (f.content_type or '').startswith('application/pdf') else '.jpg'
+                        zf.writestr(f"{student_name}/{student_name}_marked{i+1}{ext}", content)
+                        files_added += 1
+                    except Exception as e:
+                        errors.append(f"Marked copy {fid} for {student_name}: {e}")
 
-            # Upload feedback PDF for reviewed submissions
-            if include_feedback and sub.get('status') in ('reviewed', 'approved') and sub.get('feedback'):
-                try:
-                    from utils.pdf_generator import generate_review_pdf
-                    assignment = Assignment.find_one({'assignment_id': sub['assignment_id']})
-                    if assignment:
-                        pdf_bytes = generate_review_pdf(sub, assignment, student)
-                        if pdf_bytes:
-                            name = f"{student_name}_{sub['submission_id']}_feedback.pdf"
-                            result = drive_manager.upload_content(pdf_bytes, name, 'application/pdf', parent_folder_id)
-                            if result:
-                                files_uploaded += 1
-                except Exception as e:
-                    errors.append(f"Feedback PDF for {student_name}: {e}")
+                # Feedback PDF
+                if include_feedback and sub.get('status') in ('reviewed', 'approved') and sub.get('feedback'):
+                    try:
+                        from utils.pdf_generator import generate_review_pdf
+                        assignment = Assignment.find_one({'assignment_id': sub['assignment_id']})
+                        if assignment:
+                            pdf_bytes = generate_review_pdf(sub, assignment, student)
+                            if pdf_bytes:
+                                zf.writestr(f"{student_name}/{student_name}_feedback.pdf", pdf_bytes)
+                                files_added += 1
+                    except Exception as e:
+                        errors.append(f"Feedback PDF for {student_name}: {e}")
 
-            # Mark as archived
-            Submission.update_one(
-                {'submission_id': sub['submission_id']},
-                {'$set': {
-                    'archived': True,
-                    'archived_at': datetime.datetime.utcnow(),
-                    'archive_drive_folder_id': parent_folder_id
-                }}
-            )
-            archived_ids.append(sub['submission_id'])
-            details.append({'student_name': student_name, 'files_uploaded': files_uploaded, 'submission_id': sub['submission_id']})
+                if files_added > 0:
+                    archived_ids.append(sub['submission_id'])
+                    details.append({'student_name': student_name, 'files_added': files_added, 'submission_id': sub['submission_id']})
 
-        except Exception as e:
-            errors.append(f"Submission {sub.get('submission_id', '?')}: {e}")
+            except Exception as e:
+                errors.append(f"Submission {sub.get('submission_id', '?')}: {e}")
 
-    return archived_ids, details, errors, total_bytes
+    buf.seek(0)
+    return buf.getvalue(), archived_ids, details, errors
 
 
 @app.route('/api/teacher/archive/assignment/<assignment_id>', methods=['POST'])
 @teacher_required
-def archive_assignment_to_drive(assignment_id):
-    """Archive all submissions for an assignment to Google Drive."""
+def archive_assignment_download(assignment_id):
+    """Download a ZIP archive of all submissions for an assignment."""
     try:
         assignment = Assignment.find_one({'assignment_id': assignment_id})
         if not assignment or assignment['teacher_id'] != session['teacher_id']:
             return jsonify({'error': 'Assignment not found or unauthorized'}), 404
 
-        data = request.get_json()
-        folder_url = data.get('folder_url', '')
+        data = request.get_json() or {}
         include_feedback = data.get('include_feedback', True)
 
-        from utils.google_drive import extract_drive_folder_id, get_teacher_oauth_drive_manager
-        folder_id = extract_drive_folder_id(folder_url)
-        if not folder_id:
-            return jsonify({'error': 'Invalid Google Drive folder URL or ID'}), 400
-
-        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
-        drive_manager, drive_err = get_teacher_oauth_drive_manager(teacher)
-        if not drive_manager:
-            return jsonify({'error': drive_err}), 400
-
-        # Verify folder access
-        ok, err_msg = drive_manager.verify_folder_access(folder_id)
-        if not ok:
-            return jsonify({'error': f'Cannot access folder: {err_msg}'}), 400
-
-        # Create assignment subfolder
-        subfolder_name = f"{assignment.get('title', assignment_id)} ({assignment_id})"
-        subfolder_id = drive_manager.find_or_create_folder(subfolder_name, folder_id)
-        if not subfolder_id:
-            return jsonify({'error': 'Failed to create subfolder in Google Drive'}), 500
-
-        # Get all submissions (skip already storage-deleted ones)
         submissions = list(Submission.find({
             'assignment_id': assignment_id,
             'storage_deleted': {'$ne': True}
         }))
 
-        archived_ids, details, errors, total_bytes = _archive_submissions_to_drive(
-            submissions, drive_manager, subfolder_id, include_feedback
-        )
+        if not submissions:
+            return jsonify({'error': 'No submissions to archive'}), 404
 
-        return jsonify({
-            'success': True,
-            'archived_count': len(archived_ids),
-            'archived_submissions': archived_ids,
-            'details': details,
-            'total_mb': round(total_bytes / (1024 * 1024), 1),
-            'errors': errors[:20]
-        })
+        zip_bytes, archived_ids, details, errors = _build_submission_zip(submissions, include_feedback)
+
+        # Mark submissions as archived
+        import datetime
+        for sid in archived_ids:
+            Submission.update_one(
+                {'submission_id': sid},
+                {'$set': {'archived': True, 'archived_at': datetime.datetime.utcnow()}}
+            )
+
+        # Return ZIP file
+        title_safe = re.sub(r'[^\w\s-]', '', assignment.get('title', assignment_id)).strip().replace(' ', '_')
+        filename = f"archive_{title_safe}_{assignment_id}.zip"
+
+        return Response(
+            zip_bytes,
+            mimetype='application/zip',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"',
+                     'X-Archive-Count': str(len(archived_ids)),
+                     'X-Archive-Ids': ','.join(archived_ids),
+                     'X-Archive-Errors': str(len(errors))}
+        )
 
     except Exception as e:
         logger.error(f"Error archiving assignment {assignment_id}: {e}", exc_info=True)
@@ -10362,28 +10339,12 @@ def archive_assignment_to_drive(assignment_id):
 
 @app.route('/api/teacher/archive/class/<class_id>', methods=['POST'])
 @teacher_required
-def archive_class_to_drive(class_id):
-    """Archive all submissions for all assignments targeting a class."""
+def archive_class_download(class_id):
+    """Download a ZIP archive of all submissions for all assignments in a class."""
     try:
-        data = request.get_json()
-        folder_url = data.get('folder_url', '')
+        data = request.get_json() or {}
         include_feedback = data.get('include_feedback', True)
 
-        from utils.google_drive import extract_drive_folder_id, get_teacher_oauth_drive_manager
-        folder_id = extract_drive_folder_id(folder_url)
-        if not folder_id:
-            return jsonify({'error': 'Invalid Google Drive folder URL or ID'}), 400
-
-        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
-        drive_manager, drive_err = get_teacher_oauth_drive_manager(teacher)
-        if not drive_manager:
-            return jsonify({'error': drive_err}), 400
-
-        ok, err_msg = drive_manager.verify_folder_access(folder_id)
-        if not ok:
-            return jsonify({'error': f'Cannot access folder: {err_msg}'}), 400
-
-        # Find assignments for this class belonging to this teacher
         assignments = list(Assignment.find({
             'teacher_id': session['teacher_id'],
             '$or': [
@@ -10395,41 +10356,37 @@ def archive_class_to_drive(class_id):
         if not assignments:
             return jsonify({'error': 'No assignments found for this class'}), 404
 
-        all_archived_ids = []
-        all_details = []
-        all_errors = []
-        total_bytes = 0
-
+        # Gather all submissions across assignments
+        all_submissions = []
         for assignment in assignments:
-            # Create subfolder per assignment
-            subfolder_name = f"{assignment.get('title', assignment['assignment_id'])} ({assignment['assignment_id']})"
-            subfolder_id = drive_manager.find_or_create_folder(subfolder_name, folder_id)
-            if not subfolder_id:
-                all_errors.append(f"Failed to create folder for {assignment.get('title')}")
-                continue
-
-            submissions = list(Submission.find({
+            subs = list(Submission.find({
                 'assignment_id': assignment['assignment_id'],
                 'storage_deleted': {'$ne': True}
             }))
+            all_submissions.extend(subs)
 
-            archived_ids, details, errors, bytes_uploaded = _archive_submissions_to_drive(
-                submissions, drive_manager, subfolder_id, include_feedback
+        if not all_submissions:
+            return jsonify({'error': 'No submissions to archive'}), 404
+
+        zip_bytes, archived_ids, details, errors = _build_submission_zip(all_submissions, include_feedback)
+
+        # Mark submissions as archived
+        import datetime
+        for sid in archived_ids:
+            Submission.update_one(
+                {'submission_id': sid},
+                {'$set': {'archived': True, 'archived_at': datetime.datetime.utcnow()}}
             )
-            all_archived_ids.extend(archived_ids)
-            all_details.extend(details)
-            all_errors.extend(errors)
-            total_bytes += bytes_uploaded
 
-        return jsonify({
-            'success': True,
-            'archived_count': len(all_archived_ids),
-            'archived_submissions': all_archived_ids,
-            'details': all_details,
-            'total_mb': round(total_bytes / (1024 * 1024), 1),
-            'assignments_processed': len(assignments),
-            'errors': all_errors[:20]
-        })
+        filename = f"archive_{class_id}.zip"
+        return Response(
+            zip_bytes,
+            mimetype='application/zip',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"',
+                     'X-Archive-Count': str(len(archived_ids)),
+                     'X-Archive-Ids': ','.join(archived_ids),
+                     'X-Archive-Errors': str(len(errors))}
+        )
 
     except Exception as e:
         logger.error(f"Error archiving class {class_id}: {e}", exc_info=True)
