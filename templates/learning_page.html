@@ -63,12 +63,23 @@
                 <div class="p-3 text-white text-center">
                     <a href="{{ res.url or '#' }}" target="_blank" rel="noopener" class="btn btn-primary"><i class="bi bi-file-pdf me-1"></i>{{ res.title }}</a>
                 </div>
+                {% elif res.type == 'interactive' %}
+                <div class="ratio ratio-16x9">
+                    <iframe src="{{ url_for('serve_module_resource_interactive', resource_id=res.resource_id) }}"
+                            sandbox="allow-scripts allow-same-origin" allowfullscreen></iframe>
+                </div>
                 {% elif res.type == 'slides' %}
+                {% if 'docs.google.com' in (res.url or '') %}
+                <div class="ratio ratio-16x9">
+                    <iframe src="{{ res.url }}" allowfullscreen></iframe>
+                </div>
+                {% else %}
                 <div class="p-4 text-center text-white">
                     <i class="bi bi-file-earmark-slides display-4"></i>
                     <p class="mb-2">{{ res.title }}</p>
                     <a href="{{ res.url or '#' }}" target="_blank" rel="noopener" class="btn btn-light btn-sm">Open Slides</a>
                 </div>
+                {% endif %}
                 {% else %}
                 <div class="p-4 text-center text-white">
                     <i class="bi bi-link-45deg display-4"></i>
@@ -165,6 +176,7 @@
                                 {% if res.type == 'youtube' %}<i class="bi bi-youtube"></i>
                                 {% elif res.type == 'pdf' %}<i class="bi bi-file-pdf"></i>
                                 {% elif res.type == 'slides' %}<i class="bi bi-file-earmark-slides"></i>
+                                {% elif res.type == 'interactive' %}<i class="bi bi-joystick"></i>
                                 {% else %}<i class="bi bi-link-45deg"></i>{% endif %}
                             </span>
                             <span>{{ res.title }}</span>

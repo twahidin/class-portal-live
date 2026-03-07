@@ -90,6 +90,11 @@ class Database:
         # Assessments access (admin: which teachers/classes/teaching groups can create and use Assessments)
         self.db.assessments_access.create_index('config_id', unique=True)
 
+        # LO question bank
+        self.db.lo_questions.create_index('question_id', unique=True)
+        self.db.lo_questions.create_index('module_id')
+        self.db.lo_questions.create_index([('teacher_id', 1), ('module_id', 1)])
+
 db = Database()
 
 class Student:
@@ -324,6 +329,37 @@ class ModuleResource:
     @staticmethod
     def count(query):
         return db.db.module_resources.count_documents(query)
+
+
+class LOQuestion:
+    """Question bank entries linked to leaf module LOs."""
+    @staticmethod
+    def find_one(query):
+        return db.db.lo_questions.find_one(query)
+
+    @staticmethod
+    def find(query):
+        return db.db.lo_questions.find(query)
+
+    @staticmethod
+    def insert_one(document):
+        return db.db.lo_questions.insert_one(document).inserted_id
+
+    @staticmethod
+    def update_one(query, update):
+        return db.db.lo_questions.update_one(query, update)
+
+    @staticmethod
+    def delete_one(query):
+        return db.db.lo_questions.delete_one(query)
+
+    @staticmethod
+    def delete_many(query):
+        return db.db.lo_questions.delete_many(query)
+
+    @staticmethod
+    def count(query):
+        return db.db.lo_questions.count_documents(query)
 
 
 class StudentModuleMastery:

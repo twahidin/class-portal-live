@@ -33,6 +33,14 @@
                 <button type="button" class="btn btn-outline-secondary" id="zoomOutBtn" title="Zoom out"><i class="bi bi-zoom-out"></i></button>
                 <button type="button" class="btn btn-outline-secondary" id="fitBtn" title="Fit to view"><i class="bi bi-arrows-fullscreen"></i></button>
             </div>
+            <a href="{{ url_for('teacher_lo_bank', module_id=module.module_id) }}"
+               class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-collection me-1"></i>LO Bank
+            </a>
+            <a href="{{ url_for('lo_bank_csv_template', module_id=module.module_id) }}"
+               class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-download me-1"></i>CSV Template
+            </a>
             {% if module.status != 'published' %}
             <button type="button" class="btn btn-primary btn-sm" id="publishBtn">
                 <i class="bi bi-send me-1"></i>Publish

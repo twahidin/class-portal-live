@@ -6,7 +6,7 @@ from functools import wraps
 import os
 import io
 from datetime import datetime, timedelta, timezone
-from models import db, Student, Teacher, Message, Class, TeachingGroup, Assignment, Submission, Module, ModuleResource, ModuleTextbook, StudentModuleMastery, StudentLearningProfile, LearningSession, Interactive
+from models import db, Student, Teacher, Message, Class, TeachingGroup, Assignment, Submission, Module, ModuleResource, ModuleTextbook, StudentModuleMastery, StudentLearningProfile, LearningSession, Interactive, LOQuestion
 from utils.auth import hash_password, verify_password, validate_password, generate_assignment_id, generate_submission_id, encrypt_api_key, decrypt_api_key
 from utils.ai_marking import get_teacher_ai_service, mark_submission
 from utils.google_drive import get_teacher_drive_manager, upload_assignment_file
@@ -10368,6 +10368,9 @@ def _generate_resource_id():
 def _generate_session_id():
     return f"SES-{uuid.uuid4().hex[:8].upper()}"
 
+def _generate_question_id():
+    return f"LOQ-{uuid.uuid4().hex[:8].upper()}"
+
 def _get_all_module_ids_in_tree(root_module_id):
     """Collect module_id and all descendant IDs for a root module."""
     ids = [root_module_id]
@@ -10989,11 +10992,12 @@ def delete_module_node(module_id, node_id):
             parent = Module.find_one({'module_id': parent_id})
             if parent and len(parent.get('children_ids', [])) == 0:
                 Module.update_one({'module_id': parent_id}, {'$set': {'is_leaf': True}})
-        # Delete all nodes, resources, mastery records, learning sessions in subtree
+        # Delete all nodes, resources, mastery records, learning sessions, questions in subtree
         db.db.modules.delete_many({'module_id': {'$in': all_ids}})
         db.db.module_resources.delete_many({'module_id': {'$in': all_ids}})
         db.db.student_module_mastery.delete_many({'module_id': {'$in': all_ids}})
         db.db.learning_sessions.delete_many({'module_id': {'$in': all_ids}})
+        db.db.lo_questions.delete_many({'module_id': {'$in': all_ids}})
         return jsonify({'success': True, 'deleted_count': len(all_ids)})
     except Exception as e:
         logger.error("Error deleting module node: %s", e)
@@ -11037,6 +11041,10 @@ def manage_module_resources(module_id, node_id):
                     resource_doc['content'] = base64.b64encode(raw).decode('utf-8')
                 if not resource_doc.get('url') and not resource_doc.get('content'):
                     return jsonify({'error': 'Provide a PDF link (URL) or upload a PDF file'}), 400
+            elif resource_type == 'interactive':
+                resource_doc['html_content'] = request.form.get('html_content', '')
+                if not resource_doc['html_content']:
+                    return jsonify({'error': 'Interactive resource requires HTML content'}), 400
             elif resource_type in ('link', 'slides'):
                 resource_doc['url'] = request.form.get('url', '')
             ModuleResource.insert_one(resource_doc)
@@ -11081,6 +11089,16 @@ def delete_module_resource(module_id, node_id, resource_id):
     return jsonify({'success': True})
 
 
+@app.route('/modules/resource/<resource_id>/interactive')
+def serve_module_resource_interactive(resource_id):
+    """Serve raw HTML content for an interactive module resource (sandboxed via iframe)."""
+    res = ModuleResource.find_one({'resource_id': resource_id})
+    if not res or res.get('type') != 'interactive':
+        return 'Not found', 404
+    html_content = res.get('html_content', '')
+    return Response(html_content, content_type='text/html; charset=utf-8')
+
+
 @app.route('/teacher/modules/<module_id>/delete', methods=['POST', 'DELETE'])
 @teacher_required
 def delete_module_tree(module_id):
@@ -11095,10 +11113,467 @@ def delete_module_tree(module_id):
         ModuleResource.delete_many({'module_id': {'$in': tree_ids}})
         StudentModuleMastery.delete_many({'module_id': {'$in': tree_ids}})
         LearningSession.delete_many({'module_id': {'$in': tree_ids}})
+        LOQuestion.delete_many({'module_id': {'$in': tree_ids}})
         Module.delete_many({'module_id': {'$in': tree_ids}})
         return jsonify({'success': True})
     except Exception as e:
         logger.error("Error deleting module tree: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# LO BANK - Question & Resource Bank per Module Tree
+# ============================================================================
+
+def _get_leaf_modules_with_data(root_module_id, teacher_id):
+    """Collect all leaf modules in a tree with their questions and resources."""
+    all_ids = _get_all_module_ids_in_tree(root_module_id)
+    leaves = list(Module.find({'module_id': {'$in': all_ids}, 'is_leaf': True}).sort('lo_code', 1))
+    leaf_ids = [l['module_id'] for l in leaves]
+    # Batch fetch questions and resources
+    questions = list(LOQuestion.find({'module_id': {'$in': leaf_ids}}).sort('created_at', 1))
+    resources = list(ModuleResource.find({'module_id': {'$in': leaf_ids}}).sort('order', 1))
+    q_map = {}
+    for q in questions:
+        q_map.setdefault(q['module_id'], []).append(q)
+    r_map = {}
+    for r in resources:
+        r_map.setdefault(r['module_id'], []).append(r)
+    result = []
+    for leaf in leaves:
+        mid = leaf['module_id']
+        result.append({
+            'module_id': mid,
+            'title': leaf.get('title', 'Untitled'),
+            'lo_code': leaf.get('lo_code', ''),
+            'questions': q_map.get(mid, []),
+            'resources': r_map.get(mid, []),
+        })
+    return result
+
+
+@app.route('/teacher/modules/<module_id>/lo-bank')
+@teacher_required
+def teacher_lo_bank(module_id):
+    """LO Bank page: view/manage all questions and resources grouped by leaf LO."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return redirect(url_for('teacher_modules'))
+    root = Module.find_one({'module_id': module_id, 'teacher_id': session['teacher_id']})
+    if not root:
+        return redirect(url_for('teacher_modules'))
+    leaf_modules = _get_leaf_modules_with_data(module_id, session['teacher_id'])
+    total_questions = sum(len(lo['questions']) for lo in leaf_modules)
+    total_resources = sum(len(lo['resources']) for lo in leaf_modules)
+    # Teacher's assignments for AI import
+    assignments = list(Assignment.find({'teacher_id': session['teacher_id']}).sort('created_at', -1).limit(50))
+    return render_template('teacher_lo_bank.html',
+                           module=root,
+                           leaf_modules=leaf_modules,
+                           total_questions=total_questions,
+                           total_resources=total_resources,
+                           assignments=assignments)
+
+
+@app.route('/teacher/modules/<module_id>/lo-bank/questions', methods=['POST'])
+@teacher_required
+def lo_bank_add_question(module_id):
+    """Add a question to the LO bank."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    root = Module.find_one({'module_id': module_id, 'teacher_id': session['teacher_id']})
+    if not root:
+        return jsonify({'error': 'Module not found'}), 404
+    data = request.get_json(force=True)
+    node_id = data.get('module_id', '')
+    question_text = (data.get('question_text') or '').strip()
+    if not question_text:
+        return jsonify({'error': 'Question text is required'}), 400
+    # Verify node belongs to this tree
+    tree_ids = _get_all_module_ids_in_tree(module_id)
+    if node_id not in tree_ids:
+        return jsonify({'error': 'Invalid module ID'}), 400
+    options_str = (data.get('options') or '').strip()
+    options = [o.strip() for o in options_str.split('|') if o.strip()] if options_str else []
+    question_type = data.get('question_type', 'short_answer')
+    if question_type not in ('short_answer', 'mcq', 'open_ended'):
+        question_type = 'short_answer'
+    difficulty = data.get('difficulty', 'medium')
+    if difficulty not in ('easy', 'medium', 'hard'):
+        difficulty = 'medium'
+    doc = {
+        'question_id': _generate_question_id(),
+        'module_id': node_id,
+        'teacher_id': session['teacher_id'],
+        'question_text': question_text,
+        'answer_text': (data.get('answer_text') or '').strip(),
+        'question_type': question_type,
+        'options': options,
+        'difficulty': difficulty,
+        'source': 'manual',
+        'source_assignment_id': None,
+        'created_at': datetime.utcnow(),
+        'updated_at': datetime.utcnow(),
+    }
+    LOQuestion.insert_one(doc)
+    return jsonify({'success': True, 'question_id': doc['question_id']})
+
+
+@app.route('/teacher/modules/<module_id>/lo-bank/questions/<question_id>', methods=['PATCH'])
+@teacher_required
+def lo_bank_edit_question(module_id, question_id):
+    """Edit a question in the LO bank."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    q = LOQuestion.find_one({'question_id': question_id, 'teacher_id': session['teacher_id']})
+    if not q:
+        return jsonify({'error': 'Question not found'}), 404
+    data = request.get_json(force=True)
+    update_fields = {}
+    if 'question_text' in data:
+        update_fields['question_text'] = (data['question_text'] or '').strip()
+    if 'answer_text' in data:
+        update_fields['answer_text'] = (data['answer_text'] or '').strip()
+    if 'question_type' in data and data['question_type'] in ('short_answer', 'mcq', 'open_ended'):
+        update_fields['question_type'] = data['question_type']
+    if 'difficulty' in data and data['difficulty'] in ('easy', 'medium', 'hard'):
+        update_fields['difficulty'] = data['difficulty']
+    if 'options' in data:
+        options_str = (data['options'] or '').strip()
+        update_fields['options'] = [o.strip() for o in options_str.split('|') if o.strip()] if options_str else []
+    update_fields['updated_at'] = datetime.utcnow()
+    LOQuestion.update_one({'question_id': question_id}, {'$set': update_fields})
+    return jsonify({'success': True})
+
+
+@app.route('/teacher/modules/<module_id>/lo-bank/questions/<question_id>', methods=['DELETE'])
+@teacher_required
+def lo_bank_delete_question(module_id, question_id):
+    """Delete a question from the LO bank."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    q = LOQuestion.find_one({'question_id': question_id, 'teacher_id': session['teacher_id']})
+    if not q:
+        return jsonify({'error': 'Question not found'}), 404
+    LOQuestion.delete_one({'question_id': question_id})
+    return jsonify({'success': True})
+
+
+@app.route('/teacher/modules/<module_id>/lo-bank/csv-template')
+@teacher_required
+def lo_bank_csv_template(module_id):
+    """Download a CSV template pre-populated with LO codes for bulk import."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    root = Module.find_one({'module_id': module_id, 'teacher_id': session['teacher_id']})
+    if not root:
+        return jsonify({'error': 'Module not found'}), 404
+    all_ids = _get_all_module_ids_in_tree(module_id)
+    leaves = list(Module.find({'module_id': {'$in': all_ids}, 'is_leaf': True}).sort('lo_code', 1))
+
+    import csv
+    output = io.StringIO()
+    output.write('\ufeff')  # UTF-8 BOM for Excel
+    writer = csv.writer(output)
+    writer.writerow(['lo_code', 'lo_title', 'item_type', 'question_text', 'answer_text',
+                      'question_type', 'options', 'difficulty', 'resource_type', 'resource_title',
+                      'resource_url', 'interactive_html'])
+    for leaf in leaves:
+        writer.writerow([leaf.get('lo_code', ''), leaf.get('title', ''), '', '', '', '', '', '', '', '', '', ''])
+
+    subject = root.get('subject', 'module').replace(' ', '_')
+    buf = io.BytesIO(output.getvalue().encode('utf-8'))
+    return send_file(buf, mimetype='text/csv', as_attachment=True,
+                     download_name=f"lo_bank_template_{subject}.csv")
+
+
+@app.route('/teacher/modules/<module_id>/lo-bank/csv-upload', methods=['POST'])
+@teacher_required
+def lo_bank_csv_upload(module_id):
+    """Upload CSV to bulk-create questions and resources linked to LOs."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    root = Module.find_one({'module_id': module_id, 'teacher_id': session['teacher_id']})
+    if not root:
+        return jsonify({'error': 'Module not found'}), 404
+
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    import csv
+    try:
+        content = f.read().decode('utf-8-sig')
+    except UnicodeDecodeError:
+        return jsonify({'error': 'File must be UTF-8 encoded CSV'}), 400
+
+    reader = csv.DictReader(io.StringIO(content))
+
+    # Build lo_code -> module_id lookup
+    all_ids = _get_all_module_ids_in_tree(module_id)
+    leaves = list(Module.find({'module_id': {'$in': all_ids}, 'is_leaf': True}))
+    code_to_id = {}
+    for leaf in leaves:
+        code = (leaf.get('lo_code') or '').strip()
+        if code:
+            code_to_id[code] = leaf['module_id']
+
+    created_questions = 0
+    created_resources = 0
+    errors = []
+
+    for row_num, row in enumerate(reader, start=2):
+        lo_code = (row.get('lo_code') or '').strip()
+        item_type = (row.get('item_type') or '').strip().lower()
+        if not item_type:
+            continue  # skip template placeholder rows
+
+        node_id = code_to_id.get(lo_code)
+        if not node_id:
+            errors.append(f"Row {row_num}: LO code '{lo_code}' not found")
+            continue
+
+        if item_type == 'question':
+            question_text = (row.get('question_text') or '').strip()
+            if not question_text:
+                errors.append(f"Row {row_num}: empty question_text")
+                continue
+            q_type = (row.get('question_type') or 'short_answer').strip().lower()
+            if q_type not in ('short_answer', 'mcq', 'open_ended'):
+                q_type = 'short_answer'
+            difficulty = (row.get('difficulty') or 'medium').strip().lower()
+            if difficulty not in ('easy', 'medium', 'hard'):
+                difficulty = 'medium'
+            options_str = (row.get('options') or '').strip()
+            options = [o.strip() for o in options_str.split('|') if o.strip()] if options_str else []
+            doc = {
+                'question_id': _generate_question_id(),
+                'module_id': node_id,
+                'teacher_id': session['teacher_id'],
+                'question_text': question_text,
+                'answer_text': (row.get('answer_text') or '').strip(),
+                'question_type': q_type,
+                'options': options,
+                'difficulty': difficulty,
+                'source': 'csv_import',
+                'source_assignment_id': None,
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow(),
+            }
+            LOQuestion.insert_one(doc)
+            created_questions += 1
+
+        elif item_type == 'resource':
+            resource_type = (row.get('resource_type') or 'link').strip().lower()
+            # Normalize google_slides -> slides
+            if resource_type == 'google_slides':
+                resource_type = 'slides'
+            if resource_type not in ('youtube', 'pdf', 'link', 'slides', 'interactive'):
+                resource_type = 'link'
+            title = (row.get('resource_title') or '').strip()
+            if not title:
+                errors.append(f"Row {row_num}: empty resource_title")
+                continue
+            resource_doc = {
+                'resource_id': _generate_resource_id(),
+                'module_id': node_id,
+                'teacher_id': session['teacher_id'],
+                'type': resource_type,
+                'title': title,
+                'description': '',
+                'order': ModuleResource.count({'module_id': node_id}) + 1,
+                'created_at': datetime.utcnow(),
+            }
+            if resource_type == 'interactive':
+                resource_doc['html_content'] = row.get('interactive_html', '')
+            else:
+                resource_doc['url'] = (row.get('resource_url') or '').strip()
+            ModuleResource.insert_one(resource_doc)
+            created_resources += 1
+        else:
+            errors.append(f"Row {row_num}: unknown item_type '{item_type}'")
+
+    return jsonify({
+        'success': True,
+        'created_questions': created_questions,
+        'created_resources': created_resources,
+        'errors': errors,
+    })
+
+
+@app.route('/teacher/modules/<module_id>/lo-bank/ai-import-from-assignment', methods=['POST'])
+@teacher_required
+def lo_bank_ai_import(module_id):
+    """Use AI to extract questions from an assignment and map them to LOs in the bank."""
+    if not _teacher_has_module_access(session['teacher_id']):
+        return jsonify({'error': 'Access denied'}), 403
+    root = Module.find_one({'module_id': module_id, 'teacher_id': session['teacher_id']})
+    if not root:
+        return jsonify({'error': 'Module not found'}), 404
+    data = request.get_json(force=True)
+    assignment_id = data.get('assignment_id', '')
+    if not assignment_id:
+        return jsonify({'error': 'assignment_id required'}), 400
+    assignment = Assignment.find_one({'assignment_id': assignment_id, 'teacher_id': session['teacher_id']})
+    if not assignment:
+        return jsonify({'error': 'Assignment not found'}), 404
+
+    # Check for duplicate import
+    existing = LOQuestion.count({
+        'teacher_id': session['teacher_id'],
+        'source_assignment_id': assignment_id,
+    })
+    if existing > 0:
+        return jsonify({'error': f'Already imported {existing} questions from this assignment. Delete them first to re-import.'}), 400
+
+    # Build flat LO list
+    all_ids = _get_all_module_ids_in_tree(module_id)
+    leaves = list(Module.find({'module_id': {'$in': all_ids}, 'is_leaf': True}))
+    if not leaves:
+        return jsonify({'error': 'No leaf LOs found in tree'}), 400
+
+    lo_lines = []
+    code_to_id = {}
+    for leaf in leaves:
+        code = leaf.get('lo_code', '') or leaf['module_id']
+        lo_lines.append(f"{code}: {leaf.get('title', 'Untitled')}")
+        code_to_id[code] = leaf['module_id']
+    lo_text = '\n'.join(lo_lines)
+
+    # Extract question content
+    question_content = ''
+    question_paper_bytes = _get_assignment_file_bytes(assignment, 'question_paper')
+    if question_paper_bytes:
+        from utils.module_ai import _extract_text_from_pdf
+        question_content = _extract_text_from_pdf(question_paper_bytes)
+
+    if not question_content.strip():
+        submissions = list(Submission.find({
+            'assignment_id': assignment_id,
+            'status': {'$in': ['submitted', 'ai_reviewed', 'reviewed']}
+        }).limit(3))
+        question_parts = []
+        for sub in submissions:
+            af = sub.get('ai_feedback') or sub.get('teacher_feedback') or {}
+            questions = af.get('questions', [])
+            if isinstance(questions, list):
+                for q in questions:
+                    q_num = q.get('question_num') or q.get('question_number', '?')
+                    q_text = (q.get('question_text') or q.get('student_answer') or '')[:300]
+                    correct = (q.get('correct_answer') or '')[:300]
+                    question_parts.append(f"Q{q_num}: {q_text} (Answer: {correct})")
+            if question_parts:
+                break
+        question_content = '\n'.join(question_parts) if question_parts else ''
+
+    if not question_content.strip():
+        return jsonify({'error': 'Could not extract question content from this assignment'}), 400
+
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    client, model, provider = get_teacher_ai_service(teacher)
+    if not client:
+        return jsonify({'error': 'No AI provider available. Configure an API key in Settings.'}), 400
+
+    prompt = f"""Extract individual questions from this assignment paper and map each to the most appropriate Learning Objective (LO).
+
+Assignment: {assignment.get('title', 'Untitled')}
+Subject: {assignment.get('subject', 'Unknown')}
+
+Questions from the paper:
+{question_content[:8000]}
+
+Available Learning Objectives:
+{lo_text[:4000]}
+
+For each question, extract the question text, expected answer, classify its type, estimate difficulty, and assign the best LO code.
+
+Return ONLY valid JSON:
+{{
+  "questions": [
+    {{
+      "question_text": "...",
+      "answer_text": "...",
+      "question_type": "short_answer|mcq|open_ended",
+      "options": ["A", "B", "C", "D"],
+      "difficulty": "easy|medium|hard",
+      "lo_code": "1.1.1"
+    }}
+  ]
+}}
+
+Rules:
+- lo_code must match one from the list above
+- question_type: use "mcq" only if options are present
+- options: include only for MCQ, omit or empty array otherwise
+- difficulty: estimate based on cognitive demand
+- Return ONLY valid JSON"""
+
+    try:
+        import re
+        if provider == 'anthropic':
+            response = client.messages.create(model=model, max_tokens=4000, messages=[{'role': 'user', 'content': prompt}])
+            ai_content = response.content[0].text
+        elif provider == 'openai':
+            response = client.chat.completions.create(model=model, max_tokens=4000, messages=[{'role': 'user', 'content': prompt}])
+            ai_content = response.choices[0].message.content
+        elif provider == 'google':
+            response = client.generate_content(prompt)
+            ai_content = response.text
+        else:
+            return jsonify({'error': f'Unsupported provider: {provider}'}), 400
+
+        ai_content = ai_content.strip()
+        fence_match = re.search(r'```(?:json)?\s*\n?(.*?)```', ai_content, re.DOTALL)
+        if fence_match:
+            ai_content = fence_match.group(1).strip()
+        else:
+            brace_start = ai_content.find('{')
+            brace_end = ai_content.rfind('}')
+            if brace_start != -1 and brace_end != -1:
+                ai_content = ai_content[brace_start:brace_end + 1]
+
+        result = json.loads(ai_content)
+        ai_questions = result.get('questions', [])
+
+        created_count = 0
+        for aq in ai_questions:
+            lo_code = (aq.get('lo_code') or '').strip()
+            node_id = code_to_id.get(lo_code)
+            if not node_id:
+                continue
+            q_type = aq.get('question_type', 'short_answer')
+            if q_type not in ('short_answer', 'mcq', 'open_ended'):
+                q_type = 'short_answer'
+            difficulty = aq.get('difficulty', 'medium')
+            if difficulty not in ('easy', 'medium', 'hard'):
+                difficulty = 'medium'
+            options = aq.get('options', [])
+            if not isinstance(options, list):
+                options = []
+            doc = {
+                'question_id': _generate_question_id(),
+                'module_id': node_id,
+                'teacher_id': session['teacher_id'],
+                'question_text': (aq.get('question_text') or '').strip(),
+                'answer_text': (aq.get('answer_text') or '').strip(),
+                'question_type': q_type,
+                'options': options,
+                'difficulty': difficulty,
+                'source': 'ai_tagged',
+                'source_assignment_id': assignment_id,
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow(),
+            }
+            if doc['question_text']:
+                LOQuestion.insert_one(doc)
+                created_count += 1
+
+        return jsonify({'success': True, 'created_count': created_count})
+
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Failed to parse AI import JSON: {e}")
+        return jsonify({'error': 'Failed to parse AI response. Try again.'}), 500
+    except Exception as e:
+        logger.error(f"Error in AI import: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
