@@ -9803,16 +9803,12 @@ def teacher_change_password():
 
 @app.route('/api/drive/service-account-info')
 @teacher_required
-def get_drive_service_account_info():
-    """Get Google Drive service account and OAuth information"""
+def get_drive_connection_info():
+    """Get Google Drive connection status for the teacher"""
     try:
-        from utils.google_drive import get_service_account_email, is_drive_configured, is_oauth_configured
-        import os
+        from utils.google_drive import is_drive_configured, is_oauth_configured
 
         configured = is_drive_configured()
-        email = get_service_account_email() if configured else None
-
-        # OAuth status
         oauth_configured = is_oauth_configured()
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
         google_connected = bool(teacher and teacher.get('google_oauth_refresh_token'))
@@ -9820,14 +9816,12 @@ def get_drive_service_account_info():
 
         return jsonify({
             'configured': configured,
-            'email': email,
             'oauth_configured': oauth_configured,
             'google_connected': google_connected,
-            'google_email': google_email,
-            'message': 'Share your Google Drive folder with this email address and grant Editor access.' if email else 'Google Drive service account not configured.'
+            'google_email': google_email
         })
     except Exception as e:
-        logger.error(f"Error getting service account info: {e}")
+        logger.error(f"Error getting Drive connection info: {e}")
         return jsonify({'error': str(e), 'configured': False}), 500
 
 @app.route('/auth/google/connect')
@@ -12543,7 +12537,7 @@ def list_drive_files():
         if 'insufficient permissions' in error_msg.lower() or 'permission denied' in error_msg.lower():
             return jsonify({
                 'success': False, 
-                'error': 'Permission denied. Please ensure the folder is shared with the service account email with Editor access.'
+                'error': 'Permission denied. Please ensure your Google account has access to this folder.'
             }), 403
         elif 'not found' in error_msg.lower():
             return jsonify({
@@ -12573,44 +12567,37 @@ def test_folder_access():
                 'details': 'Please set the Source Files Folder ID in Settings'
             }), 400
         
-        from utils.google_drive import get_drive_service, DriveManager, get_service_account_email
-        service = get_drive_service()
-        if not service:
+        from utils.google_drive import get_teacher_drive_manager
+        manager = get_teacher_drive_manager(teacher)
+        if not manager:
             return jsonify({
                 'success': False,
-                'error': 'Google Drive service not configured',
-                'details': 'Service account credentials are missing'
+                'error': 'Google Drive not connected',
+                'details': 'Connect your Google account in Settings to enable Drive access.'
             }), 500
-        
-        service_account_email = get_service_account_email()
-        
+
         # Log the folder ID being tested
         logger.info(f"Testing folder access for ID: {source_folder_id}")
-        logger.info(f"Service account: {service_account_email}")
-        
-        manager = DriveManager(service)
+
         has_access, error_msg = manager.verify_folder_access(folder_id=source_folder_id)
-        
+
         if has_access:
-            # Try to list files to see if we can actually read them
             try:
-                # First try without mime filter to see all files
                 all_files = manager.list_files(folder_id=source_folder_id, mime_types=None)
                 pdf_files = manager.list_files(folder_id=source_folder_id, mime_types=['application/pdf'])
-                
+
                 total_count = len(all_files) if all_files else 0
                 pdf_count = len(pdf_files) if pdf_files else 0
-                
+
                 return jsonify({
                     'success': True,
                     'message': 'Folder access verified successfully',
                     'folder_id': source_folder_id,
-                    'service_account': service_account_email,
                     'total_files': total_count,
                     'pdf_files': pdf_count,
-                    'count': pdf_count,  # For backward compatibility
+                    'count': pdf_count,
                     'details': f'Found {total_count} total files, {pdf_count} PDF files',
-                    'file_names': [f.get('name', 'Unknown') for f in (all_files[:10] if all_files else [])]  # First 10 files
+                    'file_names': [f.get('name', 'Unknown') for f in (all_files[:10] if all_files else [])]
                 })
             except Exception as list_error:
                 error_str = str(list_error)
@@ -12620,46 +12607,25 @@ def test_folder_access():
                     'error': 'Can access folder metadata but cannot list files',
                     'details': error_str,
                     'folder_id': source_folder_id,
-                    'service_account': service_account_email,
                     'troubleshooting': [
-                        'The service account can see the folder exists but cannot read its contents.',
-                        'This usually means the service account needs "Editor" permission (not just "Viewer").',
-                        'Try removing and re-adding the service account with Editor permission.',
+                        'Your account can see the folder but cannot read its contents.',
+                        'Ensure you have Editor access to the folder.',
                         'Wait 1-2 minutes after sharing before testing again.'
                     ]
                 }), 500
         else:
-                # Check server logs for the actual error - might be more specific
                 logger.error(f"Folder access failed: {error_msg}")
-                
+
                 return jsonify({
                     'success': False,
                     'error': error_msg,
                     'folder_id': source_folder_id,
                     'folder_id_from_url': f'Verify URL: drive.google.com/drive/folders/{source_folder_id}',
-                    'service_account': service_account_email,
                     'troubleshooting': [
-                        '1. Right-click the folder in Google Drive',
-                        '2. Click "Share"',
-                        f'3. Paste this email: {service_account_email}',
-                        '4. Set permission to "Editor" (NOT Viewer or Commenter)',
-                        '5. UNCHECK "Notify people" checkbox',
-                        '6. Click "Share"',
-                        '7. Wait 1-2 MINUTES (not seconds) for permissions to propagate',
-                        '8. Verify the service account appears in the sharing list',
-                        '9. Click "Test Folder Access" again'
-                    ],
-                    'verification_steps': [
-                        'To verify sharing: Right-click folder > Share > Check if the service account email appears in the list',
-                        'If it does not appear, add it following the steps above',
-                        'If it appears but still fails, try removing it and re-adding it',
-                        'Check server logs for the actual Google API error message'
-                    ],
-                    'common_issues': [
-                        'Google Workspace: Admin may need to enable API access',
-                        'Shared Drives: Service account needs to be added to the Shared Drive, not just the folder',
-                        'Permissions delay: Can take 1-2 minutes to propagate',
-                        'Service account: Verify the credentials file is correct'
+                        '1. Make sure you own the folder or have Editor access',
+                        '2. Connect your Google account in Settings if not already connected',
+                        '3. Verify the folder ID matches the URL exactly',
+                        '4. Wait 1-2 minutes after sharing before testing again'
                     ]
                 }), 403
         

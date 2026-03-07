@@ -594,11 +594,9 @@ class DriveManager:
                 
                 # Check for specific error types
                 if 'insufficientFilePermissions' in error_str or 'permissionDenied' in error_str or '403' in error_str:
-                    return False, f"Permission denied (403). The folder exists but the service account doesn't have access. Verify: 1) Folder is shared with service account, 2) Permission is 'Editor', 3) Wait 30-60 seconds after sharing."
+                    return False, f"Permission denied (403). The folder exists but your account doesn't have access. Verify: 1) You own the folder or have Editor access, 2) Your Google account is connected in Settings."
                 elif 'notFound' in error_str or 'File not found' in error_str or '404' in error_str:
-                    # Sometimes Google returns 404 even when it's a permission issue
-                    # Try to get more info
-                    return False, f"Folder not found (404). This usually means: 1) Folder ID is incorrect, OR 2) Service account doesn't have access (Google returns 404 for security). Verify the folder ID matches the URL exactly: drive.google.com/drive/folders/{target_folder_id}"
+                    return False, f"Folder not found (404). This usually means: 1) Folder ID is incorrect, OR 2) Your account doesn't have access. Verify the folder ID matches the URL exactly: drive.google.com/drive/folders/{target_folder_id}"
                 elif '400' in error_str or 'Bad Request' in error_str:
                     return False, f"Bad request (400). The folder ID format may be invalid: {target_folder_id}"
                 else:
