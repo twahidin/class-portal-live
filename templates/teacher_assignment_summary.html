@@ -854,16 +854,18 @@ function renderSummary(s) {
     html += '</div>';
 
     if (s.question_notes && s.question_notes.length) {
-        html += '<hr><h6><i class="bi bi-card-text me-1"></i>Per-Question Notes</h6><div class="row g-2">';
+        html += '<hr><h6><i class="bi bi-card-text me-1"></i>Per-Question Notes</h6><ul class="list-group list-group-flush">';
         s.question_notes.forEach(qn => {
             const topicBadge = qn.topic ? `<span class="badge bg-info text-dark me-2">${escapeHtml(qn.topic)}</span>` : '';
-            html += `<div class="col-md-6"><div class="d-flex align-items-start">
-                <span class="badge bg-secondary me-2">Q${qn.q_num}</span>
-                ${topicBadge}
+            html += `<li class="list-group-item">
+                <div class="mb-1">
+                    <span class="badge bg-secondary me-2">Q${qn.q_num}</span>
+                    ${topicBadge}
+                </div>
                 <small>${escapeHtml(qn.note)}</small>
-            </div></div>`;
+            </li>`;
         });
-        html += '</div>';
+        html += '</ul>';
     }
 
     content.innerHTML = html;
