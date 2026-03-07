@@ -572,7 +572,8 @@ def generate_rubric_review_pdf(submission: dict, assignment: dict, student: dict
         logger.error(f"Error generating rubric PDF: {e}")
         raise
 
-def generate_class_report_pdf(assignment: dict, submissions: list, students_map: dict, teacher: dict = None) -> bytes:
+def generate_class_report_pdf(assignment: dict, submissions: list, students_map: dict, teacher: dict = None,
+                               ai_class_summary: dict = None, item_analysis: dict = None) -> bytes:
     """
     Generate a comprehensive class report for an assignment
     
@@ -735,7 +736,88 @@ def generate_class_report_pdf(assignment: dict, submissions: list, students_map:
             story.append(Paragraph("<b>⚠️ Areas Needing Attention:</b>", styles['Body_Custom']))
             for i in improvements[:5]:
                 story.append(Paragraph(f"• Question {i['q']}: {i['incorrect']}/{i['total']} need improvement ({i['pct']:.0f}%)", styles['Body_Custom']))
-    
+
+    # ==================== AI CLASS SUMMARY ====================
+    if ai_class_summary and not ai_class_summary.get('error'):
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("🤖 AI Class Summary", styles['Heading_Custom']))
+
+        summary_sections = [
+            ('concepts_grasped', '✅ Concepts Grasped'),
+            ('misconceptions', '⚠️ Misconceptions'),
+            ('areas_needing_clarification', '📝 Areas Needing Clarification'),
+            ('recommended_actions', '🎯 Recommended Actions'),
+        ]
+        for key, label in summary_sections:
+            items = ai_class_summary.get(key, [])
+            if items:
+                story.append(Paragraph(f"<b>{label}:</b>", styles['Body_Custom']))
+                for item in items:
+                    # Escape XML-sensitive chars for ReportLab paragraphs
+                    safe_item = str(item).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    story.append(Paragraph(f"• {safe_item}", styles['Body_Custom']))
+                story.append(Spacer(1, 6))
+
+        # Per-Question Notes
+        question_notes = ai_class_summary.get('question_notes', [])
+        if question_notes:
+            story.append(Paragraph("<b>📋 Per-Question Notes:</b>", styles['Body_Custom']))
+            for qn in question_notes:
+                q_num = qn.get('q_num', '?')
+                topic = str(qn.get('topic', '')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                note = str(qn.get('note', '')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                story.append(Paragraph(f"• <b>Q{q_num}</b> ({topic}): {note}", styles['Body_Custom']))
+            story.append(Spacer(1, 6))
+
+    # ==================== ITEM ANALYSIS ====================
+    if item_analysis and not item_analysis.get('insufficient_data') and item_analysis.get('questions'):
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("📐 Item Analysis", styles['Heading_Custom']))
+
+        ia_header = ['Q', 'FI', 'DI', 'FI Label', 'DI Label', 'Interpretation']
+        ia_data = [ia_header]
+        ia_cell_colors = []  # (row, col, color) for conditional formatting
+
+        fi_colors = {'success': SUCCESS_COLOR, 'warning': WARNING_COLOR, 'danger': DANGER_COLOR, 'secondary': LIGHT_GRAY}
+        di_colors = fi_colors
+
+        for row_idx, q in enumerate(item_analysis['questions'], 1):
+            fi_val = f"{q['fi']:.2f}" if q['fi'] is not None else 'N/A'
+            di_val = f"{q['di']:.2f}" if q['di'] is not None else 'N/A'
+            ia_data.append([
+                f"Q{q['q_num']}",
+                fi_val,
+                di_val,
+                q.get('fi_label', 'N/A'),
+                q.get('di_label', 'N/A'),
+                q.get('interpretation', '')[:60]
+            ])
+            # Track colors for FI and DI cells
+            fi_c = fi_colors.get(q.get('fi_color', 'secondary'), LIGHT_GRAY)
+            di_c = di_colors.get(q.get('di_color', 'secondary'), LIGHT_GRAY)
+            ia_cell_colors.append((row_idx, 1, fi_c))  # FI column
+            ia_cell_colors.append((row_idx, 2, di_c))  # DI column
+
+        ia_table = Table(ia_data, colWidths=[1.2*cm, 1.5*cm, 1.5*cm, 2*cm, 2*cm, 8.3*cm])
+        ia_style = [
+            ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (0, 0), (4, -1), 'CENTER'),
+            ('ALIGN', (5, 1), (5, -1), 'LEFT'),
+            ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+            ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, LIGHT_GRAY]),
+            ('PADDING', (0, 0), (-1, -1), 4),
+        ]
+        # Apply per-cell FI/DI background colors
+        for row, col, color in ia_cell_colors:
+            ia_style.append(('BACKGROUND', (col, row), (col, row), color))
+
+        ia_table.setStyle(TableStyle(ia_style))
+        story.append(ia_table)
+
     # ==================== PAGE 2: STUDENT LIST ====================
     story.append(PageBreak())
     story.append(Paragraph("👥 Individual Student Results", styles['Title_Custom']))

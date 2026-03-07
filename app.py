@@ -6801,9 +6801,17 @@ def download_assignment_report(assignment_id):
         'status': {'$in': ['submitted', 'ai_reviewed', 'reviewed']}
     }))
     
+    # Compute item analysis and get AI class summary for the report
+    item_analysis = compute_item_analysis(assignment, submissions)
+    ai_class_summary = assignment.get('ai_class_summary')
+
     try:
-        pdf_content = generate_class_report_pdf(assignment, submissions, students_map, teacher)
-        
+        pdf_content = generate_class_report_pdf(
+            assignment, submissions, students_map, teacher,
+            ai_class_summary=ai_class_summary,
+            item_analysis=item_analysis
+        )
+
         filename = f"report_{assignment['title'].replace(' ', '_')}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
 
         return Response(

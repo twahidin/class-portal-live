@@ -297,17 +297,19 @@
             {% if ai_class_summary.question_notes %}
             <hr>
             <h6><i class="bi bi-card-text me-1"></i>Per-Question Notes</h6>
-            <div class="row g-2">
+            <ul class="list-group list-group-flush">
                 {% for qn in ai_class_summary.question_notes %}
-                <div class="col-md-6">
+                <li class="list-group-item px-0 py-2">
                     <div class="d-flex align-items-start">
-                        <span class="badge bg-secondary me-2">Q{{ qn.q_num }}</span>
-                        {% if qn.topic %}<span class="badge bg-info text-dark me-2">{{ qn.topic }}</span>{% endif %}
-                        <small>{{ qn.note }}</small>
+                        <span class="badge bg-secondary me-2 mt-1" style="white-space: nowrap;">Q{{ qn.q_num }}</span>
+                        <div>
+                            {% if qn.topic %}<span class="text-info fw-semibold">{{ qn.topic }}</span><br>{% endif %}
+                            <small class="text-muted">{{ qn.note }}</small>
+                        </div>
                     </div>
-                </div>
+                </li>
                 {% endfor %}
-            </div>
+            </ul>
             {% endif %}
             {% elif ai_class_summary and ai_class_summary.get('error') %}
             <div class="text-center text-muted py-3">
