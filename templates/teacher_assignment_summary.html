@@ -856,13 +856,10 @@ function renderSummary(s) {
     if (s.question_notes && s.question_notes.length) {
         html += '<hr><h6><i class="bi bi-card-text me-1"></i>Per-Question Notes</h6><ul class="list-group list-group-flush">';
         s.question_notes.forEach(qn => {
-            const topicBadge = qn.topic ? `<span class="badge bg-info text-dark me-2">${escapeHtml(qn.topic)}</span>` : '';
+            const topicLine = qn.topic ? `<span class="text-info fw-semibold">${escapeHtml(qn.topic)}</span>` : '';
             html += `<li class="list-group-item">
-                <div class="mb-1">
-                    <span class="badge bg-secondary me-2">Q${qn.q_num}</span>
-                    ${topicBadge}
-                </div>
-                <small>${escapeHtml(qn.note)}</small>
+                <div class="mb-1"><span class="badge bg-secondary me-2">Q${qn.q_num}</span>${topicLine}</div>
+                <small class="text-muted">${escapeHtml(qn.note)}</small>
             </li>`;
         });
         html += '</ul>';
