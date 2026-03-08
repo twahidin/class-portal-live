@@ -5431,65 +5431,7 @@ def generate_assignment():
     if request.method == 'POST':
         action = request.form.get('action', 'generate')
 
-        if action == 'generate':
-            # Step 1: Generate questions from selected LOs
-            selected_module_ids = request.form.getlist('selected_los')
-            if not selected_module_ids:
-                return render_template('teacher_generate_assignment.html',
-                    teacher=teacher, teacher_modules=teacher_modules,
-                    classes=classes, teaching_groups=teaching_groups,
-                    error='Please select at least one Learning Objective.')
-
-            # Fetch full LO data
-            selected_los = []
-            for mid in selected_module_ids:
-                mod = Module.find_one({'module_id': mid})
-                if mod:
-                    selected_los.append({
-                        'title': mod.get('title', ''),
-                        'lo_code': mod.get('lo_code', ''),
-                        'learning_objectives': mod.get('learning_objectives', []),
-                    })
-
-            if not selected_los:
-                return render_template('teacher_generate_assignment.html',
-                    teacher=teacher, teacher_modules=teacher_modules,
-                    classes=classes, teaching_groups=teaching_groups,
-                    error='Could not find the selected Learning Objectives.')
-
-            subject = request.form.get('subject', 'General')
-            num_questions = int(request.form.get('num_questions', 5))
-            total_marks = int(request.form.get('total_marks', 50))
-            difficulty = request.form.get('difficulty', 'medium')
-            question_types = request.form.get('question_types', 'mixed')
-            additional_instructions = request.form.get('additional_instructions', '')
-
-            from utils.module_ai import generate_assignment_from_los
-            result = generate_assignment_from_los(
-                selected_los=selected_los,
-                subject=subject,
-                num_questions=num_questions,
-                total_marks=total_marks,
-                difficulty=difficulty,
-                question_types=question_types,
-                additional_instructions=additional_instructions,
-                teacher=teacher,
-            )
-
-            if 'error' in result:
-                return render_template('teacher_generate_assignment.html',
-                    teacher=teacher, teacher_modules=teacher_modules,
-                    classes=classes, teaching_groups=teaching_groups,
-                    error=result['error'])
-
-            # Show review/edit form with generated questions
-            return render_template('teacher_generate_assignment.html',
-                teacher=teacher, teacher_modules=teacher_modules,
-                classes=classes, teaching_groups=teaching_groups,
-                generated=result,
-                form_data=request.form)
-
-        elif action == 'create':
+        if action == 'create':
             # Step 2: Create assignment from reviewed/edited questions
             import json as _json
             questions_json = request.form.get('questions_json', '[]')
@@ -5597,6 +5539,103 @@ def generate_assignment():
         classes=classes, teaching_groups=teaching_groups)
 
 
+@app.route('/api/teacher/assignments/generate-ai', methods=['POST'])
+@teacher_required
+def api_generate_assignment_ai():
+    """JSON API: generate assignment questions from LOs using AI."""
+    try:
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        if not teacher:
+            return jsonify({'error': 'Teacher not found'}), 404
+
+        data = request.get_json(force=True)
+        selected_module_ids = data.get('selected_los', [])
+        if not selected_module_ids:
+            return jsonify({'error': 'Please select at least one Learning Objective.'})
+
+        selected_los = []
+        for mid in selected_module_ids:
+            mod = Module.find_one({'module_id': mid})
+            if mod:
+                selected_los.append({
+                    'title': mod.get('title', ''),
+                    'lo_code': mod.get('lo_code', ''),
+                    'learning_objectives': mod.get('learning_objectives', []),
+                })
+
+        if not selected_los:
+            return jsonify({'error': 'Could not find the selected Learning Objectives.'})
+
+        from utils.module_ai import generate_assignment_from_los
+        result = generate_assignment_from_los(
+            selected_los=selected_los,
+            subject=data.get('subject', 'General'),
+            num_questions=int(data.get('num_questions', 5)),
+            total_marks=int(data.get('total_marks', 50)),
+            difficulty=data.get('difficulty', 'medium'),
+            question_types=data.get('question_types', 'mixed'),
+            additional_instructions=data.get('additional_instructions', ''),
+            teacher=teacher,
+        )
+
+        if 'error' in result:
+            return jsonify({'error': result['error']})
+        return jsonify({'success': True, 'data': result})
+
+    except Exception as e:
+        logger.error("Error in generate-ai API: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/teacher/assignments/modify-ai', methods=['POST'])
+@teacher_required
+def api_modify_assignment_ai():
+    """JSON API: generate modified assignment questions using AI."""
+    try:
+        teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+        if not teacher:
+            return jsonify({'error': 'Teacher not found'}), 404
+
+        data = request.get_json(force=True)
+        assignment_id = data.get('assignment_id')
+        if not assignment_id:
+            return jsonify({'error': 'Missing assignment_id'})
+
+        original = db.db.assignments.find_one({
+            'assignment_id': assignment_id,
+            'teacher_id': session['teacher_id'],
+        })
+        if not original:
+            return jsonify({'error': 'Assignment not found'}), 404
+
+        original_text = original.get('question_paper_text', '')
+        if not original_text:
+            pdf_bytes = _get_assignment_file_bytes(original, 'question_paper')
+            if pdf_bytes:
+                original_text = extract_text_from_pdf(pdf_bytes)
+
+        if not original_text:
+            return jsonify({'error': 'Could not extract text from the original question paper.'})
+
+        from utils.module_ai import modify_assignment_content
+        result = modify_assignment_content(
+            original_text=original_text,
+            original_assignment=original,
+            modification_type=data.get('modification_type', 'difficulty'),
+            modification_level=data.get('modification_level', 'moderate'),
+            custom_instructions=data.get('custom_instructions', ''),
+            teacher=teacher,
+        )
+
+        if 'error' in result:
+            return jsonify({'error': result['error']})
+        return jsonify({'success': True, 'data': result})
+
+    except Exception as e:
+        logger.error("Error in modify-ai API: %s", e)
+        return jsonify({'error': str(e)}), 500
+
+
 # ============================================================================
 # MODIFY ASSIGNMENT (AI-powered variant generation from existing assignment)
 # ============================================================================
@@ -5626,49 +5665,9 @@ def modify_assignment(assignment_id):
     teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
 
     if request.method == 'POST':
-        action = request.form.get('action', 'modify')
+        action = request.form.get('action', 'create')
 
-        if action == 'modify':
-            # Extract original question paper text
-            original_text = original.get('question_paper_text', '')
-            if not original_text:
-                pdf_bytes = _get_assignment_file_bytes(original, 'question_paper')
-                if pdf_bytes:
-                    original_text = extract_text_from_pdf(pdf_bytes)
-
-            if not original_text:
-                return render_template('teacher_modify_assignment.html',
-                    teacher=teacher, assignment=original,
-                    classes=classes, teaching_groups=teaching_groups,
-                    error='Could not extract text from the original question paper.')
-
-            modification_type = request.form.get('modification_type', 'difficulty')
-            modification_level = request.form.get('modification_level', 'moderate')
-            custom_instructions = request.form.get('custom_instructions', '')
-
-            from utils.module_ai import modify_assignment_content
-            result = modify_assignment_content(
-                original_text=original_text,
-                original_assignment=original,
-                modification_type=modification_type,
-                modification_level=modification_level,
-                custom_instructions=custom_instructions,
-                teacher=teacher,
-            )
-
-            if 'error' in result:
-                return render_template('teacher_modify_assignment.html',
-                    teacher=teacher, assignment=original,
-                    classes=classes, teaching_groups=teaching_groups,
-                    error=result['error'])
-
-            return render_template('teacher_modify_assignment.html',
-                teacher=teacher, assignment=original,
-                classes=classes, teaching_groups=teaching_groups,
-                generated=result,
-                form_data=request.form)
-
-        elif action == 'create':
+        if action == 'create':
             import json as _json
             questions_json = request.form.get('questions_json', '[]')
             try:

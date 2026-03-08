@@ -21,16 +21,12 @@
         <p class="text-muted">Select Learning Objectives from your module trees and let AI create questions</p>
     </div>
 
-    {% if error %}
-    <div class="alert alert-danger">
-        <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+    <div id="error-alert" class="alert alert-danger d-none">
+        <i class="bi bi-exclamation-circle me-2"></i><span id="error-text"></span>
     </div>
-    {% endif %}
 
-    {% if not generated %}
     {# ============ STEP 1: Configuration ============ #}
-    <form method="POST" id="generate-form">
-        <input type="hidden" name="action" value="generate">
+    <div id="step-config">
         <div class="row">
             <div class="col-lg-8">
                 <!-- LO Picker -->
@@ -61,7 +57,7 @@
                         <h5 class="mb-0"><i class="bi bi-chat-text me-2"></i>Additional Instructions</h5>
                     </div>
                     <div class="card-body">
-                        <textarea class="form-control" name="additional_instructions" rows="3"
+                        <textarea class="form-control" id="additional-instructions" rows="3"
                             placeholder="Any specific requirements for the AI (e.g., 'Include real-world scenarios', 'Focus on application questions')"></textarea>
                     </div>
                 </div>
@@ -76,9 +72,8 @@
                     <div class="card-body">
                         <div class="mb-3">
                             <label class="form-label">Subject</label>
-                            <input type="text" class="form-control" name="subject" required
-                                placeholder="e.g., Mathematics" list="subjects-list"
-                                value="{{ form_data.get('subject', '') if form_data else '' }}">
+                            <input type="text" class="form-control" id="cfg-subject" required
+                                placeholder="e.g., Mathematics" list="subjects-list">
                             <datalist id="subjects-list">
                                 {% if teacher.subjects %}
                                 {% for subj in teacher.subjects %}
@@ -87,32 +82,26 @@
                                 {% endif %}
                             </datalist>
                         </div>
-
                         <div class="mb-3">
                             <label class="form-label">Number of Questions</label>
-                            <input type="number" class="form-control" name="num_questions"
-                                value="{{ form_data.get('num_questions', '5') if form_data else '5' }}" min="1" max="30">
+                            <input type="number" class="form-control" id="cfg-num-questions" value="5" min="1" max="30">
                         </div>
-
                         <div class="mb-3">
                             <label class="form-label">Total Marks</label>
-                            <input type="number" class="form-control" name="total_marks"
-                                value="{{ form_data.get('total_marks', '50') if form_data else '50' }}" min="1">
+                            <input type="number" class="form-control" id="cfg-total-marks" value="50" min="1">
                         </div>
-
                         <div class="mb-3">
                             <label class="form-label">Difficulty</label>
-                            <select class="form-select" name="difficulty">
+                            <select class="form-select" id="cfg-difficulty">
                                 <option value="easy">Easy</option>
                                 <option value="medium" selected>Medium</option>
                                 <option value="hard">Hard</option>
                                 <option value="mixed">Mixed</option>
                             </select>
                         </div>
-
                         <div class="mb-3">
                             <label class="form-label">Question Types</label>
-                            <select class="form-select" name="question_types">
+                            <select class="form-select" id="cfg-question-types">
                                 <option value="mcq">Multiple Choice (MCQ)</option>
                                 <option value="short_answer">Short Answer</option>
                                 <option value="structured">Structured</option>
@@ -122,166 +111,118 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-lg w-100" id="generate-btn" {% if not teacher_modules %}disabled{% endif %}>
+                <button type="button" class="btn btn-primary btn-lg w-100" id="generate-btn" {% if not teacher_modules %}disabled{% endif %}>
                     <i class="bi bi-lightning me-2"></i>Generate Questions
                 </button>
             </div>
         </div>
-    </form>
+    </div>
 
-    {% else %}
-    {# ============ STEP 2: Review & Edit ============ #}
-    <form method="POST" id="create-form">
-        <input type="hidden" name="action" value="create">
-        <input type="hidden" name="questions_json" id="questions-json">
+    {# ============ STEP 2: Review & Edit (populated by JS) ============ #}
+    <div id="step-review" class="d-none">
+        <form method="POST" id="create-form">
+            <input type="hidden" name="action" value="create">
+            <input type="hidden" name="questions_json" id="questions-json">
 
-        <div class="row">
-            <div class="col-lg-8">
-                <div class="alert alert-success mb-4">
-                    <i class="bi bi-check-circle me-2"></i>AI generated {{ generated.questions|length }} questions. Review and edit below, then create the assignment.
+            <div class="row">
+                <div class="col-lg-8">
+                    <div class="alert alert-success mb-4">
+                        <i class="bi bi-check-circle me-2"></i>AI generated <span id="q-count">0</span> questions. Review and edit below, then create the assignment.
+                    </div>
+                    <div id="questions-container"></div>
                 </div>
 
-                <!-- Editable Questions -->
-                <div id="questions-container">
-                {% for q in generated.questions %}
-                <div class="card mb-3 question-card" data-index="{{ loop.index0 }}">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span><strong>Question {{ q.number }}</strong>
-                            {% if q.lo_code %}<span class="badge bg-info ms-2">LO {{ q.lo_code }}</span>{% endif %}
-                            <span class="badge bg-secondary ms-1">{{ q.type }}</span>
-                        </span>
-                        <div>
-                            <span class="badge bg-primary">{{ q.marks }} marks</span>
-                            <button type="button" class="btn btn-sm btn-outline-danger ms-2 delete-question" title="Remove question">
-                                <i class="bi bi-trash"></i>
-                            </button>
+                <div class="col-lg-4">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Assignment Details</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Title</label>
+                                <input type="text" class="form-control" name="title" id="review-title" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Subject</label>
+                                <input type="text" class="form-control" name="subject" id="review-subject" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Total Marks</label>
+                                <input type="number" class="form-control" name="total_marks" id="total-marks-display" readonly>
+                                <small class="text-muted">Auto-calculated from questions</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Due Date (optional)</label>
+                                <input type="date" class="form-control" name="due_date">
+                            </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">Question Text</label>
-                            <textarea class="form-control q-text" rows="3">{{ q.text }}</textarea>
+
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-people me-2"></i>Assign To</h5>
                         </div>
-                        <div class="row">
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Marks</label>
-                                <input type="number" class="form-control q-marks" value="{{ q.marks }}" min="1">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">Type</label>
-                                <select class="form-select q-type">
-                                    <option value="mcq" {% if q.type == 'mcq' %}selected{% endif %}>MCQ</option>
-                                    <option value="short_answer" {% if q.type == 'short_answer' %}selected{% endif %}>Short Answer</option>
-                                    <option value="structured" {% if q.type == 'structured' %}selected{% endif %}>Structured</option>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <select class="form-select" name="target_type" id="target-type">
+                                    <option value="class">Class</option>
+                                    <option value="teaching_group">Teaching Group</option>
                                 </select>
                             </div>
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label">LO Code</label>
-                                <input type="text" class="form-control q-lo-code" value="{{ q.lo_code|default('', true) }}">
+                            <div id="class-select-wrapper">
+                                <select class="form-select" name="target_class_id">
+                                    <option value="">-- Select class --</option>
+                                    {% for cls in classes %}
+                                    <option value="{{ cls.class_id }}">{{ cls.class_id }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div id="group-select-wrapper" style="display: none;">
+                                <select class="form-select" name="target_group_id">
+                                    <option value="">-- Select group --</option>
+                                    {% for grp in teaching_groups %}
+                                    <option value="{{ grp.group_id }}">{{ grp.name }}</option>
+                                    {% endfor %}
+                                </select>
                             </div>
                         </div>
-                        {% if q.options %}
-                        <div class="mb-3 mcq-options">
-                            <label class="form-label fw-bold">Options</label>
-                            {% for opt in q.options %}
-                            <input type="text" class="form-control mb-1 q-option" value="{{ opt }}">
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                        <div class="mb-0">
-                            <label class="form-label fw-bold">Model Answer</label>
-                            <textarea class="form-control q-answer" rows="2">{{ q.answer }}</textarea>
-                        </div>
                     </div>
-                </div>
-                {% endfor %}
+
+                    <button type="submit" class="btn btn-success btn-lg w-100" id="create-btn">
+                        <i class="bi bi-check-circle me-2"></i>Create Assignment (Draft)
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary w-100 mt-2" id="back-btn">
+                        <i class="bi bi-arrow-counterclockwise me-2"></i>Start Over
+                    </button>
                 </div>
             </div>
-
-            <div class="col-lg-4">
-                <!-- Assignment Details -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Assignment Details</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label class="form-label">Title</label>
-                            <input type="text" class="form-control" name="title" required
-                                value="{{ generated.title_suggestion|default('AI-Generated Assignment', true) }}">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Subject</label>
-                            <input type="text" class="form-control" name="subject" required
-                                value="{{ form_data.get('subject', 'General') if form_data else 'General' }}">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Total Marks</label>
-                            <input type="number" class="form-control" name="total_marks" id="total-marks-display"
-                                value="{{ form_data.get('total_marks', '50') if form_data else '50' }}" readonly>
-                            <small class="text-muted">Auto-calculated from questions</small>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Due Date (optional)</label>
-                            <input type="date" class="form-control" name="due_date">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Target -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-people me-2"></i>Assign To</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <select class="form-select" name="target_type" id="target-type">
-                                <option value="class">Class</option>
-                                <option value="teaching_group">Teaching Group</option>
-                            </select>
-                        </div>
-                        <div id="class-select-wrapper">
-                            <select class="form-select" name="target_class_id">
-                                <option value="">-- Select class --</option>
-                                {% for cls in classes %}
-                                <option value="{{ cls.class_id }}">{{ cls.class_id }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div id="group-select-wrapper" style="display: none;">
-                            <select class="form-select" name="target_group_id">
-                                <option value="">-- Select group --</option>
-                                {% for grp in teaching_groups %}
-                                <option value="{{ grp.group_id }}">{{ grp.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn btn-success btn-lg w-100" id="create-btn">
-                    <i class="bi bi-check-circle me-2"></i>Create Assignment (Draft)
-                </button>
-                <a href="{{ url_for('generate_assignment') }}" class="btn btn-outline-secondary w-100 mt-2">
-                    <i class="bi bi-arrow-counterclockwise me-2"></i>Start Over
-                </a>
-            </div>
-        </div>
-    </form>
-    {% endif %}
+        </form>
+    </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    {% if not generated %}
-    // ===== STEP 1: LO Tree Picker =====
+    const stepConfig = document.getElementById('step-config');
+    const stepReview = document.getElementById('step-review');
+    const errorAlert = document.getElementById('error-alert');
+    const errorText = document.getElementById('error-text');
+    const generateBtn = document.getElementById('generate-btn');
+    const questionsContainer = document.getElementById('questions-container');
+
+    function showError(msg) {
+        errorText.textContent = msg;
+        errorAlert.classList.remove('d-none');
+        window.scrollTo({top: 0, behavior: 'smooth'});
+    }
+    function hideError() { errorAlert.classList.add('d-none'); }
+
+    // ===== LO Tree Picker =====
+    {% if teacher_modules %}
     const treeContainer = document.getElementById('lo-tree-container');
     const selectedCount = document.getElementById('selected-count');
-    const generateBtn = document.getElementById('generate-btn');
 
-    {% if teacher_modules %}
     fetch('{{ url_for("module_tree_nodes_for_picker") }}')
         .then(r => r.json())
         .then(data => {
@@ -293,7 +234,7 @@ document.addEventListener('DOMContentLoaded', function() {
             data.trees.forEach(tree => {
                 const treeDiv = document.createElement('div');
                 treeDiv.className = 'mb-3';
-                treeDiv.innerHTML = `<h6 class="fw-bold text-primary mb-2"><i class="bi bi-diagram-3 me-1"></i>${tree.title}</h6>`;
+                treeDiv.innerHTML = '<h6 class="fw-bold text-primary mb-2"><i class="bi bi-diagram-3 me-1"></i>' + tree.title + '</h6>';
                 renderBranch(tree.children || [], treeDiv, 0);
                 treeContainer.appendChild(treeDiv);
             });
@@ -310,27 +251,26 @@ document.addEventListener('DOMContentLoaded', function() {
             div.className = 'py-1';
 
             if (node.is_leaf) {
-                div.innerHTML = `
-                    <div class="form-check">
-                        <input class="form-check-input lo-checkbox" type="checkbox"
-                            name="selected_los" value="${node.module_id}" id="lo-${node.module_id}">
-                        <label class="form-check-label" for="lo-${node.module_id}">
-                            ${node.lo_code ? '<span class="badge bg-secondary me-1">' + node.lo_code + '</span>' : ''}
-                            ${node.title}
-                        </label>
-                    </div>`;
+                const chkId = 'lo-' + node.module_id;
+                const codeHtml = node.lo_code ? '<span class="badge bg-secondary me-1">' + node.lo_code + '</span>' : '';
+                div.innerHTML = '<div class="form-check">' +
+                    '<input class="form-check-input lo-checkbox" type="checkbox" value="' + node.module_id + '" id="' + chkId + '">' +
+                    '<label class="form-check-label" for="' + chkId + '">' + codeHtml + node.title + '</label></div>';
                 div.querySelector('input').addEventListener('change', updateSelectedCount);
             } else {
                 const hasChildren = node.children && node.children.length > 0;
-                div.innerHTML = `
-                    <div class="fw-semibold text-dark ${hasChildren ? 'cursor-pointer' : ''}"
-                         ${hasChildren ? 'onclick="this.nextElementSibling.classList.toggle(\'d-none\')"' : ''}>
-                        ${hasChildren ? '<i class="bi bi-chevron-down me-1"></i>' : '<i class="bi bi-dot me-1"></i>'}
-                        ${node.title}
-                    </div>
-                    <div class="branch-children"></div>`;
+                const chevron = hasChildren ? '<i class="bi bi-chevron-down me-1 toggle-icon"></i>' : '<i class="bi bi-dot me-1"></i>';
+                const header = document.createElement('div');
+                header.className = 'fw-semibold text-dark' + (hasChildren ? ' cursor-pointer' : '');
+                header.innerHTML = chevron + node.title;
+                div.appendChild(header);
+
                 if (hasChildren) {
-                    renderBranch(node.children, div.querySelector('.branch-children'), depth + 1);
+                    const childContainer = document.createElement('div');
+                    childContainer.className = 'branch-children';
+                    div.appendChild(childContainer);
+                    header.addEventListener('click', function() { childContainer.classList.toggle('d-none'); });
+                    renderBranch(node.children, childContainer, depth + 1);
                 }
             }
             parent.appendChild(div);
@@ -342,37 +282,131 @@ document.addEventListener('DOMContentLoaded', function() {
         selectedCount.textContent = checked + ' selected';
         selectedCount.className = 'badge ' + (checked > 0 ? 'bg-primary' : 'bg-secondary');
     }
-
-    // Show spinner on generate
-    document.getElementById('generate-form').addEventListener('submit', function() {
-        generateBtn.disabled = true;
-        generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
-    });
     {% endif %}
 
-    {% else %}
-    // ===== STEP 2: Review & Edit =====
-    const questionsContainer = document.getElementById('questions-container');
-    const totalMarksDisplay = document.getElementById('total-marks-display');
-    const createForm = document.getElementById('create-form');
+    // ===== Generate via AJAX =====
+    generateBtn.addEventListener('click', async function() {
+        hideError();
+        const selectedLOs = Array.from(document.querySelectorAll('.lo-checkbox:checked')).map(c => c.value);
+        const subject = document.getElementById('cfg-subject').value.trim();
 
-    // Target type toggle
+        if (selectedLOs.length === 0) { showError('Please select at least one Learning Objective.'); return; }
+        if (!subject) { showError('Please enter a subject.'); return; }
+
+        generateBtn.disabled = true;
+        generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating (this may take a minute)...';
+
+        try {
+            const resp = await fetch('{{ url_for("api_generate_assignment_ai") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    selected_los: selectedLOs,
+                    subject: subject,
+                    num_questions: document.getElementById('cfg-num-questions').value,
+                    total_marks: document.getElementById('cfg-total-marks').value,
+                    difficulty: document.getElementById('cfg-difficulty').value,
+                    question_types: document.getElementById('cfg-question-types').value,
+                    additional_instructions: document.getElementById('additional-instructions').value,
+                }),
+            });
+            const data = await resp.json();
+
+            if (data.error) {
+                showError(data.error);
+                generateBtn.disabled = false;
+                generateBtn.innerHTML = '<i class="bi bi-lightning me-2"></i>Generate Questions';
+                return;
+            }
+
+            // Show Step 2
+            showReviewStep(data.data, subject);
+
+        } catch (err) {
+            showError('Network error: ' + err.message);
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = '<i class="bi bi-lightning me-2"></i>Generate Questions';
+        }
+    });
+
+    function showReviewStep(result, subject) {
+        stepConfig.classList.add('d-none');
+        stepReview.classList.remove('d-none');
+        hideError();
+
+        const questions = result.questions || [];
+        document.getElementById('q-count').textContent = questions.length;
+        document.getElementById('review-title').value = result.title_suggestion || 'AI-Generated Assignment';
+        document.getElementById('review-subject').value = subject;
+
+        questionsContainer.innerHTML = '';
+        questions.forEach((q, i) => {
+            questionsContainer.appendChild(buildQuestionCard(q, i));
+        });
+        recalcMarks();
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    }
+
+    function buildQuestionCard(q, idx) {
+        const card = document.createElement('div');
+        card.className = 'card mb-3 question-card';
+
+        const loCodeBadge = q.lo_code ? ' <span class="badge bg-info ms-2">LO ' + escapeHtml(q.lo_code) + '</span>' : '';
+        const typeBadge = '<span class="badge bg-secondary ms-1">' + escapeHtml(q.type || 'short_answer') + '</span>';
+        const marks = parseInt(q.marks) || 0;
+
+        let optionsHtml = '';
+        if (q.type === 'mcq' && q.options && q.options.length) {
+            optionsHtml = '<div class="mb-3 mcq-options"><label class="form-label fw-bold">Options</label>';
+            q.options.forEach(opt => {
+                optionsHtml += '<input type="text" class="form-control mb-1 q-option" value="' + escapeHtml(opt) + '">';
+            });
+            optionsHtml += '</div>';
+        }
+
+        card.innerHTML =
+            '<div class="card-header d-flex justify-content-between align-items-center">' +
+                '<span><strong>Question ' + (idx+1) + '</strong>' + loCodeBadge + typeBadge + '</span>' +
+                '<div><span class="badge bg-primary">' + marks + ' marks</span>' +
+                '<button type="button" class="btn btn-sm btn-outline-danger ms-2 delete-question" title="Remove"><i class="bi bi-trash"></i></button></div>' +
+            '</div>' +
+            '<div class="card-body">' +
+                '<div class="mb-3"><label class="form-label fw-bold">Question Text</label>' +
+                '<textarea class="form-control q-text" rows="3">' + escapeHtml(q.text) + '</textarea></div>' +
+                '<div class="row">' +
+                    '<div class="col-md-4 mb-3"><label class="form-label">Marks</label>' +
+                    '<input type="number" class="form-control q-marks" value="' + marks + '" min="1"></div>' +
+                    '<div class="col-md-4 mb-3"><label class="form-label">Type</label>' +
+                    '<select class="form-select q-type">' +
+                        '<option value="mcq"' + (q.type==='mcq'?' selected':'') + '>MCQ</option>' +
+                        '<option value="short_answer"' + (q.type==='short_answer'?' selected':'') + '>Short Answer</option>' +
+                        '<option value="structured"' + (q.type==='structured'?' selected':'') + '>Structured</option></select></div>' +
+                    '<div class="col-md-4 mb-3"><label class="form-label">LO Code</label>' +
+                    '<input type="text" class="form-control q-lo-code" value="' + escapeHtml(q.lo_code || '') + '"></div>' +
+                '</div>' +
+                optionsHtml +
+                '<div class="mb-0"><label class="form-label fw-bold">Model Answer</label>' +
+                '<textarea class="form-control q-answer" rows="2">' + escapeHtml(q.answer) + '</textarea></div>' +
+            '</div>';
+        return card;
+    }
+
+    // ===== Review Step Logic =====
     document.getElementById('target-type').addEventListener('change', function() {
         document.getElementById('class-select-wrapper').style.display = this.value === 'class' ? '' : 'none';
         document.getElementById('group-select-wrapper').style.display = this.value === 'teaching_group' ? '' : 'none';
     });
 
-    // Delete question
     questionsContainer.addEventListener('click', function(e) {
         const btn = e.target.closest('.delete-question');
-        if (btn) {
-            btn.closest('.question-card').remove();
-            recalcMarks();
-            renumberQuestions();
-        }
+        if (btn) { btn.closest('.question-card').remove(); recalcMarks(); renumberQuestions(); }
     });
 
-    // Recalculate marks on change
     questionsContainer.addEventListener('input', function(e) {
         if (e.target.classList.contains('q-marks')) recalcMarks();
     });
@@ -380,7 +414,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function recalcMarks() {
         let total = 0;
         document.querySelectorAll('.q-marks').forEach(el => { total += parseInt(el.value) || 0; });
-        totalMarksDisplay.value = total;
+        document.getElementById('total-marks-display').value = total;
     }
 
     function renumberQuestions() {
@@ -389,8 +423,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Serialize questions on submit
-    createForm.addEventListener('submit', function(e) {
+    document.getElementById('create-form').addEventListener('submit', function() {
         const questions = [];
         document.querySelectorAll('.question-card').forEach((card, i) => {
             const q = {
@@ -402,23 +435,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 answer: card.querySelector('.q-answer').value,
             };
             const options = card.querySelectorAll('.q-option');
-            if (options.length > 0) {
-                q.options = Array.from(options).map(o => o.value);
-            }
+            if (options.length > 0) q.options = Array.from(options).map(o => o.value);
             questions.push(q);
         });
         document.getElementById('questions-json').value = JSON.stringify(questions);
         recalcMarks();
-        // Update total_marks hidden field with recalculated value
-        const totalInput = createForm.querySelector('input[name="total_marks"]');
-        if (totalInput) totalInput.value = totalMarksDisplay.value;
-
+        this.querySelector('input[name="total_marks"]').value = document.getElementById('total-marks-display').value;
         document.getElementById('create-btn').disabled = true;
         document.getElementById('create-btn').innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Creating...';
     });
 
-    recalcMarks();
-    {% endif %}
+    document.getElementById('back-btn').addEventListener('click', function() {
+        stepReview.classList.add('d-none');
+        stepConfig.classList.remove('d-none');
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<i class="bi bi-lightning me-2"></i>Generate Questions';
+    });
 });
 </script>
 {% endblock %}

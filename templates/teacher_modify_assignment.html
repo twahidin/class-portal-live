@@ -21,16 +21,12 @@
         <p class="text-muted">Create an AI-modified variant of an existing assignment</p>
     </div>
 
-    {% if error %}
-    <div class="alert alert-danger">
-        <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+    <div id="error-alert" class="alert alert-danger d-none">
+        <i class="bi bi-exclamation-circle me-2"></i><span id="error-text"></span>
     </div>
-    {% endif %}
 
-    {% if not generated %}
     {# ============ STEP 1: Modification Settings ============ #}
-    <form method="POST" id="modify-form">
-        <input type="hidden" name="action" value="modify">
+    <div id="step-config">
         <div class="row">
             <div class="col-lg-8">
                 <!-- Original Assignment Info -->
@@ -50,7 +46,7 @@
                                 <small class="text-muted">Created: {{ assignment.created_at|sgt }}</small>
                                 {% endif %}
                             </div>
-                            {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
+                            {% if assignment.question_paper_id or (assignment.get('drive_file_refs') or {}).get('question_paper_drive_id') %}
                             <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}"
                                class="btn btn-sm btn-outline-primary" target="_blank">
                                 <i class="bi bi-download me-1"></i>View Original
@@ -117,7 +113,7 @@
                         <h5 class="mb-0"><i class="bi bi-chat-text me-2"></i>Custom Instructions</h5>
                     </div>
                     <div class="card-body">
-                        <textarea class="form-control" name="custom_instructions" rows="3"
+                        <textarea class="form-control" id="custom-instructions" rows="3"
                             placeholder="Any specific changes you want (e.g., 'Add more application questions', 'Use local context')"></textarea>
                     </div>
                 </div>
@@ -157,181 +153,226 @@
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-lg w-100" id="modify-btn">
+                <button type="button" class="btn btn-primary btn-lg w-100" id="modify-btn">
                     <i class="bi bi-magic me-2"></i>Generate Modified Version
                 </button>
             </div>
         </div>
-    </form>
+    </div>
 
-    {% else %}
-    {# ============ STEP 2: Review & Edit ============ #}
-    <form method="POST" id="create-form">
-        <input type="hidden" name="action" value="create">
-        <input type="hidden" name="questions_json" id="questions-json">
+    {# ============ STEP 2: Review & Edit (populated by JS) ============ #}
+    <div id="step-review" class="d-none">
+        <form method="POST" id="create-form">
+            <input type="hidden" name="action" value="create">
+            <input type="hidden" name="questions_json" id="questions-json">
 
-        <div class="row">
-            <div class="col-lg-8">
-                <div class="alert alert-success mb-4">
-                    <i class="bi bi-check-circle me-2"></i>AI generated a modified version with {{ generated.questions|length }} questions. Review and edit below.
+            <div class="row">
+                <div class="col-lg-8">
+                    <div class="alert alert-success mb-4">
+                        <i class="bi bi-check-circle me-2"></i>AI generated a modified version with <span id="q-count">0</span> questions. Review and edit below.
+                    </div>
+                    <div id="questions-container"></div>
                 </div>
 
-                <!-- Editable Questions -->
-                <div id="questions-container">
-                {% for q in generated.questions %}
-                <div class="card mb-3 question-card" data-index="{{ loop.index0 }}">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span><strong>Question {{ q.number }}</strong>
-                            <span class="badge bg-secondary ms-1">{{ q.type }}</span>
-                        </span>
-                        <div>
-                            <span class="badge bg-primary">{{ q.marks }} marks</span>
-                            <button type="button" class="btn btn-sm btn-outline-danger ms-2 delete-question" title="Remove question">
-                                <i class="bi bi-trash"></i>
-                            </button>
+                <div class="col-lg-4">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Assignment Details</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Title</label>
+                                <input type="text" class="form-control" name="title" id="review-title" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Subject</label>
+                                <input type="text" class="form-control" name="subject" id="review-subject" required
+                                    value="{{ assignment.subject }}">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Total Marks</label>
+                                <input type="number" class="form-control" name="total_marks" id="total-marks-display"
+                                    value="{{ assignment.total_marks }}" readonly>
+                                <small class="text-muted">Auto-calculated from questions</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Due Date (optional)</label>
+                                <input type="date" class="form-control" name="due_date">
+                            </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">Question Text</label>
-                            <textarea class="form-control q-text" rows="3">{{ q.text }}</textarea>
+
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-people me-2"></i>Assign To</h5>
                         </div>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Marks</label>
-                                <input type="number" class="form-control q-marks" value="{{ q.marks }}" min="1">
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <select class="form-select" name="target_type" id="target-type">
+                                    <option value="class">Class</option>
+                                    <option value="teaching_group">Teaching Group</option>
+                                </select>
                             </div>
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Type</label>
-                                <select class="form-select q-type">
-                                    <option value="mcq" {% if q.type == 'mcq' %}selected{% endif %}>MCQ</option>
-                                    <option value="short_answer" {% if q.type == 'short_answer' %}selected{% endif %}>Short Answer</option>
-                                    <option value="structured" {% if q.type == 'structured' %}selected{% endif %}>Structured</option>
+                            <div id="class-select-wrapper">
+                                <select class="form-select" name="target_class_id">
+                                    <option value="">-- Select class --</option>
+                                    {% for cls in classes %}
+                                    <option value="{{ cls.class_id }}">{{ cls.class_id }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div id="group-select-wrapper" style="display: none;">
+                                <select class="form-select" name="target_group_id">
+                                    <option value="">-- Select group --</option>
+                                    {% for grp in teaching_groups %}
+                                    <option value="{{ grp.group_id }}">{{ grp.name }}</option>
+                                    {% endfor %}
                                 </select>
                             </div>
                         </div>
-                        {% if q.options %}
-                        <div class="mb-3 mcq-options">
-                            <label class="form-label fw-bold">Options</label>
-                            {% for opt in q.options %}
-                            <input type="text" class="form-control mb-1 q-option" value="{{ opt }}">
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                        <div class="mb-0">
-                            <label class="form-label fw-bold">Model Answer</label>
-                            <textarea class="form-control q-answer" rows="2">{{ q.answer }}</textarea>
-                        </div>
                     </div>
-                </div>
-                {% endfor %}
+
+                    <button type="submit" class="btn btn-success btn-lg w-100" id="create-btn">
+                        <i class="bi bi-check-circle me-2"></i>Create Assignment (Draft)
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary w-100 mt-2" id="back-btn">
+                        <i class="bi bi-arrow-counterclockwise me-2"></i>Try Again
+                    </button>
                 </div>
             </div>
-
-            <div class="col-lg-4">
-                <!-- Assignment Details -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Assignment Details</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label class="form-label">Title</label>
-                            <input type="text" class="form-control" name="title" required
-                                value="{{ generated.title_suggestion|default('Modified: ' + assignment.title, true) }}">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Subject</label>
-                            <input type="text" class="form-control" name="subject" required
-                                value="{{ assignment.subject }}">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Total Marks</label>
-                            <input type="number" class="form-control" name="total_marks" id="total-marks-display"
-                                value="{{ assignment.total_marks }}" readonly>
-                            <small class="text-muted">Auto-calculated from questions</small>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Due Date (optional)</label>
-                            <input type="date" class="form-control" name="due_date">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Target -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-people me-2"></i>Assign To</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <select class="form-select" name="target_type" id="target-type">
-                                <option value="class">Class</option>
-                                <option value="teaching_group">Teaching Group</option>
-                            </select>
-                        </div>
-                        <div id="class-select-wrapper">
-                            <select class="form-select" name="target_class_id">
-                                <option value="">-- Select class --</option>
-                                {% for cls in classes %}
-                                <option value="{{ cls.class_id }}">{{ cls.class_id }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div id="group-select-wrapper" style="display: none;">
-                            <select class="form-select" name="target_group_id">
-                                <option value="">-- Select group --</option>
-                                {% for grp in teaching_groups %}
-                                <option value="{{ grp.group_id }}">{{ grp.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn btn-success btn-lg w-100" id="create-btn">
-                    <i class="bi bi-check-circle me-2"></i>Create Assignment (Draft)
-                </button>
-                <a href="{{ url_for('modify_assignment', assignment_id=assignment.assignment_id) }}" class="btn btn-outline-secondary w-100 mt-2">
-                    <i class="bi bi-arrow-counterclockwise me-2"></i>Try Again
-                </a>
-            </div>
-        </div>
-    </form>
-    {% endif %}
+        </form>
+    </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    {% if not generated %}
-    // Show spinner on modify
-    document.getElementById('modify-form').addEventListener('submit', function() {
-        const btn = document.getElementById('modify-btn');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
-    });
-    {% else %}
-    // ===== STEP 2: Review & Edit =====
+    const stepConfig = document.getElementById('step-config');
+    const stepReview = document.getElementById('step-review');
+    const errorAlert = document.getElementById('error-alert');
+    const errorText = document.getElementById('error-text');
+    const modifyBtn = document.getElementById('modify-btn');
     const questionsContainer = document.getElementById('questions-container');
-    const totalMarksDisplay = document.getElementById('total-marks-display');
-    const createForm = document.getElementById('create-form');
+    const assignmentId = '{{ assignment.assignment_id }}';
 
-    // Target type toggle
+    function showError(msg) {
+        errorText.textContent = msg;
+        errorAlert.classList.remove('d-none');
+        window.scrollTo({top: 0, behavior: 'smooth'});
+    }
+    function hideError() { errorAlert.classList.add('d-none'); }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    }
+
+    // ===== Modify via AJAX =====
+    modifyBtn.addEventListener('click', async function() {
+        hideError();
+        const modType = document.querySelector('input[name="modification_type"]:checked').value;
+        const modLevel = document.querySelector('input[name="modification_level"]:checked').value;
+        const customInstr = document.getElementById('custom-instructions').value;
+
+        modifyBtn.disabled = true;
+        modifyBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating (this may take a minute)...';
+
+        try {
+            const resp = await fetch('{{ url_for("api_modify_assignment_ai") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    assignment_id: assignmentId,
+                    modification_type: modType,
+                    modification_level: modLevel,
+                    custom_instructions: customInstr,
+                }),
+            });
+            const data = await resp.json();
+
+            if (data.error) {
+                showError(data.error);
+                modifyBtn.disabled = false;
+                modifyBtn.innerHTML = '<i class="bi bi-magic me-2"></i>Generate Modified Version';
+                return;
+            }
+
+            showReviewStep(data.data);
+
+        } catch (err) {
+            showError('Network error: ' + err.message);
+            modifyBtn.disabled = false;
+            modifyBtn.innerHTML = '<i class="bi bi-magic me-2"></i>Generate Modified Version';
+        }
+    });
+
+    function showReviewStep(result) {
+        stepConfig.classList.add('d-none');
+        stepReview.classList.remove('d-none');
+        hideError();
+
+        const questions = result.questions || [];
+        document.getElementById('q-count').textContent = questions.length;
+        document.getElementById('review-title').value = result.title_suggestion || 'Modified: {{ assignment.title|default("Assignment", true) }}';
+
+        questionsContainer.innerHTML = '';
+        questions.forEach((q, i) => {
+            questionsContainer.appendChild(buildQuestionCard(q, i));
+        });
+        recalcMarks();
+    }
+
+    function buildQuestionCard(q, idx) {
+        const card = document.createElement('div');
+        card.className = 'card mb-3 question-card';
+        const marks = parseInt(q.marks) || 0;
+        const typeBadge = '<span class="badge bg-secondary ms-1">' + escapeHtml(q.type || 'short_answer') + '</span>';
+
+        let optionsHtml = '';
+        if (q.type === 'mcq' && q.options && q.options.length) {
+            optionsHtml = '<div class="mb-3 mcq-options"><label class="form-label fw-bold">Options</label>';
+            q.options.forEach(opt => {
+                optionsHtml += '<input type="text" class="form-control mb-1 q-option" value="' + escapeHtml(opt) + '">';
+            });
+            optionsHtml += '</div>';
+        }
+
+        card.innerHTML =
+            '<div class="card-header d-flex justify-content-between align-items-center">' +
+                '<span><strong>Question ' + (idx+1) + '</strong>' + typeBadge + '</span>' +
+                '<div><span class="badge bg-primary">' + marks + ' marks</span>' +
+                '<button type="button" class="btn btn-sm btn-outline-danger ms-2 delete-question" title="Remove"><i class="bi bi-trash"></i></button></div>' +
+            '</div>' +
+            '<div class="card-body">' +
+                '<div class="mb-3"><label class="form-label fw-bold">Question Text</label>' +
+                '<textarea class="form-control q-text" rows="3">' + escapeHtml(q.text) + '</textarea></div>' +
+                '<div class="row">' +
+                    '<div class="col-md-6 mb-3"><label class="form-label">Marks</label>' +
+                    '<input type="number" class="form-control q-marks" value="' + marks + '" min="1"></div>' +
+                    '<div class="col-md-6 mb-3"><label class="form-label">Type</label>' +
+                    '<select class="form-select q-type">' +
+                        '<option value="mcq"' + (q.type==='mcq'?' selected':'') + '>MCQ</option>' +
+                        '<option value="short_answer"' + (q.type==='short_answer'?' selected':'') + '>Short Answer</option>' +
+                        '<option value="structured"' + (q.type==='structured'?' selected':'') + '>Structured</option></select></div>' +
+                '</div>' +
+                optionsHtml +
+                '<div class="mb-0"><label class="form-label fw-bold">Model Answer</label>' +
+                '<textarea class="form-control q-answer" rows="2">' + escapeHtml(q.answer) + '</textarea></div>' +
+            '</div>';
+        return card;
+    }
+
+    // ===== Review Step Logic =====
     document.getElementById('target-type').addEventListener('change', function() {
         document.getElementById('class-select-wrapper').style.display = this.value === 'class' ? '' : 'none';
         document.getElementById('group-select-wrapper').style.display = this.value === 'teaching_group' ? '' : 'none';
     });
 
-    // Delete question
     questionsContainer.addEventListener('click', function(e) {
         const btn = e.target.closest('.delete-question');
-        if (btn) {
-            btn.closest('.question-card').remove();
-            recalcMarks();
-            renumberQuestions();
-        }
+        if (btn) { btn.closest('.question-card').remove(); recalcMarks(); renumberQuestions(); }
     });
 
     questionsContainer.addEventListener('input', function(e) {
@@ -341,7 +382,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function recalcMarks() {
         let total = 0;
         document.querySelectorAll('.q-marks').forEach(el => { total += parseInt(el.value) || 0; });
-        totalMarksDisplay.value = total;
+        document.getElementById('total-marks-display').value = total;
     }
 
     function renumberQuestions() {
@@ -350,7 +391,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    createForm.addEventListener('submit', function(e) {
+    document.getElementById('create-form').addEventListener('submit', function() {
         const questions = [];
         document.querySelectorAll('.question-card').forEach((card, i) => {
             const q = {
@@ -361,22 +402,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 answer: card.querySelector('.q-answer').value,
             };
             const options = card.querySelectorAll('.q-option');
-            if (options.length > 0) {
-                q.options = Array.from(options).map(o => o.value);
-            }
+            if (options.length > 0) q.options = Array.from(options).map(o => o.value);
             questions.push(q);
         });
         document.getElementById('questions-json').value = JSON.stringify(questions);
         recalcMarks();
-        const totalInput = createForm.querySelector('input[name="total_marks"]');
-        if (totalInput) totalInput.value = totalMarksDisplay.value;
-
+        this.querySelector('input[name="total_marks"]').value = document.getElementById('total-marks-display').value;
         document.getElementById('create-btn').disabled = true;
         document.getElementById('create-btn').innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Creating...';
     });
 
-    recalcMarks();
-    {% endif %}
+    document.getElementById('back-btn').addEventListener('click', function() {
+        stepReview.classList.add('d-none');
+        stepConfig.classList.remove('d-none');
+        modifyBtn.disabled = false;
+        modifyBtn.innerHTML = '<i class="bi bi-magic me-2"></i>Generate Modified Version';
+    });
 });
 </script>
 {% endblock %}
