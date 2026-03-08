@@ -5663,40 +5663,74 @@ def api_generate_assignment_ai():
 @app.route('/api/teacher/assignments/modify-ai', methods=['POST'])
 @teacher_required
 def api_modify_assignment_ai():
-    """JSON API: generate modified assignment questions using AI."""
+    """JSON API: generate modified assignment questions using AI.
+
+    Accepts either:
+    - JSON body with assignment_id (modify existing assignment)
+    - Multipart form with uploaded PDF file (modify from uploaded PDF)
+    """
     try:
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
         if not teacher:
             return jsonify({'error': 'Teacher not found'}), 404
 
-        data = request.get_json(force=True)
-        assignment_id = data.get('assignment_id')
-        if not assignment_id:
-            return jsonify({'error': 'Missing assignment_id'})
+        # Determine if this is a file upload or JSON request
+        uploaded_file = request.files.get('pdf_file')
+        if uploaded_file and uploaded_file.filename:
+            # --- Mode: Upload PDF ---
+            if not uploaded_file.filename.lower().endswith('.pdf'):
+                return jsonify({'error': 'Please upload a PDF file.'})
+            pdf_bytes = uploaded_file.read()
+            if not pdf_bytes:
+                return jsonify({'error': 'Uploaded file is empty.'})
+            original_text = extract_text_from_pdf(pdf_bytes)
+            if not original_text or len(original_text.strip()) < 20:
+                return jsonify({'error': 'Could not extract readable text from the uploaded PDF. The file may be scanned/image-based.'})
 
-        original = db.db.assignments.find_one({
-            'assignment_id': assignment_id,
-            'teacher_id': session['teacher_id'],
-        })
-        if not original:
-            return jsonify({'error': 'Assignment not found'}), 404
+            # Build a minimal assignment dict for the AI function
+            original_assignment = {
+                'title': request.form.get('title', uploaded_file.filename.rsplit('.', 1)[0]),
+                'subject': request.form.get('subject', 'General'),
+                'total_marks': int(request.form.get('total_marks', 100)),
+            }
+            modification_type = request.form.get('modification_type', 'difficulty')
+            modification_level = request.form.get('modification_level', 'moderate')
+            custom_instructions = request.form.get('custom_instructions', '')
+        else:
+            # --- Mode: Existing assignment by ID ---
+            data = request.get_json(force=True)
+            assignment_id = data.get('assignment_id')
+            if not assignment_id:
+                return jsonify({'error': 'Missing assignment_id'})
 
-        original_text = original.get('question_paper_text', '')
-        if not original_text:
-            pdf_bytes = _get_assignment_file_bytes(original, 'question_paper')
-            if pdf_bytes:
-                original_text = extract_text_from_pdf(pdf_bytes)
+            original = db.db.assignments.find_one({
+                'assignment_id': assignment_id,
+                'teacher_id': session['teacher_id'],
+            })
+            if not original:
+                return jsonify({'error': 'Assignment not found'}), 404
 
-        if not original_text:
-            return jsonify({'error': 'Could not extract text from the original question paper.'})
+            original_text = original.get('question_paper_text', '')
+            if not original_text:
+                pdf_bytes = _get_assignment_file_bytes(original, 'question_paper')
+                if pdf_bytes:
+                    original_text = extract_text_from_pdf(pdf_bytes)
+
+            if not original_text:
+                return jsonify({'error': 'Could not extract text from the original question paper. Try uploading the PDF directly using the upload option.'})
+
+            original_assignment = original
+            modification_type = data.get('modification_type', 'difficulty')
+            modification_level = data.get('modification_level', 'moderate')
+            custom_instructions = data.get('custom_instructions', '')
 
         from utils.module_ai import modify_assignment_content
         result = modify_assignment_content(
             original_text=original_text,
-            original_assignment=original,
-            modification_type=data.get('modification_type', 'difficulty'),
-            modification_level=data.get('modification_level', 'moderate'),
-            custom_instructions=data.get('custom_instructions', ''),
+            original_assignment=original_assignment,
+            modification_type=modification_type,
+            modification_level=modification_level,
+            custom_instructions=custom_instructions,
             teacher=teacher,
         )
 
@@ -5840,6 +5874,125 @@ def modify_assignment(assignment_id):
 
     return render_template('teacher_modify_assignment.html',
         teacher=teacher, assignment=original,
+        classes=classes, teaching_groups=teaching_groups)
+
+
+@app.route('/teacher/assignments/modify-upload', methods=['GET', 'POST'])
+@teacher_required
+def modify_assignment_upload():
+    """Modify an assignment from an uploaded PDF (no existing assignment required)."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    if not teacher:
+        return redirect(url_for('teacher_assignments'))
+
+    # Get classes and teaching groups
+    teacher_classes = set(teacher.get('classes', []))
+    assigned_students = Student.find({'teachers': session['teacher_id']})
+    for student in assigned_students:
+        if student.get('class'):
+            teacher_classes.add(student.get('class'))
+    classes = list(Class.find({'class_id': {'$in': list(teacher_classes)}})) if teacher_classes else []
+    teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'create')
+        if action == 'create':
+            import json as _json
+            questions_json = request.form.get('questions_json', '[]')
+            try:
+                questions = _json.loads(questions_json)
+            except Exception:
+                return render_template('teacher_modify_assignment.html',
+                    teacher=teacher, assignment=None, upload_mode=True,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='Invalid questions data.')
+
+            if not questions:
+                return render_template('teacher_modify_assignment.html',
+                    teacher=teacher, assignment=None, upload_mode=True,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='No questions to create assignment from.')
+
+            title = request.form.get('title', 'Modified Assignment')
+            subject = request.form.get('subject', 'General')
+            total_marks = int(request.form.get('total_marks', 100))
+
+            from utils.pdf_generator import generate_question_paper_pdf, generate_answer_key_pdf
+            question_paper_bytes = generate_question_paper_pdf(questions, title, subject, total_marks)
+            answer_key_bytes = generate_answer_key_pdf(questions, title)
+
+            question_paper_text = extract_text_from_pdf(question_paper_bytes)
+            answer_key_text = extract_text_from_pdf(answer_key_bytes)
+
+            from gridfs import GridFS
+            fs = GridFS(db.db)
+            new_assignment_id = generate_assignment_id()
+
+            question_paper_id = fs.put(
+                question_paper_bytes,
+                filename=f"{new_assignment_id}_question.pdf",
+                content_type='application/pdf',
+                assignment_id=new_assignment_id,
+                file_type='question_paper',
+            )
+            answer_key_id = fs.put(
+                answer_key_bytes,
+                filename=f"{new_assignment_id}_answer.pdf",
+                content_type='application/pdf',
+                assignment_id=new_assignment_id,
+                file_type='answer_key',
+            )
+
+            target_type = request.form.get('target_type', 'class')
+            target_class_id = request.form.get('target_class_id', '').strip() or None
+            target_group_id = request.form.get('target_group_id', '').strip() or None
+            default_model = teacher.get('default_ai_model', 'anthropic')
+
+            assignment_doc = {
+                'assignment_id': new_assignment_id,
+                'teacher_id': session['teacher_id'],
+                'title': title,
+                'subject': subject,
+                'instructions': '',
+                'total_marks': total_marks,
+                'marking_type': 'standard',
+                'award_marks': True,
+                'send_ai_feedback_immediately': False,
+                'question_paper_id': question_paper_id,
+                'answer_key_id': answer_key_id,
+                'question_paper_name': f"{new_assignment_id}_question.pdf",
+                'answer_key_name': f"{new_assignment_id}_answer.pdf",
+                'reference_materials_id': None,
+                'reference_materials_name': None,
+                'rubrics_id': None,
+                'rubrics_name': None,
+                'question_paper_text': question_paper_text,
+                'answer_key_text': answer_key_text,
+                'reference_materials_text': '',
+                'rubrics_text': '',
+                'due_date': request.form.get('due_date') or None,
+                'status': 'draft',
+                'ai_model': default_model,
+                'feedback_instructions': '',
+                'grading_instructions': '',
+                'target_type': target_type,
+                'target_class_id': target_class_id if target_type == 'class' else None,
+                'target_group_id': target_group_id if target_type == 'teaching_group' else None,
+                'generated_questions': questions,
+                'generation_source': 'ai_modify_upload',
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow(),
+            }
+
+            if teacher.get('auto_save_to_assessment_bank'):
+                assignment_doc['in_assessment_bank'] = True
+                assignment_doc['bank_added_at'] = datetime.utcnow()
+
+            Assignment.insert_one(assignment_doc)
+            return redirect(url_for('edit_assignment', assignment_id=new_assignment_id))
+
+    return render_template('teacher_modify_assignment.html',
+        teacher=teacher, assignment=None, upload_mode=True,
         classes=classes, teaching_groups=teaching_groups)
 
 

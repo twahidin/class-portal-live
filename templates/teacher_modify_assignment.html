@@ -18,9 +18,14 @@
 
     <div class="page-header mb-4">
         <h1><i class="bi bi-pencil me-2"></i>Modify Assignment</h1>
-        <p class="text-muted">Create an AI-modified variant of an existing assignment</p>
+        <p class="text-muted">Create an AI-modified variant of an assignment</p>
     </div>
 
+    {% if error %}
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+    </div>
+    {% endif %}
     <div id="error-alert" class="alert alert-danger d-none">
         <i class="bi bi-exclamation-circle me-2"></i><span id="error-text"></span>
     </div>
@@ -29,7 +34,8 @@
     <div id="step-config">
         <div class="row">
             <div class="col-lg-8">
-                <!-- Original Assignment Info -->
+                {% if assignment %}
+                <!-- Original Assignment Info (existing assignment mode) -->
                 <div class="card mb-4">
                     <div class="card-header">
                         <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>Original Assignment</h5>
@@ -55,6 +61,36 @@
                         </div>
                     </div>
                 </div>
+                {% else %}
+                <!-- Upload PDF Mode -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Upload Question Paper</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted mb-3">Upload a PDF question paper to generate a modified version with questions and answers.</p>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">PDF File <span class="text-danger">*</span></label>
+                            <input type="file" class="form-control" id="pdf-upload" accept=".pdf" required>
+                            <div class="form-text">Upload the question paper PDF you want to modify</div>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Title</label>
+                                <input type="text" class="form-control" id="upload-title" placeholder="Assignment title">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Subject</label>
+                                <input type="text" class="form-control" id="upload-subject" placeholder="e.g. Computing" value="General">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Total Marks</label>
+                                <input type="number" class="form-control" id="upload-total-marks" value="100" min="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
 
                 <!-- Modification Type -->
                 <div class="card mb-4">
@@ -187,12 +223,12 @@
                             <div class="mb-3">
                                 <label class="form-label">Subject</label>
                                 <input type="text" class="form-control" name="subject" id="review-subject" required
-                                    value="{{ assignment.subject }}">
+                                    value="{{ (assignment.subject if assignment else 'General') }}">
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Total Marks</label>
                                 <input type="number" class="form-control" name="total_marks" id="total-marks-display"
-                                    value="{{ assignment.total_marks }}" readonly>
+                                    value="{{ (assignment.total_marks if assignment else 100) }}" readonly>
                                 <small class="text-muted">Auto-calculated from questions</small>
                             </div>
                             <div class="mb-3">
@@ -254,7 +290,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const errorText = document.getElementById('error-text');
     const modifyBtn = document.getElementById('modify-btn');
     const questionsContainer = document.getElementById('questions-container');
-    const assignmentId = '{{ assignment.assignment_id }}';
+    const uploadMode = {{ 'true' if (upload_mode is defined and upload_mode) else 'false' }};
+    const assignmentId = '{{ assignment.assignment_id if assignment else "" }}';
 
     function showError(msg) {
         errorText.textContent = msg;
@@ -276,11 +313,41 @@ document.addEventListener('DOMContentLoaded', function() {
         const modLevel = document.querySelector('input[name="modification_level"]:checked').value;
         const customInstr = document.getElementById('custom-instructions').value;
 
-        modifyBtn.disabled = true;
-        modifyBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating (this may take a minute)...';
+        let fetchOptions;
 
-        try {
-            const resp = await fetch('{{ url_for("api_modify_assignment_ai") }}', {
+        if (uploadMode) {
+            // Upload mode: send as multipart form with PDF file
+            const fileInput = document.getElementById('pdf-upload');
+            if (!fileInput || !fileInput.files.length) {
+                showError('Please select a PDF file to upload.');
+                return;
+            }
+            const file = fileInput.files[0];
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                showError('Please upload a PDF file.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('pdf_file', file);
+            formData.append('modification_type', modType);
+            formData.append('modification_level', modLevel);
+            formData.append('custom_instructions', customInstr);
+            formData.append('title', document.getElementById('upload-title').value || file.name.replace('.pdf', ''));
+            formData.append('subject', document.getElementById('upload-subject').value || 'General');
+            formData.append('total_marks', document.getElementById('upload-total-marks').value || '100');
+
+            fetchOptions = {
+                method: 'POST',
+                body: formData,
+            };
+        } else {
+            // Existing assignment mode: send as JSON
+            if (!assignmentId) {
+                showError('No assignment selected.');
+                return;
+            }
+            fetchOptions = {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -289,7 +356,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     modification_level: modLevel,
                     custom_instructions: customInstr,
                 }),
-            });
+            };
+        }
+
+        modifyBtn.disabled = true;
+        modifyBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating (this may take a minute)...';
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 min timeout
+            fetchOptions.signal = controller.signal;
+
+            const resp = await fetch('{{ url_for("api_modify_assignment_ai") }}', fetchOptions);
+            clearTimeout(timeoutId);
             const data = await resp.json();
 
             if (data.error) {
@@ -302,7 +381,11 @@ document.addEventListener('DOMContentLoaded', function() {
             showReviewStep(data.data);
 
         } catch (err) {
-            showError('Network error: ' + err.message);
+            if (err.name === 'AbortError') {
+                showError('Request timed out. The AI is taking too long. Please try again or use a simpler modification.');
+            } else {
+                showError('Network error: ' + err.message);
+            }
             modifyBtn.disabled = false;
             modifyBtn.innerHTML = '<i class="bi bi-magic me-2"></i>Generate Modified Version';
         }
@@ -315,7 +398,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const questions = result.questions || [];
         document.getElementById('q-count').textContent = questions.length;
-        document.getElementById('review-title').value = result.title_suggestion || 'Modified: {{ assignment.title|default("Assignment", true) }}';
+        document.getElementById('review-title').value = result.title_suggestion || 'Modified Assignment';
+
+        // Update subject from upload if in upload mode
+        if (uploadMode) {
+            const uploadSubject = document.getElementById('upload-subject');
+            if (uploadSubject && uploadSubject.value) {
+                document.getElementById('review-subject').value = uploadSubject.value;
+            }
+        }
 
         questionsContainer.innerHTML = '';
         questions.forEach((q, i) => {

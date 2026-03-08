@@ -46,7 +46,9 @@
                     <li><a class="dropdown-item" href="{{ url_for('generate_assignment') }}">
                         <i class="bi bi-lightning me-2"></i>Generate</a></li>
                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modifyPickerModal">
-                        <i class="bi bi-pencil me-2"></i>Modify</a></li>
+                        <i class="bi bi-pencil me-2"></i>Modify Existing</a></li>
+                    <li><a class="dropdown-item" href="{{ url_for('modify_assignment_upload') }}">
+                        <i class="bi bi-file-earmark-arrow-up me-2"></i>Modify from PDF</a></li>
                     <li><hr class="dropdown-divider"></li>
                     <li><a class="dropdown-item {% if bank_count == 0 %}disabled{% endif %}"
                            href="{% if bank_count > 0 %}{{ url_for('teacher_assessment_bank') }}{% else %}javascript:void(0){% endif %}"
