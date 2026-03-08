@@ -67,12 +67,18 @@
             </div>
 
             <div class="assignment-actions">
+                <button class="btn btn-success btn-sm" onclick="openReuseModal('{{ assignment.assignment_id }}', '{{ assignment.title|e }}')">
+                    <i class="bi bi-arrow-repeat me-1"></i>Reuse
+                </button>
+                <a href="{{ url_for('modify_assignment', assignment_id=assignment.assignment_id) }}" class="btn btn-outline-info btn-sm">
+                    <i class="bi bi-magic me-1"></i>Modify
+                </a>
                 <a href="{{ url_for('assignment_summary', assignment_id=assignment.assignment_id) }}" class="btn btn-primary btn-sm">
                     <i class="bi bi-bar-chart me-1"></i>Summary
                 </a>
                 {% if assignment.get('question_paper_id') %}
                 <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" class="btn btn-outline-secondary btn-sm">
-                    <i class="bi bi-download me-1"></i>Download PDF
+                    <i class="bi bi-download me-1"></i>PDF
                 </a>
                 {% endif %}
                 <button class="btn btn-outline-danger btn-sm" onclick="removeFromBank('{{ assignment.assignment_id }}')">
@@ -93,10 +99,110 @@
     </div>
     {% endif %}
 </div>
+
+<!-- Reuse Assignment Modal -->
+<div class="modal fade" id="reuseModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-repeat me-2"></i>Reuse Assignment</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">Assign <strong id="reuse-title"></strong> to a new class or group. A copy will be created as a draft.</p>
+                <input type="hidden" id="reuse-assignment-id">
+                <div class="mb-3">
+                    <label class="form-label">Assign To</label>
+                    <select class="form-select" id="reuse-target-type">
+                        <option value="class">Class</option>
+                        <option value="teaching_group">Teaching Group</option>
+                    </select>
+                </div>
+                <div id="reuse-class-wrapper" class="mb-3">
+                    <label class="form-label">Class</label>
+                    <select class="form-select" id="reuse-class-id">
+                        <option value="">-- Select class --</option>
+                        {% for cls in classes %}
+                        <option value="{{ cls.class_id }}">{{ cls.class_id }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div id="reuse-group-wrapper" class="mb-3" style="display: none;">
+                    <label class="form-label">Teaching Group</label>
+                    <select class="form-select" id="reuse-group-id">
+                        <option value="">-- Select group --</option>
+                        {% for grp in teaching_groups %}
+                        <option value="{{ grp.group_id }}">{{ grp.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" id="reuse-confirm-btn" onclick="confirmReuse()">
+                    <i class="bi bi-arrow-repeat me-1"></i>Create Draft Copy
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+let reuseModal;
+document.addEventListener('DOMContentLoaded', function() {
+    reuseModal = new bootstrap.Modal(document.getElementById('reuseModal'));
+    document.getElementById('reuse-target-type').addEventListener('change', function() {
+        document.getElementById('reuse-class-wrapper').style.display = this.value === 'class' ? '' : 'none';
+        document.getElementById('reuse-group-wrapper').style.display = this.value === 'teaching_group' ? '' : 'none';
+    });
+});
+
+function openReuseModal(assignmentId, title) {
+    document.getElementById('reuse-assignment-id').value = assignmentId;
+    document.getElementById('reuse-title').textContent = title;
+    reuseModal.show();
+}
+
+async function confirmReuse() {
+    const assignmentId = document.getElementById('reuse-assignment-id').value;
+    const targetType = document.getElementById('reuse-target-type').value;
+    const classId = document.getElementById('reuse-class-id').value;
+    const groupId = document.getElementById('reuse-group-id').value;
+
+    if (targetType === 'class' && !classId) { alert('Please select a class.'); return; }
+    if (targetType === 'teaching_group' && !groupId) { alert('Please select a teaching group.'); return; }
+
+    const btn = document.getElementById('reuse-confirm-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
+
+    try {
+        const resp = await fetch('{{ url_for("reuse_bank_assignment") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                assignment_id: assignmentId,
+                target_type: targetType,
+                target_class_id: classId,
+                target_group_id: groupId,
+            }),
+        });
+        const data = await resp.json();
+        if (data.success) {
+            reuseModal.hide();
+            window.location.href = '/teacher/assignments/' + data.assignment_id + '/edit';
+        } else {
+            alert(data.error || 'Failed to create copy');
+        }
+    } catch (e) {
+        alert('Failed to create copy. Please try again.');
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Create Draft Copy';
+}
+
 async function removeFromBank(assignmentId) {
     if (!confirm('Remove this assignment from the Assessment Bank?')) return;
     try {

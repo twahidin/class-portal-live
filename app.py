@@ -5357,9 +5357,21 @@ def teacher_assessment_bank():
     }).sort('bank_added_at', -1))
     for a in bank_assignments:
         a['submission_count'] = db.db.submissions.count_documents({'assignment_id': a['assignment_id']})
+
+    # Classes and teaching groups for the reuse modal
+    teacher_classes = set(teacher.get('classes', []))
+    assigned_students = Student.find({'teachers': session['teacher_id']})
+    for student in assigned_students:
+        if student.get('class'):
+            teacher_classes.add(student.get('class'))
+    classes = list(Class.find({'class_id': {'$in': list(teacher_classes)}})) if teacher_classes else []
+    teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
+
     return render_template('teacher_assessment_bank.html',
                          teacher=teacher,
-                         assignments=bank_assignments)
+                         assignments=bank_assignments,
+                         classes=classes,
+                         teaching_groups=teaching_groups)
 
 @app.route('/api/teacher/assignments/bank/sync', methods=['POST'])
 @teacher_required
@@ -5398,6 +5410,67 @@ def backfill_assessment_bank():
         {'$set': {'in_assessment_bank': True, 'bank_added_at': datetime.utcnow()}}
     )
     return jsonify({'success': True, 'count': result.modified_count})
+
+
+@app.route('/api/teacher/assignments/bank/reuse', methods=['POST'])
+@teacher_required
+def reuse_bank_assignment():
+    """Duplicate a bank assignment and assign to a new class/group."""
+    data = request.get_json(force=True)
+    source_id = data.get('assignment_id')
+    target_type = data.get('target_type', 'class')
+    target_class_id = data.get('target_class_id', '').strip() or None
+    target_group_id = data.get('target_group_id', '').strip() or None
+
+    source = db.db.assignments.find_one({
+        'assignment_id': source_id,
+        'teacher_id': session['teacher_id'],
+    })
+    if not source:
+        return jsonify({'error': 'Assignment not found'}), 404
+
+    new_id = generate_assignment_id()
+
+    # Copy the assignment with a new ID and target
+    copy_fields = [
+        'title', 'subject', 'instructions', 'total_marks', 'marking_type',
+        'award_marks', 'send_ai_feedback_immediately',
+        'question_paper_id', 'answer_key_id', 'question_paper_name', 'answer_key_name',
+        'reference_materials_id', 'reference_materials_name',
+        'rubrics_id', 'rubrics_name',
+        'question_paper_text', 'answer_key_text',
+        'reference_materials_text', 'rubrics_text',
+        'ai_model', 'feedback_instructions', 'grading_instructions',
+        'enable_overall_review', 'overall_review_limit',
+        'enable_question_help', 'question_help_limit',
+        'linked_module_ids', 'generated_questions',
+        'drive_file_refs',
+        'spreadsheet_student_template_id', 'spreadsheet_student_template_name',
+        'spreadsheet_answer_key_id', 'spreadsheet_answer_key_name',
+        'python_question_template_id', 'python_question_template_name',
+        'python_answer_key_template_id', 'python_answer_key_template_name',
+    ]
+
+    new_doc = {
+        'assignment_id': new_id,
+        'teacher_id': session['teacher_id'],
+        'status': 'draft',
+        'target_type': target_type,
+        'target_class_id': target_class_id if target_type == 'class' else None,
+        'target_group_id': target_group_id if target_type == 'teaching_group' else None,
+        'reused_from': source_id,
+        'in_assessment_bank': True,
+        'bank_added_at': datetime.utcnow(),
+        'created_at': datetime.utcnow(),
+        'updated_at': datetime.utcnow(),
+    }
+
+    for field in copy_fields:
+        if field in source:
+            new_doc[field] = source[field]
+
+    Assignment.insert_one(new_doc)
+    return jsonify({'success': True, 'assignment_id': new_id})
 
 
 # ============================================================================
