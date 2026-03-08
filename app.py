@@ -3170,6 +3170,234 @@ def download_student_feedback_pdf(submission_id):
         return 'Error generating PDF', 500
 
 
+@app.route('/student/submission/<submission_id>/correction-pdf')
+@login_required
+def download_correction_pdf(submission_id):
+    """Serve the auto-generated correction PDF for a student."""
+    from gridfs import GridFS
+    from bson import ObjectId
+
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id']
+    })
+    if not submission:
+        return 'Not found', 404
+
+    correction_pdf_id = submission.get('correction_pdf_id')
+    if not correction_pdf_id:
+        return 'No correction PDF available', 404
+
+    try:
+        fs = GridFS(db.db)
+        pdf_file = fs.get(ObjectId(correction_pdf_id))
+        return Response(
+            pdf_file.read(),
+            mimetype='application/pdf',
+            headers={
+                'Content-Disposition': 'inline; filename="correction_paper.pdf"'
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error serving correction PDF: {e}")
+        return 'Error loading correction PDF', 500
+
+
+@app.route('/student/submit-correction', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def student_submit_correction():
+    """Submit correction files (photos/PDF/Drive link) for a submission that requires corrections."""
+    from gridfs import GridFS
+    from bson import ObjectId
+
+    try:
+        # Handle both form data and JSON (for Drive link)
+        is_json = request.is_json
+        if is_json:
+            data = request.get_json()
+            submission_id = data.get('submission_id')
+            drive_url = data.get('drive_url')
+        else:
+            submission_id = request.form.get('submission_id')
+            drive_url = None
+
+        if not submission_id:
+            return jsonify({'success': False, 'error': 'Missing submission_id'}), 400
+
+        submission = Submission.find_one({
+            'submission_id': submission_id,
+            'student_id': session['student_id']
+        })
+        if not submission:
+            return jsonify({'success': False, 'error': 'Submission not found'}), 404
+
+        if not submission.get('corrections_required'):
+            return jsonify({'success': False, 'error': 'No corrections required for this submission'}), 400
+
+        if submission.get('correction_submitted'):
+            return jsonify({'success': False, 'error': 'Corrections already submitted'}), 400
+
+        assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+        if not assignment:
+            return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+        teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
+        fs = GridFS(db.db)
+        correction_file_ids = []
+        file_type = 'image'
+
+        if drive_url:
+            # Handle Google Drive link
+            from utils.google_drive import extract_drive_file_id, get_teacher_drive_manager, get_drive_service, DriveManager
+            file_id = extract_drive_file_id(drive_url)
+            if not file_id:
+                return jsonify({'success': False, 'error': 'Invalid Google Drive URL'}), 400
+
+            drive_manager = get_teacher_drive_manager(teacher)
+            if not drive_manager:
+                service = get_drive_service()
+                if service:
+                    drive_manager = DriveManager(service)
+                else:
+                    return jsonify({'success': False, 'error': 'Google Drive not configured'}), 500
+
+            try:
+                file_bytes, content_type, filename = drive_manager.download_shared_file(file_id)
+            except Exception as e:
+                logger.error(f"Error downloading Drive file for correction: {e}")
+                return jsonify({'success': False, 'error': 'Failed to download from Google Drive'}), 400
+
+            if not file_bytes:
+                return jsonify({'success': False, 'error': 'Could not download Drive file'}), 400
+
+            grid_id = fs.put(file_bytes, filename=filename or 'correction_drive_file', content_type=content_type or 'application/octet-stream')
+            correction_file_ids.append(str(grid_id))
+            file_type = 'pdf' if 'pdf' in (content_type or '') else 'image'
+        else:
+            # Handle file uploads (photos or PDF)
+            files = request.files.getlist('files')
+            upload_type = request.form.get('file_type', 'images')
+            if not files:
+                return jsonify({'success': False, 'error': 'No files uploaded'}), 400
+
+            for f in files:
+                content = f.read()
+                if not content:
+                    continue
+                grid_id = fs.put(content, filename=f.filename, content_type=f.content_type)
+                correction_file_ids.append(str(grid_id))
+
+            file_type = 'pdf' if upload_type == 'pdf' else 'image'
+
+        if not correction_file_ids:
+            return jsonify({'success': False, 'error': 'No valid files uploaded'}), 400
+
+        # Update submission with correction files
+        Submission.update_one(
+            {'submission_id': submission_id},
+            {'$set': {
+                'correction_submitted': True,
+                'correction_submitted_at': datetime.utcnow(),
+                'correction_file_ids': correction_file_ids,
+                'correction_file_type': file_type
+            }}
+        )
+
+        # Trigger AI re-marking of corrections in background
+        try:
+            _mark_correction_submission(submission_id, assignment, teacher)
+        except Exception as e:
+            logger.error(f"Error in correction AI marking for {submission_id}: {e}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Corrections submitted successfully',
+            'redirect': url_for('view_submission', submission_id=submission_id)
+        })
+
+    except Exception as e:
+        logger.error(f"Error submitting correction: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _mark_correction_submission(submission_id, assignment, teacher):
+    """AI re-mark the correction submission files."""
+    from gridfs import GridFS
+    from bson import ObjectId
+    from utils.ai_marking import analyze_submission_images
+
+    submission = Submission.find_one({'submission_id': submission_id})
+    if not submission:
+        return
+
+    fs = GridFS(db.db)
+    pages = []
+    for fid in submission.get('correction_file_ids', []):
+        try:
+            grid_file = fs.get(ObjectId(fid))
+            content = grid_file.read()
+            content_type = grid_file.content_type or ''
+            if 'pdf' in content_type:
+                pages.append({'type': 'pdf', 'data': content})
+            else:
+                pages.append({'type': 'image', 'data': content})
+        except Exception as e:
+            logger.warning(f"Error reading correction file {fid}: {e}")
+
+    if not pages:
+        return
+
+    # Build context about which questions were wrong and what the correct answers are
+    ai_feedback = submission.get('ai_feedback', {})
+    teacher_feedback = submission.get('teacher_feedback', {})
+    context_parts = [
+        "This is a CORRECTION submission. The student is correcting previously wrong answers.",
+        "Only mark the questions listed below. The student's correction paper has these questions:",
+        ""
+    ]
+    for q in ai_feedback.get('questions', []):
+        q_num = str(q.get('question_num', ''))
+        teacher_q = teacher_feedback.get('questions', {}).get(q_num, {})
+        marks = teacher_q.get('marks') if teacher_q.get('marks') is not None else q.get('marks_awarded')
+        marks_total = teacher_q.get('marks_total') or q.get('marks_total', 0)
+        needs_correction = False
+        if q.get('is_correct') == False:
+            needs_correction = True
+        elif marks is not None and marks_total:
+            try:
+                if float(marks) < float(marks_total):
+                    needs_correction = True
+            except (ValueError, TypeError):
+                pass
+        if needs_correction:
+            correct_answer = teacher_q.get('correct_answer') or q.get('correct_answer', 'N/A')
+            context_parts.append(f"Q{q_num} (originally {marks}/{marks_total}): Correct answer = {correct_answer}")
+
+    additional_context = '\n'.join(context_parts)
+
+    # Get answer key content if available
+    answer_key_content = None
+    answer_key_id = assignment.get('answer_key_id')
+    if answer_key_id:
+        try:
+            ak_file = fs.get(ObjectId(answer_key_id))
+            answer_key_content = ak_file.read()
+        except Exception:
+            pass
+
+    result = analyze_submission_images(
+        pages, assignment, answer_key_content=answer_key_content,
+        teacher=teacher, additional_context=additional_context
+    )
+
+    Submission.update_one(
+        {'submission_id': submission_id},
+        {'$set': {'correction_feedback': result}}
+    )
+    logger.info(f"Correction AI marking complete for {submission_id}")
+
+
 # ============================================================================
 # MY MODULES - STUDENT ROUTES
 # ============================================================================
@@ -9749,6 +9977,28 @@ def extract_answer_key(submission_id):
         return jsonify({'error': str(e)}), 500
 
 
+def _submission_needs_corrections(submission, assignment):
+    """Check if a submission has any incorrect or partial answers requiring corrections."""
+    if assignment.get('marking_type') in ['spreadsheet', 'python']:
+        return False
+    ai_feedback = submission.get('ai_feedback', {})
+    teacher_feedback = submission.get('teacher_feedback', {})
+    for q in ai_feedback.get('questions', []):
+        q_num = str(q.get('question_num', ''))
+        teacher_q = teacher_feedback.get('questions', {}).get(q_num, {})
+        marks = teacher_q.get('marks') if teacher_q.get('marks') is not None else q.get('marks_awarded')
+        marks_total = teacher_q.get('marks_total') or q.get('marks_total', 0)
+        if q.get('is_correct') == False:
+            return True
+        if marks is not None and marks_total:
+            try:
+                if float(marks) < float(marks_total):
+                    return True
+            except (ValueError, TypeError):
+                pass
+    return False
+
+
 @app.route('/teacher/review/<submission_id>/send', methods=['POST'])
 @limiter.limit("200 per hour")
 @teacher_required
@@ -9784,7 +10034,32 @@ def send_feedback_to_student(submission_id):
         submission_after = Submission.find_one({'submission_id': submission_id})
         if submission_after:
             _update_profile_and_mastery_from_assignment(submission['student_id'], assignment, submission_after)
-        
+
+        # Auto-detect if corrections are needed and generate correction PDF
+        if submission_after and _submission_needs_corrections(submission_after, assignment):
+            try:
+                from utils.pdf_generator import generate_correction_pdf
+                from gridfs import GridFS
+                from bson import ObjectId
+                correction_pdf_bytes = generate_correction_pdf(submission_after, assignment, student)
+                fs = GridFS(db.db)
+                correction_pdf_id = fs.put(
+                    correction_pdf_bytes,
+                    filename=f"correction_{assignment['title']}_{student['student_id']}.pdf",
+                    content_type='application/pdf'
+                )
+                Submission.update_one(
+                    {'submission_id': submission_id},
+                    {'$set': {
+                        'corrections_required': True,
+                        'correction_pdf_id': str(correction_pdf_id),
+                        'correction_submitted': False
+                    }}
+                )
+                logger.info(f"Correction PDF generated for submission {submission_id}")
+            except Exception as e:
+                logger.error(f"Error generating correction PDF for {submission_id}: {e}")
+
         # Send Telegram notification if student has linked account
         if student and student.get('telegram_id'):
             try:

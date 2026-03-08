@@ -358,6 +358,173 @@ def generate_review_pdf(submission: dict, assignment: dict, student: dict, teach
         logger.error(f"Error generating PDF: {e}")
         raise
 
+def generate_correction_pdf(submission: dict, assignment: dict, student: dict) -> bytes:
+    """
+    Generate a Correction Paper PDF with a 3-column table for questions that need corrections.
+    Only includes questions where is_correct=False or marks < marks_total.
+
+    Args:
+        submission: The submission document with feedback
+        assignment: The assignment document
+        student: The student document
+
+    Returns:
+        PDF content as bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+
+    styles = get_styles()
+    story = []
+
+    # Header
+    story.append(Paragraph("Correction Paper", styles['Title_Custom']))
+    story.append(Spacer(1, 5))
+
+    # Info box
+    info_data = [
+        ['Student:', student.get('name', 'Unknown'), 'Date:', datetime.utcnow().strftime('%d %B %Y')],
+        ['ID:', student.get('student_id', 'N/A'), 'Class:', student.get('class', 'N/A')],
+        ['Assignment:', assignment.get('title', 'Untitled'), 'Subject:', assignment.get('subject', 'N/A')],
+    ]
+
+    info_table = Table(info_data, colWidths=[2*cm, 6*cm, 2*cm, 6*cm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('TEXTCOLOR', (0, 0), (-1, -1), TEXT_COLOR),
+        ('BACKGROUND', (0, 0), (-1, -1), LIGHT_GRAY),
+        ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+        ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+        ('PADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 15))
+
+    # Instructions
+    instructions_text = (
+        "<b>Instructions:</b> Print this correction paper. For each question listed below, "
+        "read the hint/feedback carefully, then write your corrected answer in the blank column. "
+        "Once complete, photograph or scan your corrections and upload them via the portal."
+    )
+    instr_data = [[Paragraph(instructions_text, styles['Body_Custom'])]]
+    instr_table = Table(instr_data, colWidths=[16*cm])
+    instr_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), HexColor('#fff3cd')),
+        ('BOX', (0, 0), (-1, -1), 1, WARNING_COLOR),
+        ('PADDING', (0, 0), (-1, -1), 10),
+    ]))
+    story.append(instr_table)
+    story.append(Spacer(1, 15))
+
+    # Build correction table
+    ai_feedback = submission.get('ai_feedback', {})
+    teacher_feedback = submission.get('teacher_feedback', {})
+    questions = ai_feedback.get('questions', [])
+
+    # Table header
+    table_data = [[
+        Paragraph('<b>Q#</b>', styles['TableHeader']),
+        Paragraph('<b>Hint / Feedback</b>', styles['TableHeader']),
+        Paragraph('<b>Your Correction</b>', styles['TableHeader'])
+    ]]
+
+    correction_count = 0
+    for q in questions:
+        q_num = str(q.get('question_num', '?'))
+        teacher_q = teacher_feedback.get('questions', {}).get(q_num, {})
+
+        marks = teacher_q.get('marks') if teacher_q.get('marks') is not None else q.get('marks_awarded')
+        marks_total = teacher_q.get('marks_total') or q.get('marks_total', 0)
+
+        # Only include questions that need corrections
+        needs_correction = False
+        if q.get('is_correct') == False:
+            needs_correction = True
+        elif marks is not None and marks_total:
+            try:
+                if float(marks) < float(marks_total):
+                    needs_correction = True
+            except (ValueError, TypeError):
+                pass
+
+        if not needs_correction:
+            continue
+
+        correction_count += 1
+
+        # Build hint from teacher edits (preferred) or AI feedback
+        feedback = teacher_q.get('feedback') or q.get('feedback', '')
+        improvement = q.get('improvement', '')
+        hint_parts = []
+        if feedback:
+            hint_parts.append(feedback)
+        if improvement:
+            hint_parts.append(f"Tip: {improvement}")
+        hint_text = '\n'.join(hint_parts) if hint_parts else 'Review your answer and try again.'
+
+        # Format marks display
+        marks_display = f"{marks}/{marks_total}" if marks is not None else f"?/{marks_total}"
+
+        row = [
+            Paragraph(f"<b>Q{q_num}</b><br/>{marks_display}", styles['TableCell']),
+            Paragraph(truncate_text(hint_text, 300), styles['TableCell']),
+            Paragraph("", styles['TableCell'])  # Blank for student to fill in
+        ]
+        table_data.append(row)
+
+    if correction_count == 0:
+        story.append(Paragraph("No corrections required - all answers are correct!", styles['Body_Custom']))
+    else:
+        # Summary
+        story.append(Paragraph(f"Questions requiring correction: <b>{correction_count}</b>", styles['Body_Custom']))
+        story.append(Spacer(1, 10))
+
+        correction_table = Table(table_data, colWidths=[2*cm, 8*cm, 6*cm])
+        correction_table.setStyle(TableStyle([
+            # Header row - orange/warning color
+            ('BACKGROUND', (0, 0), (-1, 0), WARNING_COLOR),
+            ('TEXTCOLOR', (0, 0), (-1, 0), TEXT_COLOR),
+            # Alternating rows
+            ('BACKGROUND', (0, 1), (-1, -1), white),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, LIGHT_GRAY]),
+            # Borders
+            ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
+            ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+            # Alignment
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            # Padding
+            ('PADDING', (0, 0), (-1, -1), 8),
+            # Minimum row height for correction column
+            ('ROWHEIGHTS', (0, 1), (-1, -1), 3*cm),
+        ]))
+        story.append(correction_table)
+
+    # Footer
+    story.append(Spacer(1, 30))
+    story.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR))
+    story.append(Spacer(1, 5))
+    footer_text = f"Generated: {datetime.utcnow().strftime('%d %B %Y, %H:%M UTC')}"
+    story.append(Paragraph(footer_text, styles['Footer']))
+
+    try:
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Error generating correction PDF: {e}")
+        raise
+
+
 def generate_feedback_pdf(submission: dict, assignment: dict, student: dict) -> bytes:
     """Legacy function - redirects to generate_review_pdf"""
     return generate_review_pdf(submission, assignment, student)

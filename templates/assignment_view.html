@@ -315,8 +315,12 @@
                     <h5>{% if existing_submission.get('submitted_via') == 'manual' %}This assignment was submitted on your behalf by your teacher.{% else %}Your work has been submitted!{% endif %}</h5>
                     <p class="text-muted small">{% if existing_submission.get('submitted_via') == 'manual' %}You cannot submit on your own unless the teacher rejects this submission.{% endif %}</p>
                     <p class="text-muted">
-                        Status: 
-                        {% if existing_submission.get('feedback_sent', False) and existing_submission.get('status') == 'ai_reviewed' %}
+                        Status:
+                        {% if existing_submission.get('corrections_required') and not existing_submission.get('correction_submitted') %}
+                        <span class="badge bg-warning text-dark"><i class="bi bi-pencil-square me-1"></i>Pending Corrections</span>
+                        {% elif existing_submission.get('correction_submitted') %}
+                        <span class="badge bg-info"><i class="bi bi-check2-circle me-1"></i>Correction Submitted</span>
+                        {% elif existing_submission.get('feedback_sent', False) and existing_submission.get('status') == 'ai_reviewed' %}
                         <span class="badge bg-info">AI Feedback Received</span>
                         {% elif existing_submission.get('feedback_sent', False) %}
                         <span class="badge bg-success">Feedback Available</span>
@@ -353,9 +357,20 @@
                     </p>
                     {% endif %}
                     
+                    {% if existing_submission.get('corrections_required') and not existing_submission.get('correction_submitted') %}
+                    <div class="d-flex flex-wrap gap-2 justify-content-center mt-3">
+                        <a href="{{ url_for('view_submission', submission_id=existing_submission.submission_id) }}" class="btn btn-outline-secondary btn-lg">
+                            <i class="bi bi-eye me-1"></i>View Feedback
+                        </a>
+                        <button type="button" class="btn btn-warning btn-lg" data-bs-toggle="modal" data-bs-target="#correctionSubmitModal">
+                            <i class="bi bi-pencil-square me-1"></i>Submit Correction
+                        </button>
+                    </div>
+                    {% else %}
                     <a href="{{ url_for('view_submission', submission_id=existing_submission.submission_id) }}" class="btn btn-primary btn-lg mt-3">
                         <i class="bi bi-eye me-1"></i>{% if existing_submission.get('feedback_sent', False) %}View Feedback{% else %}View Submission{% endif %}
                     </a>
+                    {% endif %}
                 </div>
             </div>
             {% endif %}
@@ -368,7 +383,15 @@
     <!-- Three action boxes -->
     <div class="row g-3 mb-4">
         <div class="col-md-4">
-            {% if assignment.assignment_type == 'assessment' and not existing_submission %}
+            {% if existing_submission and existing_submission.get('corrections_required') and not existing_submission.get('correction_submitted') %}
+            <div class="card h-100 border-warning action-box-card" id="submit-correction-box" style="cursor: pointer;" data-bs-toggle="modal" data-bs-target="#correctionSubmitModal">
+                <div class="card-body text-center py-4">
+                    <i class="bi bi-pencil-square text-warning" style="font-size: 2.5rem;"></i>
+                    <h6 class="mt-2 mb-1">Submit Correction</h6>
+                    <p class="text-muted small mb-0">Upload your corrected answers</p>
+                </div>
+            </div>
+            {% elif assignment.assignment_type == 'assessment' and not existing_submission %}
             <div class="card h-100 border-info">
                 <div class="card-body text-center py-4">
                     <i class="bi bi-clipboard-check text-info" style="font-size: 2.5rem;"></i>
@@ -416,14 +439,45 @@
     <!-- Read-only PDF view of question paper (below the 3 boxes) -->
     {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
     <div class="card mb-4">
+        {% if existing_submission and existing_submission.get('corrections_required') %}
+        <div class="card-header bg-light">
+            <ul class="nav nav-pills" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#question-paper-tab" type="button" role="tab">
+                        <i class="bi bi-file-earmark-pdf me-1"></i>Question Paper
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" data-bs-toggle="pill" data-bs-target="#correction-paper-tab" type="button" role="tab">
+                        <i class="bi bi-pencil-square me-1"></i>Correction Paper
+                    </button>
+                </li>
+            </ul>
+        </div>
+        <div class="card-body p-0" style="min-height: 60vh;">
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="question-paper-tab" role="tabpanel">
+                    <iframe src="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}"
+                            style="width: 100%; height: 70vh; border: none;"
+                            title="Question paper"></iframe>
+                </div>
+                <div class="tab-pane fade" id="correction-paper-tab" role="tabpanel">
+                    <iframe src="{{ url_for('download_correction_pdf', submission_id=existing_submission.submission_id) }}"
+                            style="width: 100%; height: 70vh; border: none;"
+                            title="Correction paper"></iframe>
+                </div>
+            </div>
+        </div>
+        {% else %}
         <div class="card-header bg-light">
             <h6 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Question Paper</h6>
         </div>
         <div class="card-body p-0" style="min-height: 60vh;">
-            <iframe src="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" 
-                    style="width: 100%; height: 70vh; border: none;" 
+            <iframe src="{{ url_for('download_student_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}"
+                    style="width: 100%; height: 70vh; border: none;"
                     title="Question paper"></iframe>
         </div>
+        {% endif %}
     </div>
     {% endif %}
     
@@ -783,6 +837,110 @@
         </div>
     </div>
 </div>
+<!-- Correction Submission Modal -->
+{% if existing_submission and existing_submission.get('corrections_required') and not existing_submission.get('correction_submitted') %}
+<div class="modal fade" id="correctionSubmitModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Submit Correction</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info small mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <strong>Instructions:</strong>
+                    <ol class="mb-0 mt-2 ps-3">
+                        <li>Print or view the <strong>Correction Paper</strong> tab below</li>
+                        <li>Write your corrected answers in the blank column</li>
+                        <li>Photograph, scan, or create a PDF of your corrections</li>
+                        <li>Upload your correction files here</li>
+                    </ol>
+                </div>
+
+                <form id="correction-form" enctype="multipart/form-data">
+                    <input type="hidden" name="submission_id" value="{{ existing_submission.submission_id }}">
+
+                    <!-- Upload Method Tabs -->
+                    <ul class="nav nav-pills nav-fill mb-3" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#correction-photo-upload" type="button">
+                                <i class="bi bi-camera me-1"></i>Photos
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="pill" data-bs-target="#correction-pdf-upload" type="button">
+                                <i class="bi bi-file-pdf me-1"></i>PDF
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="pill" data-bs-target="#correction-drive-upload" type="button">
+                                <i class="bi bi-google me-1"></i>Google Drive
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- Photo Upload -->
+                        <div class="tab-pane fade show active" id="correction-photo-upload">
+                            <div class="upload-zone" id="correction-photo-zone">
+                                <input type="file" class="d-none" id="correction-photo-input" name="files"
+                                       accept="image/*" multiple capture="environment">
+                                <label for="correction-photo-input" class="upload-label">
+                                    <i class="bi bi-camera" style="font-size: 2.5rem; color: #ffc107;"></i>
+                                    <h6 class="mt-2">Click to upload correction photos</h6>
+                                    <p class="text-muted small mb-0">Or drag and drop images here</p>
+                                </label>
+                            </div>
+                            <div id="correction-photo-preview" class="photo-preview mt-3" style="display: none;">
+                                <h6 class="small"><i class="bi bi-images me-1"></i>Pages to submit:</h6>
+                                <div class="preview-grid" id="correction-preview-grid"></div>
+                            </div>
+                        </div>
+
+                        <!-- PDF Upload -->
+                        <div class="tab-pane fade" id="correction-pdf-upload">
+                            <div class="upload-zone" id="correction-pdf-zone">
+                                <input type="file" class="d-none" id="correction-pdf-input" name="files" accept=".pdf">
+                                <label for="correction-pdf-input" class="upload-label">
+                                    <i class="bi bi-file-earmark-pdf" style="font-size: 2.5rem; color: #dc3545;"></i>
+                                    <h6 class="mt-2">Click to upload PDF</h6>
+                                    <p class="text-muted small mb-0">Or drag and drop here</p>
+                                </label>
+                            </div>
+                            <div id="correction-pdf-preview" class="mt-3" style="display: none;">
+                                <div class="alert alert-success">
+                                    <i class="bi bi-check-circle me-2"></i>
+                                    <span id="correction-pdf-filename">file.pdf</span>
+                                    <button type="button" class="btn-close float-end" onclick="clearCorrectionPdf()"></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Google Drive Link -->
+                        <div class="tab-pane fade" id="correction-drive-upload">
+                            <div class="mb-3">
+                                <label for="correction-drive-link" class="form-label fw-semibold">Google Drive Link</label>
+                                <input type="url" class="form-control" id="correction-drive-link"
+                                       placeholder="https://drive.google.com/file/d/...">
+                                <div class="form-text">Paste a shared Google Drive link to your correction file</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="correction-submit-error" class="alert alert-danger small mt-3" style="display: none;"></div>
+
+                    <div class="d-grid gap-2 mt-3">
+                        <button type="button" class="btn btn-warning btn-lg" id="correction-submit-btn" onclick="submitCorrection()">
+                            <i class="bi bi-send-fill me-1"></i>Submit Correction
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -2143,6 +2301,144 @@
                 console.error(error);
             }
         });
+    }
+
+    // === CORRECTION SUBMISSION ===
+    let correctionFiles = [];
+    let correctionPdfFile = null;
+
+    const correctionPhotoInput = document.getElementById('correction-photo-input');
+    const correctionPdfInput = document.getElementById('correction-pdf-input');
+
+    if (correctionPhotoInput) {
+        correctionPhotoInput.addEventListener('change', function() {
+            correctionFiles = Array.from(this.files);
+            const previewDiv = document.getElementById('correction-photo-preview');
+            const grid = document.getElementById('correction-preview-grid');
+            if (correctionFiles.length > 0) {
+                previewDiv.style.display = 'block';
+                grid.innerHTML = '';
+                correctionFiles.forEach((f, i) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const item = document.createElement('div');
+                        item.className = 'preview-item';
+                        item.innerHTML = `<img src="${e.target.result}" alt="Page ${i+1}"><span class="page-num">${i+1}</span>`;
+                        grid.appendChild(item);
+                    };
+                    reader.readAsDataURL(f);
+                });
+            } else {
+                previewDiv.style.display = 'none';
+            }
+        });
+    }
+
+    if (correctionPdfInput) {
+        correctionPdfInput.addEventListener('change', function() {
+            correctionPdfFile = this.files[0];
+            if (correctionPdfFile) {
+                document.getElementById('correction-pdf-preview').style.display = 'block';
+                document.getElementById('correction-pdf-filename').textContent = correctionPdfFile.name;
+            }
+        });
+    }
+
+    function clearCorrectionPdf() {
+        correctionPdfFile = null;
+        if (correctionPdfInput) correctionPdfInput.value = '';
+        document.getElementById('correction-pdf-preview').style.display = 'none';
+    }
+
+    async function submitCorrection() {
+        const errorDiv = document.getElementById('correction-submit-error');
+        const submitBtn = document.getElementById('correction-submit-btn');
+        const driveLink = document.getElementById('correction-drive-link');
+        errorDiv.style.display = 'none';
+
+        const submissionId = document.querySelector('#correction-form input[name="submission_id"]')?.value;
+        if (!submissionId) return;
+
+        // Determine which tab is active
+        const activeDriveTab = document.querySelector('#correction-drive-upload.active, #correction-drive-upload.show');
+        const activePdfTab = document.querySelector('#correction-pdf-upload.active, #correction-pdf-upload.show');
+
+        if (activeDriveTab && driveLink && driveLink.value.trim()) {
+            // Google Drive submission
+            const originalHtml = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Submitting...';
+            try {
+                const response = await fetch('/student/submit-correction', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ submission_id: submissionId, drive_url: driveLink.value.trim() })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    window.location.href = result.redirect;
+                } else {
+                    errorDiv.textContent = result.error || 'Submission failed';
+                    errorDiv.style.display = 'block';
+                    submitBtn.innerHTML = originalHtml;
+                    submitBtn.disabled = false;
+                }
+            } catch (err) {
+                errorDiv.textContent = 'Could not connect to server';
+                errorDiv.style.display = 'block';
+                submitBtn.innerHTML = originalHtml;
+                submitBtn.disabled = false;
+            }
+            return;
+        }
+
+        // File upload (photos or PDF)
+        const formData = new FormData();
+        formData.append('submission_id', submissionId);
+
+        if (activePdfTab && correctionPdfFile) {
+            formData.append('files', correctionPdfFile);
+            formData.append('file_type', 'pdf');
+        } else if (correctionFiles.length > 0) {
+            correctionFiles.forEach(f => formData.append('files', f));
+            formData.append('file_type', 'images');
+        } else {
+            errorDiv.textContent = 'Please upload files or paste a Google Drive link';
+            errorDiv.style.display = 'block';
+            return;
+        }
+
+        const originalHtml = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading & marking...';
+
+        // Show loading modal
+        const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
+        document.getElementById('loading-text').textContent = 'Uploading corrections and generating AI feedback...';
+        loadingModal.show();
+
+        try {
+            const response = await fetch('/student/submit-correction', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+            loadingModal.hide();
+            if (result.success) {
+                window.location.href = result.redirect;
+            } else {
+                errorDiv.textContent = result.error || 'Submission failed';
+                errorDiv.style.display = 'block';
+                submitBtn.innerHTML = originalHtml;
+                submitBtn.disabled = false;
+            }
+        } catch (err) {
+            loadingModal.hide();
+            errorDiv.textContent = 'Could not connect to server';
+            errorDiv.style.display = 'block';
+            submitBtn.innerHTML = originalHtml;
+            submitBtn.disabled = false;
+        }
     }
 </script>
 {% endblock %}

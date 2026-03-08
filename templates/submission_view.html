@@ -52,7 +52,11 @@
                         Submitted: {{ (submission.submitted_at|sgt).strftime('%d %B %Y, %H:%M') if submission.submitted_at else 'N/A' }} SGT
                     </p>
                     <div>
-                        {% if submission.status == 'reviewed' %}
+                        {% if submission.get('corrections_required') and not submission.get('correction_submitted') %}
+                        <span class="badge bg-warning text-dark"><i class="bi bi-pencil-square me-1"></i>Pending Corrections</span>
+                        {% elif submission.get('correction_submitted') %}
+                        <span class="badge bg-info"><i class="bi bi-check2-circle me-1"></i>Correction Submitted</span>
+                        {% elif submission.status == 'reviewed' %}
                         <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Reviewed by Teacher</span>
                         {% elif submission.status == 'ai_reviewed' %}
                         <span class="badge bg-info"><i class="bi bi-robot me-1"></i>AI Reviewed - Awaiting Teacher</span>
@@ -626,6 +630,75 @@
                                 Reviewed on {{ submission.reviewed_at.strftime('%d %B %Y') }}
                                 {% endif %}
                             </small>
+                        </div>
+                        {% endif %}
+
+                        <!-- Correction Feedback (if corrections were submitted and AI re-marked) -->
+                        {% if submission.get('correction_feedback') %}
+                        {% set corr_feedback = submission.correction_feedback %}
+                        <div class="card mt-4 border-warning">
+                            <div class="card-header bg-warning text-dark">
+                                <h6 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Correction Feedback</h6>
+                            </div>
+                            <div class="card-body">
+                                {% if corr_feedback.get('questions') %}
+                                <div class="table-responsive">
+                                    <table class="table table-sm feedback-table">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th style="width: 50px;">Q#</th>
+                                                <th>Student Answer</th>
+                                                <th>Feedback</th>
+                                                <th style="width: 70px;">Marks</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for cq in corr_feedback.questions %}
+                                            <tr class="{% if cq.is_correct %}table-success{% elif cq.is_correct == false %}table-danger{% endif %}">
+                                                <td class="text-center">
+                                                    <strong>{{ cq.question_num }}</strong>
+                                                    {% if cq.is_correct %}
+                                                    <br><i class="bi bi-check-circle text-success"></i>
+                                                    {% elif cq.is_correct == false %}
+                                                    <br><i class="bi bi-x-circle text-danger"></i>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="small">{{ (cq.get('student_answer', '') or '')|latex_safe }}</td>
+                                                <td class="small">{{ (cq.get('feedback', '') or '')|latex_safe }}</td>
+                                                <td class="text-center">
+                                                    {% if cq.get('marks_awarded') is not none %}
+                                                    <span class="badge {% if cq.is_correct %}bg-success{% elif cq.get('marks_awarded', 0) > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                                                        {{ cq.marks_awarded }}/{{ cq.get('marks_total', '?') }}
+                                                    </span>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% endif %}
+                                {% if corr_feedback.get('overall_feedback') %}
+                                <div class="alert alert-secondary mt-2 mb-0">
+                                    {{ corr_feedback.overall_feedback|latex_safe }}
+                                </div>
+                                {% endif %}
+                                {% if submission.get('correction_submitted_at') %}
+                                <small class="text-muted d-block mt-2">
+                                    Corrections submitted: {{ (submission.correction_submitted_at|sgt).strftime('%d %B %Y, %H:%M') }} SGT
+                                </small>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% elif submission.get('correction_submitted') %}
+                        <div class="card mt-4 border-warning">
+                            <div class="card-header bg-warning text-dark">
+                                <h6 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Correction Status</h6>
+                            </div>
+                            <div class="card-body text-center py-4">
+                                <i class="bi bi-hourglass-split text-warning" style="font-size: 2rem;"></i>
+                                <p class="mt-2 mb-0">Your corrections have been submitted and are being processed.</p>
+                            </div>
                         </div>
                         {% endif %}
                     {% else %}

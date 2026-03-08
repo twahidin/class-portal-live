@@ -422,16 +422,17 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
 # Limit pages sent to AI to avoid 413 request_too_large (API max request size)
 MAX_PAGES_FOR_AI = 20
 
-def analyze_submission_images(pages: list, assignment: dict, answer_key_content: bytes = None, teacher: dict = None, override_ai_model: str = None) -> dict:
+def analyze_submission_images(pages: list, assignment: dict, answer_key_content: bytes = None, teacher: dict = None, override_ai_model: str = None, additional_context: str = None) -> dict:
     """
     Analyze student submission images/PDF and generate feedback
-    
+
     Args:
         pages: List of page dictionaries with 'type' and 'data' keys
         assignment: Assignment document with details (including extracted text fields)
         answer_key_content: Optional bytes of answer key PDF (fallback if no extracted text)
         teacher: Teacher document for API key
-    
+        additional_context: Optional extra context to append to the system prompt (e.g. for correction re-marking)
+
     Returns:
         Dictionary with structured feedback
     """
@@ -537,6 +538,10 @@ Respond ONLY with valid JSON in this exact format:
     "confidence": "high/medium/low — set to 'low' if handwriting is mostly illegible or you are guessing at more than 30% of answers",
     "review_notes": "REQUIRED if confidence is low — explain what was unclear and why teacher review is needed"
 }}"""
+
+        # Append additional context if provided (e.g. for correction re-marking)
+        if additional_context:
+            system_prompt += f"\n\nADDITIONAL CONTEXT:\n{additional_context}"
 
         # Add answer key - ALWAYS use PDF vision for accuracy (critical for marking)
         # Extracted text is stored but not used here to ensure we don't miss 
