@@ -10152,7 +10152,7 @@ def _calculate_teacher_storage(teacher_id):
     from bson import ObjectId
 
     # Get all assignment IDs for this teacher
-    assignments = list(Assignment.find({'teacher_id': teacher_id}, {'assignment_id': 1, 'question_paper_file_id': 1, 'answer_key_file_id': 1}))
+    assignments = list(db.db.assignments.find({'teacher_id': teacher_id}, {'assignment_id': 1, 'question_paper_file_id': 1, 'answer_key_file_id': 1}))
     assignment_ids = [a['assignment_id'] for a in assignments]
 
     if not assignment_ids:

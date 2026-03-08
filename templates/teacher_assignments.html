@@ -43,12 +43,12 @@
                 <ul class="dropdown-menu">
                     <li><a class="dropdown-item" href="{{ url_for('create_assignment') }}">
                         <i class="bi bi-pencil-square me-2"></i>Create</a></li>
-                    <li><a class="dropdown-item {% if not has_module_trees %}disabled{% endif %}"
-                           href="{% if has_module_trees %}#{% else %}javascript:void(0){% endif %}"
-                           {% if not has_module_trees %}title="Create a module tree first"{% endif %}>
-                        <i class="bi bi-lightning me-2"></i>Generate</a></li>
-                    <li><a class="dropdown-item" href="#">
-                        <i class="bi bi-pencil me-2"></i>Modify</a></li>
+                    <li><a class="dropdown-item disabled" href="javascript:void(0)"
+                           title="Coming soon">
+                        <i class="bi bi-lightning me-2"></i>Generate <span class="badge bg-secondary ms-1" style="font-size: 0.65em;">Soon</span></a></li>
+                    <li><a class="dropdown-item disabled" href="javascript:void(0)"
+                           title="Coming soon">
+                        <i class="bi bi-pencil me-2"></i>Modify <span class="badge bg-secondary ms-1" style="font-size: 0.65em;">Soon</span></a></li>
                     <li><hr class="dropdown-divider"></li>
                     <li><a class="dropdown-item {% if bank_count == 0 %}disabled{% endif %}"
                            href="{% if bank_count > 0 %}{{ url_for('teacher_assessment_bank') }}{% else %}javascript:void(0){% endif %}"
