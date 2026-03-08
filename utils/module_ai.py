@@ -668,3 +668,270 @@ Use is_correct: true, false, or "partial". mastery_indication is 0-100."""
     except Exception as e:
         logger.error("Error analyzing writing: %s", e)
         return {'error': str(e)}
+
+
+def generate_assignment_from_los(
+    selected_los,
+    subject,
+    num_questions,
+    total_marks,
+    difficulty,
+    question_types,
+    additional_instructions,
+    teacher,
+):
+    """Generate assignment questions + answer key from selected Learning Objectives.
+
+    Args:
+        selected_los: list of dicts [{title, lo_code, learning_objectives}]
+        subject: subject name
+        num_questions: number of questions to generate
+        total_marks: total marks for the assignment
+        difficulty: easy/medium/hard/mixed
+        question_types: mcq/short_answer/structured/mixed
+        additional_instructions: free-text teacher instructions
+        teacher: teacher document (for AI provider resolution)
+
+    Returns:
+        dict with keys: questions (list), title_suggestion (str)
+        Each question: {number, text, marks, answer, lo_code, type}
+    """
+    from utils.ai_marking import get_teacher_ai_service
+
+    model_type = teacher.get('default_ai_model', 'anthropic') if teacher else 'anthropic'
+    client, model_name, provider = get_teacher_ai_service(teacher, model_type)
+    if not client:
+        return {'error': AI_UNAVAILABLE_MSG}
+
+    lo_descriptions = []
+    for lo in selected_los:
+        code = lo.get('lo_code', '')
+        title = lo.get('title', '')
+        objectives = lo.get('learning_objectives', [])
+        obj_text = '; '.join(objectives) if objectives else ''
+        lo_descriptions.append(f"- [{code}] {title}" + (f" (Objectives: {obj_text})" if obj_text else ''))
+
+    lo_block = '\n'.join(lo_descriptions)
+
+    system_prompt = f"""You are an expert teacher creating a {subject} assignment.
+
+LEARNING OBJECTIVES TO ASSESS:
+{lo_block}
+
+CONSTRAINTS:
+- Number of questions: {num_questions}
+- Total marks: {total_marks} (distribute marks across questions proportionally)
+- Difficulty: {difficulty}
+- Question types: {question_types}
+{('- Additional instructions: ' + additional_instructions) if additional_instructions else ''}
+
+RULES:
+- Each question must clearly test one or more of the listed learning objectives
+- Include the lo_code for the primary LO each question targets
+- For MCQ questions, provide 4 options labeled A-D
+- For short_answer questions, provide the expected answer
+- For structured questions, break into parts (a), (b), etc. and provide detailed answers
+- Distribute marks to total exactly {total_marks}
+- Vary question difficulty according to the "{difficulty}" setting
+- Suggest a concise assignment title
+
+Respond with valid JSON only:
+{{
+    "title_suggestion": "Chapter X: Topic Name",
+    "questions": [
+        {{
+            "number": 1,
+            "text": "Full question text here",
+            "marks": 5,
+            "answer": "Full model answer or correct option",
+            "lo_code": "1.1.1",
+            "type": "mcq|short_answer|structured",
+            "options": ["A) ...", "B) ...", "C) ...", "D) ..."]
+        }}
+    ]
+}}
+
+The "options" field should only be present for MCQ questions. Omit it for other types."""
+
+    try:
+        if provider == 'anthropic':
+            message = client.messages.create(
+                model=model_name,
+                max_tokens=8000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": "Generate the assignment now. Respond with JSON only."}],
+            )
+            response_text = message.content[0].text
+        elif provider in ('openai', 'deepseek'):
+            response = client.chat.completions.create(
+                model=model_name,
+                max_tokens=8000,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate the assignment now. Respond with JSON only."},
+                ],
+                response_format={"type": "json_object"},
+            )
+            response_text = response.choices[0].message.content
+        elif provider == 'google':
+            model = client.GenerativeModel(model_name)
+            response = model.generate_content(
+                system_prompt + "\n\nGenerate the assignment now. Respond with JSON only.",
+                generation_config={"response_mime_type": "application/json", "max_output_tokens": 8000},
+            )
+            response_text = response.text
+        else:
+            return {'error': f'Unsupported provider: {provider}'}
+
+        json_str = _extract_and_repair_json(response_text) if response_text else ''
+        if json_str:
+            result = json.loads(json_str)
+            if 'questions' not in result:
+                return {'error': 'AI response missing questions field'}
+            return result
+        return {'error': 'Could not parse AI response'}
+
+    except Exception as e:
+        logger.error("Error generating assignment from LOs: %s", e)
+        return {'error': str(e)}
+
+
+def modify_assignment_content(
+    original_text,
+    original_assignment,
+    modification_type,
+    modification_level,
+    custom_instructions,
+    teacher,
+):
+    """Generate a modified version of an existing assignment.
+
+    Args:
+        original_text: extracted question paper text
+        original_assignment: assignment metadata dict
+        modification_type: difficulty/format/topic_focus/language_level
+        modification_level: slight/moderate/significant
+        custom_instructions: free-text teacher instructions
+        teacher: teacher document (for AI provider resolution)
+
+    Returns:
+        dict with keys: questions (list), title_suggestion (str)
+    """
+    from utils.ai_marking import get_teacher_ai_service
+
+    model_type = teacher.get('default_ai_model', 'anthropic') if teacher else 'anthropic'
+    client, model_name, provider = get_teacher_ai_service(teacher, model_type)
+    if not client:
+        return {'error': AI_UNAVAILABLE_MSG}
+
+    subject = original_assignment.get('subject', 'General')
+    total_marks = original_assignment.get('total_marks', 100)
+    title = original_assignment.get('title', 'Untitled')
+
+    modification_descriptions = {
+        'difficulty': {
+            'slight': 'Make the questions slightly easier or harder (adjust complexity of 1-2 questions)',
+            'moderate': 'Noticeably change the difficulty level across most questions',
+            'significant': 'Substantially rework all questions to a different difficulty level',
+        },
+        'format': {
+            'slight': 'Change the format of 1-2 questions (e.g., MCQ to short answer)',
+            'moderate': 'Restructure most questions into different formats while keeping the same content',
+            'significant': 'Completely reformat all questions into different types',
+        },
+        'topic_focus': {
+            'slight': 'Shift emphasis slightly toward different aspects of the same topics',
+            'moderate': 'Change context/scenarios while testing the same concepts',
+            'significant': 'Create entirely new questions on the same topics with different angles',
+        },
+        'language_level': {
+            'slight': 'Simplify or complexify the language slightly',
+            'moderate': 'Rewrite questions with noticeably different vocabulary and sentence structure',
+            'significant': 'Completely rewrite for a different language proficiency level',
+        },
+    }
+
+    mod_desc = modification_descriptions.get(modification_type, {}).get(
+        modification_level, 'Modify the assignment as specified'
+    )
+
+    system_prompt = f"""You are an expert teacher modifying an existing {subject} assignment.
+
+ORIGINAL ASSIGNMENT: "{title}"
+Total marks: {total_marks}
+
+ORIGINAL QUESTION PAPER TEXT:
+{original_text}
+
+MODIFICATION REQUESTED:
+Type: {modification_type}
+Level: {modification_level}
+Description: {mod_desc}
+{('Custom instructions: ' + custom_instructions) if custom_instructions else ''}
+
+RULES:
+- Maintain the same total marks ({total_marks})
+- Keep the same number of questions unless the modification requires changing it
+- Ensure the modified version is a distinct paper (not just reworded identically)
+- For MCQ questions, provide 4 options labeled A-D
+- Suggest a title for the modified version
+- Include complete model answers for each question
+
+Respond with valid JSON only:
+{{
+    "title_suggestion": "Modified version title",
+    "questions": [
+        {{
+            "number": 1,
+            "text": "Full question text",
+            "marks": 5,
+            "answer": "Full model answer",
+            "type": "mcq|short_answer|structured",
+            "options": ["A) ...", "B) ...", "C) ...", "D) ..."]
+        }}
+    ]
+}}
+
+The "options" field should only be present for MCQ questions."""
+
+    try:
+        if provider == 'anthropic':
+            message = client.messages.create(
+                model=model_name,
+                max_tokens=8000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": "Generate the modified assignment now. Respond with JSON only."}],
+            )
+            response_text = message.content[0].text
+        elif provider in ('openai', 'deepseek'):
+            response = client.chat.completions.create(
+                model=model_name,
+                max_tokens=8000,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "Generate the modified assignment now. Respond with JSON only."},
+                ],
+                response_format={"type": "json_object"},
+            )
+            response_text = response.choices[0].message.content
+        elif provider == 'google':
+            model = client.GenerativeModel(model_name)
+            response = model.generate_content(
+                system_prompt + "\n\nGenerate the modified assignment now. Respond with JSON only.",
+                generation_config={"response_mime_type": "application/json", "max_output_tokens": 8000},
+            )
+            response_text = response.text
+        else:
+            return {'error': f'Unsupported provider: {provider}'}
+
+        json_str = _extract_and_repair_json(response_text) if response_text else ''
+        if json_str:
+            result = json.loads(json_str)
+            if 'questions' not in result:
+                return {'error': 'AI response missing questions field'}
+            return result
+        return {'error': 'Could not parse AI response'}
+
+    except Exception as e:
+        logger.error("Error modifying assignment: %s", e)
+        return {'error': str(e)}

@@ -1730,3 +1730,113 @@ def generate_heatmap_pdf(assignment: dict, report: dict, teacher: dict = None) -
     except Exception as e:
         logger.error(f"Error generating heatmap PDF: {e}")
         raise
+
+
+def generate_question_paper_pdf(questions, title, subject, total_marks):
+    """Generate a formatted question paper PDF from structured questions.
+
+    Args:
+        questions: list of dicts with number, text, marks, type, options (for MCQ)
+        title: assignment title
+        subject: subject name
+        total_marks: total marks
+
+    Returns:
+        PDF bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        rightMargin=2 * cm, leftMargin=2 * cm,
+        topMargin=2 * cm, bottomMargin=2 * cm,
+    )
+    styles = get_styles()
+    story = []
+
+    # Header
+    story.append(Paragraph(title, styles['Title_Custom']))
+    story.append(Paragraph(f"{subject} | Total Marks: {total_marks}", styles['SubHeading']))
+    story.append(HRFlowable(width="100%", thickness=2, color=PRIMARY_COLOR, spaceAfter=20))
+
+    # Instructions
+    story.append(Paragraph("Instructions", styles['Heading_Custom']))
+    story.append(Paragraph("Answer ALL questions. Show your working where applicable.", styles['Body_Custom']))
+    story.append(Spacer(1, 15))
+
+    # Questions
+    for q in questions:
+        num = q.get('number', '')
+        text = q.get('text', '')
+        marks = q.get('marks', 0)
+        q_type = q.get('type', 'short_answer')
+        options = q.get('options', [])
+
+        # Question header with marks
+        story.append(Paragraph(
+            f"<b>Question {num}</b> [{marks} mark{'s' if marks != 1 else ''}]",
+            styles['Heading_Custom'],
+        ))
+        story.append(Paragraph(text.replace('\n', '<br/>'), styles['Body_Custom']))
+
+        # MCQ options
+        if q_type == 'mcq' and options:
+            story.append(Spacer(1, 5))
+            for opt in options:
+                story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{opt}", styles['Body_Custom']))
+
+        story.append(Spacer(1, 15))
+
+    # Footer
+    story.append(Spacer(1, 20))
+    story.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=10))
+    story.append(Paragraph("--- End of Paper ---", ParagraphStyle(
+        'EndPaper', parent=styles['Normal'], alignment=TA_CENTER, fontSize=10, textColor=TEXT_COLOR,
+    )))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generate_answer_key_pdf(questions, title):
+    """Generate an answer key PDF from structured questions.
+
+    Args:
+        questions: list of dicts with number, text, marks, answer, type
+        title: assignment title
+
+    Returns:
+        PDF bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        rightMargin=2 * cm, leftMargin=2 * cm,
+        topMargin=2 * cm, bottomMargin=2 * cm,
+    )
+    styles = get_styles()
+    story = []
+
+    # Header
+    story.append(Paragraph(f"{title} — Answer Key", styles['Title_Custom']))
+    story.append(HRFlowable(width="100%", thickness=2, color=PRIMARY_COLOR, spaceAfter=20))
+
+    for q in questions:
+        num = q.get('number', '')
+        marks = q.get('marks', 0)
+        answer = q.get('answer', '')
+
+        story.append(Paragraph(
+            f"<b>Question {num}</b> [{marks} mark{'s' if marks != 1 else ''}]",
+            styles['Heading_Custom'],
+        ))
+        story.append(Paragraph(answer.replace('\n', '<br/>'), styles['Body_Custom']))
+        story.append(Spacer(1, 12))
+
+    # Footer
+    story.append(Spacer(1, 20))
+    story.append(Paragraph(f"Generated: {datetime.utcnow().strftime('%d %B %Y, %H:%M UTC')}", styles['Footer']))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()

@@ -43,12 +43,10 @@
                 <ul class="dropdown-menu">
                     <li><a class="dropdown-item" href="{{ url_for('create_assignment') }}">
                         <i class="bi bi-pencil-square me-2"></i>Create</a></li>
-                    <li><a class="dropdown-item disabled" href="javascript:void(0)"
-                           title="Coming soon">
-                        <i class="bi bi-lightning me-2"></i>Generate <span class="badge bg-secondary ms-1" style="font-size: 0.65em;">Soon</span></a></li>
-                    <li><a class="dropdown-item disabled" href="javascript:void(0)"
-                           title="Coming soon">
-                        <i class="bi bi-pencil me-2"></i>Modify <span class="badge bg-secondary ms-1" style="font-size: 0.65em;">Soon</span></a></li>
+                    <li><a class="dropdown-item" href="{{ url_for('generate_assignment') }}">
+                        <i class="bi bi-lightning me-2"></i>Generate</a></li>
+                    <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#modifyPickerModal">
+                        <i class="bi bi-pencil me-2"></i>Modify</a></li>
                     <li><hr class="dropdown-divider"></li>
                     <li><a class="dropdown-item {% if bank_count == 0 %}disabled{% endif %}"
                            href="{% if bank_count > 0 %}{{ url_for('teacher_assessment_bank') }}{% else %}javascript:void(0){% endif %}"
@@ -238,10 +236,76 @@
         </div>
     </div>
 </div>
+
+<!-- Modify Assignment Picker Modal -->
+<div class="modal fade" id="modifyPickerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Select Assignment to Modify</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="modify-picker-loading" class="text-center py-3">
+                    <div class="spinner-border text-primary"></div>
+                    <p class="text-muted mt-2">Loading assignments...</p>
+                </div>
+                <div id="modify-picker-list" class="list-group" style="display:none; max-height: 400px; overflow-y: auto;"></div>
+                <div id="modify-picker-empty" class="text-muted text-center py-3" style="display:none;">
+                    No assignments found.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+    // Modify picker modal
+    const modifyPickerModal = document.getElementById('modifyPickerModal');
+    if (modifyPickerModal) {
+        modifyPickerModal.addEventListener('show.bs.modal', function() {
+            const loading = document.getElementById('modify-picker-loading');
+            const list = document.getElementById('modify-picker-list');
+            const empty = document.getElementById('modify-picker-empty');
+            loading.style.display = '';
+            list.style.display = 'none';
+            empty.style.display = 'none';
+            list.innerHTML = '';
+
+            fetch('{{ url_for("modify_assignment_picker") }}')
+                .then(r => r.json())
+                .then(data => {
+                    loading.style.display = 'none';
+                    if (!data.assignments || data.assignments.length === 0) {
+                        empty.style.display = '';
+                        return;
+                    }
+                    list.style.display = '';
+                    data.assignments.forEach(a => {
+                        const item = document.createElement('a');
+                        item.className = 'list-group-item list-group-item-action';
+                        item.href = '/teacher/assignments/' + a.assignment_id + '/modify';
+                        item.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${a.title}</strong>
+                                    <br><small class="text-muted">${a.subject || ''} | ${a.total_marks || 0} marks</small>
+                                </div>
+                                <i class="bi bi-chevron-right text-muted"></i>
+                            </div>`;
+                        list.appendChild(item);
+                    });
+                })
+                .catch(() => {
+                    loading.style.display = 'none';
+                    empty.style.display = '';
+                    empty.textContent = 'Failed to load assignments.';
+                });
+        });
+    }
+
     let deleteAssignmentId = null;
     const deleteModal = new bootstrap.Modal(document.getElementById('delete-modal'));
     

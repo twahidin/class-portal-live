@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+
+{% block title %}Modify Assignment - Teacher Portal{% endblock %}
+
+{% block navbar %}
+{% set active_nav = 'assignments' %}
+{% include 'partials/teacher_navbar.html' %}
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('teacher_assignments') }}">Assignments</a></li>
+            <li class="breadcrumb-item active">Modify with AI</li>
+        </ol>
+    </nav>
+
+    <div class="page-header mb-4">
+        <h1><i class="bi bi-pencil me-2"></i>Modify Assignment</h1>
+        <p class="text-muted">Create an AI-modified variant of an existing assignment</p>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+    </div>
+    {% endif %}
+
+    {% if not generated %}
+    {# ============ STEP 1: Modification Settings ============ #}
+    <form method="POST" id="modify-form">
+        <input type="hidden" name="action" value="modify">
+        <div class="row">
+            <div class="col-lg-8">
+                <!-- Original Assignment Info -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>Original Assignment</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h5>{{ assignment.title }}</h5>
+                                <p class="text-muted mb-1">
+                                    <span class="badge bg-primary me-1">{{ assignment.subject }}</span>
+                                    Total Marks: {{ assignment.total_marks }}
+                                </p>
+                                {% if assignment.created_at %}
+                                <small class="text-muted">Created: {{ assignment.created_at|sgt }}</small>
+                                {% endif %}
+                            </div>
+                            {% if assignment.question_paper_id or assignment.get('drive_file_refs', {}).get('question_paper_drive_id') %}
+                            <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}"
+                               class="btn btn-sm btn-outline-primary" target="_blank">
+                                <i class="bi bi-download me-1"></i>View Original
+                            </a>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modification Type -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Modification Type</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="form-check card p-3 h-100">
+                                    <input class="form-check-input" type="radio" name="modification_type"
+                                        value="difficulty" id="mod-difficulty" checked>
+                                    <label class="form-check-label w-100" for="mod-difficulty">
+                                        <strong><i class="bi bi-speedometer2 me-1"></i>Difficulty</strong>
+                                        <br><small class="text-muted">Make questions easier or harder</small>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check card p-3 h-100">
+                                    <input class="form-check-input" type="radio" name="modification_type"
+                                        value="format" id="mod-format">
+                                    <label class="form-check-label w-100" for="mod-format">
+                                        <strong><i class="bi bi-layout-text-sidebar me-1"></i>Format</strong>
+                                        <br><small class="text-muted">Change question types (MCQ, structured, etc.)</small>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check card p-3 h-100">
+                                    <input class="form-check-input" type="radio" name="modification_type"
+                                        value="topic_focus" id="mod-topic">
+                                    <label class="form-check-label w-100" for="mod-topic">
+                                        <strong><i class="bi bi-bullseye me-1"></i>Topic Focus</strong>
+                                        <br><small class="text-muted">Shift emphasis or change scenarios</small>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check card p-3 h-100">
+                                    <input class="form-check-input" type="radio" name="modification_type"
+                                        value="language_level" id="mod-language">
+                                    <label class="form-check-label w-100" for="mod-language">
+                                        <strong><i class="bi bi-translate me-1"></i>Language Level</strong>
+                                        <br><small class="text-muted">Adjust vocabulary and complexity</small>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Custom Instructions -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-chat-text me-2"></i>Custom Instructions</h5>
+                    </div>
+                    <div class="card-body">
+                        <textarea class="form-control" name="custom_instructions" rows="3"
+                            placeholder="Any specific changes you want (e.g., 'Add more application questions', 'Use local context')"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+                <!-- Modification Level -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Modification Level</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="radio" name="modification_level"
+                                value="slight" id="level-slight">
+                            <label class="form-check-label" for="level-slight">
+                                <strong>Slight</strong>
+                                <br><small class="text-muted">Minor tweaks, mostly similar</small>
+                            </label>
+                        </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="radio" name="modification_level"
+                                value="moderate" id="level-moderate" checked>
+                            <label class="form-check-label" for="level-moderate">
+                                <strong>Moderate</strong>
+                                <br><small class="text-muted">Noticeable changes throughout</small>
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="modification_level"
+                                value="significant" id="level-significant">
+                            <label class="form-check-label" for="level-significant">
+                                <strong>Significant</strong>
+                                <br><small class="text-muted">Substantially reworked</small>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-lg w-100" id="modify-btn">
+                    <i class="bi bi-magic me-2"></i>Generate Modified Version
+                </button>
+            </div>
+        </div>
+    </form>
+
+    {% else %}
+    {# ============ STEP 2: Review & Edit ============ #}
+    <form method="POST" id="create-form">
+        <input type="hidden" name="action" value="create">
+        <input type="hidden" name="questions_json" id="questions-json">
+
+        <div class="row">
+            <div class="col-lg-8">
+                <div class="alert alert-success mb-4">
+                    <i class="bi bi-check-circle me-2"></i>AI generated a modified version with {{ generated.questions|length }} questions. Review and edit below.
+                </div>
+
+                <!-- Editable Questions -->
+                <div id="questions-container">
+                {% for q in generated.questions %}
+                <div class="card mb-3 question-card" data-index="{{ loop.index0 }}">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><strong>Question {{ q.number }}</strong>
+                            <span class="badge bg-secondary ms-1">{{ q.type }}</span>
+                        </span>
+                        <div>
+                            <span class="badge bg-primary">{{ q.marks }} marks</span>
+                            <button type="button" class="btn btn-sm btn-outline-danger ms-2 delete-question" title="Remove question">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Question Text</label>
+                            <textarea class="form-control q-text" rows="3">{{ q.text }}</textarea>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Marks</label>
+                                <input type="number" class="form-control q-marks" value="{{ q.marks }}" min="1">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Type</label>
+                                <select class="form-select q-type">
+                                    <option value="mcq" {% if q.type == 'mcq' %}selected{% endif %}>MCQ</option>
+                                    <option value="short_answer" {% if q.type == 'short_answer' %}selected{% endif %}>Short Answer</option>
+                                    <option value="structured" {% if q.type == 'structured' %}selected{% endif %}>Structured</option>
+                                </select>
+                            </div>
+                        </div>
+                        {% if q.options %}
+                        <div class="mb-3 mcq-options">
+                            <label class="form-label fw-bold">Options</label>
+                            {% for opt in q.options %}
+                            <input type="text" class="form-control mb-1 q-option" value="{{ opt }}">
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        <div class="mb-0">
+                            <label class="form-label fw-bold">Model Answer</label>
+                            <textarea class="form-control q-answer" rows="2">{{ q.answer }}</textarea>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                </div>
+            </div>
+
+            <div class="col-lg-4">
+                <!-- Assignment Details -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Assignment Details</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Title</label>
+                            <input type="text" class="form-control" name="title" required
+                                value="{{ generated.title_suggestion|default('Modified: ' + assignment.title, true) }}">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Subject</label>
+                            <input type="text" class="form-control" name="subject" required
+                                value="{{ assignment.subject }}">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Total Marks</label>
+                            <input type="number" class="form-control" name="total_marks" id="total-marks-display"
+                                value="{{ assignment.total_marks }}" readonly>
+                            <small class="text-muted">Auto-calculated from questions</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Due Date (optional)</label>
+                            <input type="date" class="form-control" name="due_date">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Target -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-people me-2"></i>Assign To</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <select class="form-select" name="target_type" id="target-type">
+                                <option value="class">Class</option>
+                                <option value="teaching_group">Teaching Group</option>
+                            </select>
+                        </div>
+                        <div id="class-select-wrapper">
+                            <select class="form-select" name="target_class_id">
+                                <option value="">-- Select class --</option>
+                                {% for cls in classes %}
+                                <option value="{{ cls.class_id }}">{{ cls.class_id }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div id="group-select-wrapper" style="display: none;">
+                            <select class="form-select" name="target_group_id">
+                                <option value="">-- Select group --</option>
+                                {% for grp in teaching_groups %}
+                                <option value="{{ grp.group_id }}">{{ grp.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-success btn-lg w-100" id="create-btn">
+                    <i class="bi bi-check-circle me-2"></i>Create Assignment (Draft)
+                </button>
+                <a href="{{ url_for('modify_assignment', assignment_id=assignment.assignment_id) }}" class="btn btn-outline-secondary w-100 mt-2">
+                    <i class="bi bi-arrow-counterclockwise me-2"></i>Try Again
+                </a>
+            </div>
+        </div>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    {% if not generated %}
+    // Show spinner on modify
+    document.getElementById('modify-form').addEventListener('submit', function() {
+        const btn = document.getElementById('modify-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
+    });
+    {% else %}
+    // ===== STEP 2: Review & Edit =====
+    const questionsContainer = document.getElementById('questions-container');
+    const totalMarksDisplay = document.getElementById('total-marks-display');
+    const createForm = document.getElementById('create-form');
+
+    // Target type toggle
+    document.getElementById('target-type').addEventListener('change', function() {
+        document.getElementById('class-select-wrapper').style.display = this.value === 'class' ? '' : 'none';
+        document.getElementById('group-select-wrapper').style.display = this.value === 'teaching_group' ? '' : 'none';
+    });
+
+    // Delete question
+    questionsContainer.addEventListener('click', function(e) {
+        const btn = e.target.closest('.delete-question');
+        if (btn) {
+            btn.closest('.question-card').remove();
+            recalcMarks();
+            renumberQuestions();
+        }
+    });
+
+    questionsContainer.addEventListener('input', function(e) {
+        if (e.target.classList.contains('q-marks')) recalcMarks();
+    });
+
+    function recalcMarks() {
+        let total = 0;
+        document.querySelectorAll('.q-marks').forEach(el => { total += parseInt(el.value) || 0; });
+        totalMarksDisplay.value = total;
+    }
+
+    function renumberQuestions() {
+        document.querySelectorAll('.question-card').forEach((card, i) => {
+            card.querySelector('.card-header span strong').textContent = 'Question ' + (i + 1);
+        });
+    }
+
+    createForm.addEventListener('submit', function(e) {
+        const questions = [];
+        document.querySelectorAll('.question-card').forEach((card, i) => {
+            const q = {
+                number: i + 1,
+                text: card.querySelector('.q-text').value,
+                marks: parseInt(card.querySelector('.q-marks').value) || 0,
+                type: card.querySelector('.q-type').value,
+                answer: card.querySelector('.q-answer').value,
+            };
+            const options = card.querySelectorAll('.q-option');
+            if (options.length > 0) {
+                q.options = Array.from(options).map(o => o.value);
+            }
+            questions.push(q);
+        });
+        document.getElementById('questions-json').value = JSON.stringify(questions);
+        recalcMarks();
+        const totalInput = createForm.querySelector('input[name="total_marks"]');
+        if (totalInput) totalInput.value = totalMarksDisplay.value;
+
+        document.getElementById('create-btn').disabled = true;
+        document.getElementById('create-btn').innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Creating...';
+    });
+
+    recalcMarks();
+    {% endif %}
+});
+</script>
+{% endblock %}

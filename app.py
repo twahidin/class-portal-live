@@ -5400,6 +5400,388 @@ def backfill_assessment_bank():
     return jsonify({'success': True, 'count': result.modified_count})
 
 
+# ============================================================================
+# GENERATE ASSIGNMENT (AI-powered question generation from module LOs)
+# ============================================================================
+
+@app.route('/teacher/assignments/generate', methods=['GET', 'POST'])
+@teacher_required
+def generate_assignment():
+    """Generate a new assignment from selected Learning Objectives using AI."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    if not teacher:
+        return redirect(url_for('teacher_assignments'))
+
+    # Get teacher's module trees for LO selection
+    teacher_modules = []
+    if _teacher_has_module_access(session['teacher_id']):
+        teacher_modules = list(
+            Module.find({'teacher_id': session['teacher_id'], 'parent_id': None}).sort('title', 1)
+        )
+
+    # Get classes and teaching groups for assignment target
+    teacher_classes = set(teacher.get('classes', []))
+    assigned_students = Student.find({'teachers': session['teacher_id']})
+    for student in assigned_students:
+        if student.get('class'):
+            teacher_classes.add(student.get('class'))
+    classes = list(Class.find({'class_id': {'$in': list(teacher_classes)}})) if teacher_classes else []
+    teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'generate')
+
+        if action == 'generate':
+            # Step 1: Generate questions from selected LOs
+            selected_module_ids = request.form.getlist('selected_los')
+            if not selected_module_ids:
+                return render_template('teacher_generate_assignment.html',
+                    teacher=teacher, teacher_modules=teacher_modules,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='Please select at least one Learning Objective.')
+
+            # Fetch full LO data
+            selected_los = []
+            for mid in selected_module_ids:
+                mod = Module.find_one({'module_id': mid})
+                if mod:
+                    selected_los.append({
+                        'title': mod.get('title', ''),
+                        'lo_code': mod.get('lo_code', ''),
+                        'learning_objectives': mod.get('learning_objectives', []),
+                    })
+
+            if not selected_los:
+                return render_template('teacher_generate_assignment.html',
+                    teacher=teacher, teacher_modules=teacher_modules,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='Could not find the selected Learning Objectives.')
+
+            subject = request.form.get('subject', 'General')
+            num_questions = int(request.form.get('num_questions', 5))
+            total_marks = int(request.form.get('total_marks', 50))
+            difficulty = request.form.get('difficulty', 'medium')
+            question_types = request.form.get('question_types', 'mixed')
+            additional_instructions = request.form.get('additional_instructions', '')
+
+            from utils.module_ai import generate_assignment_from_los
+            result = generate_assignment_from_los(
+                selected_los=selected_los,
+                subject=subject,
+                num_questions=num_questions,
+                total_marks=total_marks,
+                difficulty=difficulty,
+                question_types=question_types,
+                additional_instructions=additional_instructions,
+                teacher=teacher,
+            )
+
+            if 'error' in result:
+                return render_template('teacher_generate_assignment.html',
+                    teacher=teacher, teacher_modules=teacher_modules,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error=result['error'])
+
+            # Show review/edit form with generated questions
+            return render_template('teacher_generate_assignment.html',
+                teacher=teacher, teacher_modules=teacher_modules,
+                classes=classes, teaching_groups=teaching_groups,
+                generated=result,
+                form_data=request.form)
+
+        elif action == 'create':
+            # Step 2: Create assignment from reviewed/edited questions
+            import json as _json
+            questions_json = request.form.get('questions_json', '[]')
+            try:
+                questions = _json.loads(questions_json)
+            except Exception:
+                return render_template('teacher_generate_assignment.html',
+                    teacher=teacher, teacher_modules=teacher_modules,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='Invalid questions data.')
+
+            if not questions:
+                return render_template('teacher_generate_assignment.html',
+                    teacher=teacher, teacher_modules=teacher_modules,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='No questions to create assignment from.')
+
+            title = request.form.get('title', 'AI-Generated Assignment')
+            subject = request.form.get('subject', 'General')
+            total_marks = int(request.form.get('total_marks', 50))
+
+            # Generate PDFs
+            from utils.pdf_generator import generate_question_paper_pdf, generate_answer_key_pdf
+            question_paper_bytes = generate_question_paper_pdf(questions, title, subject, total_marks)
+            answer_key_bytes = generate_answer_key_pdf(questions, title)
+
+            # Extract text for AI marking
+            question_paper_text = extract_text_from_pdf(question_paper_bytes)
+            answer_key_text = extract_text_from_pdf(answer_key_bytes)
+
+            # Store in GridFS
+            from gridfs import GridFS
+            fs = GridFS(db.db)
+            assignment_id = generate_assignment_id()
+
+            question_paper_id = fs.put(
+                question_paper_bytes,
+                filename=f"{assignment_id}_question.pdf",
+                content_type='application/pdf',
+                assignment_id=assignment_id,
+                file_type='question_paper',
+            )
+            answer_key_id = fs.put(
+                answer_key_bytes,
+                filename=f"{assignment_id}_answer.pdf",
+                content_type='application/pdf',
+                assignment_id=assignment_id,
+                file_type='answer_key',
+            )
+
+            # Assignment target
+            target_type = request.form.get('target_type', 'class')
+            target_class_id = request.form.get('target_class_id', '').strip() or None
+            target_group_id = request.form.get('target_group_id', '').strip() or None
+
+            default_model = teacher.get('default_ai_model', 'anthropic')
+
+            assignment_doc = {
+                'assignment_id': assignment_id,
+                'teacher_id': session['teacher_id'],
+                'title': title,
+                'subject': subject,
+                'instructions': '',
+                'total_marks': total_marks,
+                'marking_type': 'standard',
+                'award_marks': True,
+                'send_ai_feedback_immediately': False,
+                'question_paper_id': question_paper_id,
+                'answer_key_id': answer_key_id,
+                'question_paper_name': f"{assignment_id}_question.pdf",
+                'answer_key_name': f"{assignment_id}_answer.pdf",
+                'reference_materials_id': None,
+                'reference_materials_name': None,
+                'rubrics_id': None,
+                'rubrics_name': None,
+                'question_paper_text': question_paper_text,
+                'answer_key_text': answer_key_text,
+                'reference_materials_text': '',
+                'rubrics_text': '',
+                'due_date': request.form.get('due_date') or None,
+                'status': 'draft',
+                'ai_model': default_model,
+                'feedback_instructions': '',
+                'grading_instructions': '',
+                'target_type': target_type,
+                'target_class_id': target_class_id if target_type == 'class' else None,
+                'target_group_id': target_group_id if target_type == 'teaching_group' else None,
+                'generated_questions': questions,
+                'generation_source': 'ai_generate',
+                'linked_module_ids': request.form.getlist('linked_module_ids'),
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow(),
+            }
+
+            # Auto-save to assessment bank if teacher has toggle
+            if teacher.get('auto_save_to_assessment_bank'):
+                assignment_doc['in_assessment_bank'] = True
+                assignment_doc['bank_added_at'] = datetime.utcnow()
+
+            Assignment.insert_one(assignment_doc)
+            return redirect(url_for('edit_assignment', assignment_id=assignment_id))
+
+    return render_template('teacher_generate_assignment.html',
+        teacher=teacher, teacher_modules=teacher_modules,
+        classes=classes, teaching_groups=teaching_groups)
+
+
+# ============================================================================
+# MODIFY ASSIGNMENT (AI-powered variant generation from existing assignment)
+# ============================================================================
+
+@app.route('/teacher/assignments/<assignment_id>/modify', methods=['GET', 'POST'])
+@teacher_required
+def modify_assignment(assignment_id):
+    """Create a modified variant of an existing assignment using AI."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    if not teacher:
+        return redirect(url_for('teacher_assignments'))
+
+    original = db.db.assignments.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id'],
+    })
+    if not original:
+        return redirect(url_for('teacher_assignments'))
+
+    # Get classes and teaching groups
+    teacher_classes = set(teacher.get('classes', []))
+    assigned_students = Student.find({'teachers': session['teacher_id']})
+    for student in assigned_students:
+        if student.get('class'):
+            teacher_classes.add(student.get('class'))
+    classes = list(Class.find({'class_id': {'$in': list(teacher_classes)}})) if teacher_classes else []
+    teaching_groups = list(TeachingGroup.find({'teacher_id': session['teacher_id']}))
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'modify')
+
+        if action == 'modify':
+            # Extract original question paper text
+            original_text = original.get('question_paper_text', '')
+            if not original_text:
+                pdf_bytes = _get_assignment_file_bytes(original, 'question_paper')
+                if pdf_bytes:
+                    original_text = extract_text_from_pdf(pdf_bytes)
+
+            if not original_text:
+                return render_template('teacher_modify_assignment.html',
+                    teacher=teacher, assignment=original,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='Could not extract text from the original question paper.')
+
+            modification_type = request.form.get('modification_type', 'difficulty')
+            modification_level = request.form.get('modification_level', 'moderate')
+            custom_instructions = request.form.get('custom_instructions', '')
+
+            from utils.module_ai import modify_assignment_content
+            result = modify_assignment_content(
+                original_text=original_text,
+                original_assignment=original,
+                modification_type=modification_type,
+                modification_level=modification_level,
+                custom_instructions=custom_instructions,
+                teacher=teacher,
+            )
+
+            if 'error' in result:
+                return render_template('teacher_modify_assignment.html',
+                    teacher=teacher, assignment=original,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error=result['error'])
+
+            return render_template('teacher_modify_assignment.html',
+                teacher=teacher, assignment=original,
+                classes=classes, teaching_groups=teaching_groups,
+                generated=result,
+                form_data=request.form)
+
+        elif action == 'create':
+            import json as _json
+            questions_json = request.form.get('questions_json', '[]')
+            try:
+                questions = _json.loads(questions_json)
+            except Exception:
+                return render_template('teacher_modify_assignment.html',
+                    teacher=teacher, assignment=original,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='Invalid questions data.')
+
+            if not questions:
+                return render_template('teacher_modify_assignment.html',
+                    teacher=teacher, assignment=original,
+                    classes=classes, teaching_groups=teaching_groups,
+                    error='No questions to create assignment from.')
+
+            title = request.form.get('title', f"Modified: {original.get('title', 'Assignment')}")
+            subject = request.form.get('subject', original.get('subject', 'General'))
+            total_marks = int(request.form.get('total_marks', original.get('total_marks', 100)))
+
+            from utils.pdf_generator import generate_question_paper_pdf, generate_answer_key_pdf
+            question_paper_bytes = generate_question_paper_pdf(questions, title, subject, total_marks)
+            answer_key_bytes = generate_answer_key_pdf(questions, title)
+
+            question_paper_text = extract_text_from_pdf(question_paper_bytes)
+            answer_key_text = extract_text_from_pdf(answer_key_bytes)
+
+            from gridfs import GridFS
+            fs = GridFS(db.db)
+            new_assignment_id = generate_assignment_id()
+
+            question_paper_id = fs.put(
+                question_paper_bytes,
+                filename=f"{new_assignment_id}_question.pdf",
+                content_type='application/pdf',
+                assignment_id=new_assignment_id,
+                file_type='question_paper',
+            )
+            answer_key_id = fs.put(
+                answer_key_bytes,
+                filename=f"{new_assignment_id}_answer.pdf",
+                content_type='application/pdf',
+                assignment_id=new_assignment_id,
+                file_type='answer_key',
+            )
+
+            target_type = request.form.get('target_type', 'class')
+            target_class_id = request.form.get('target_class_id', '').strip() or None
+            target_group_id = request.form.get('target_group_id', '').strip() or None
+
+            default_model = teacher.get('default_ai_model', 'anthropic')
+
+            assignment_doc = {
+                'assignment_id': new_assignment_id,
+                'teacher_id': session['teacher_id'],
+                'title': title,
+                'subject': subject,
+                'instructions': '',
+                'total_marks': total_marks,
+                'marking_type': 'standard',
+                'award_marks': True,
+                'send_ai_feedback_immediately': False,
+                'question_paper_id': question_paper_id,
+                'answer_key_id': answer_key_id,
+                'question_paper_name': f"{new_assignment_id}_question.pdf",
+                'answer_key_name': f"{new_assignment_id}_answer.pdf",
+                'reference_materials_id': None,
+                'reference_materials_name': None,
+                'rubrics_id': None,
+                'rubrics_name': None,
+                'question_paper_text': question_paper_text,
+                'answer_key_text': answer_key_text,
+                'reference_materials_text': '',
+                'rubrics_text': '',
+                'due_date': request.form.get('due_date') or None,
+                'status': 'draft',
+                'ai_model': default_model,
+                'feedback_instructions': '',
+                'grading_instructions': '',
+                'target_type': target_type,
+                'target_class_id': target_class_id if target_type == 'class' else None,
+                'target_group_id': target_group_id if target_type == 'teaching_group' else None,
+                'generated_questions': questions,
+                'generation_source': 'ai_modify',
+                'parent_assignment_id': assignment_id,
+                'linked_module_ids': original.get('linked_module_ids', []),
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow(),
+            }
+
+            if teacher.get('auto_save_to_assessment_bank'):
+                assignment_doc['in_assessment_bank'] = True
+                assignment_doc['bank_added_at'] = datetime.utcnow()
+
+            Assignment.insert_one(assignment_doc)
+            return redirect(url_for('edit_assignment', assignment_id=new_assignment_id))
+
+    return render_template('teacher_modify_assignment.html',
+        teacher=teacher, assignment=original,
+        classes=classes, teaching_groups=teaching_groups)
+
+
+@app.route('/teacher/assignments/modify-picker')
+@teacher_required
+def modify_assignment_picker():
+    """API endpoint returning recent assignments for the Modify picker modal."""
+    assignments = list(db.db.assignments.find(
+        {'teacher_id': session['teacher_id']},
+        {'assignment_id': 1, 'title': 1, 'subject': 1, 'total_marks': 1, 'created_at': 1, '_id': 0}
+    ).sort('created_at', -1).limit(20))
+    return jsonify({'success': True, 'assignments': assignments})
+
+
 def _build_student_status_for_submission(submission):
     """Build display status dict for one submission (for class view and API)."""
     status = submission.get('status', 'submitted')
