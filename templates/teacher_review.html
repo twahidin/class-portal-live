@@ -68,6 +68,13 @@
                     <button class="btn btn-danger" onclick="openRejectModal()" title="Reject submission and request resubmission">
                         <i class="bi bi-x-circle me-1"></i>Reject
                     </button>
+                    {% if submission.get('feedback_sent') and not submission.get('corrections_required') %}
+                    <button class="btn btn-warning" onclick="triggerCorrections()" id="btn-trigger-corrections" title="Generate correction paper for student">
+                        <i class="bi bi-pencil-square me-1"></i>Trigger Corrections
+                    </button>
+                    {% elif submission.get('corrections_required') %}
+                    <span class="badge bg-warning text-dark align-self-center ms-2"><i class="bi bi-pencil-square me-1"></i>Corrections {{ 'Submitted' if submission.get('correction_submitted') else 'Pending' }}</span>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -1142,6 +1149,30 @@
     }
     
     // Send feedback to student
+    async function triggerCorrections() {
+        if (!confirm('Generate a correction paper for this student? They will see a "Pending Corrections" status and can submit corrected answers.')) return;
+        const btn = document.getElementById('btn-trigger-corrections');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating...';
+        try {
+            const response = await fetch(`/teacher/submission/{{ submission.submission_id }}/trigger-corrections`, { method: 'POST' });
+            const result = await response.json();
+            if (result.success) {
+                alert(result.message);
+                location.reload();
+            } else {
+                alert(result.error || 'Failed to trigger corrections');
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        } catch (err) {
+            alert('Error connecting to server');
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+
     async function sendFeedback() {
         const includeAnswerKey = document.getElementById('include-answer-key').checked;
         const confirmMsg = includeAnswerKey 

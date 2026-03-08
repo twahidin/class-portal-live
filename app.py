@@ -9999,6 +9999,53 @@ def _submission_needs_corrections(submission, assignment):
     return False
 
 
+@app.route('/teacher/submission/<submission_id>/trigger-corrections', methods=['POST'])
+@teacher_required
+def trigger_corrections(submission_id):
+    """Manually trigger correction PDF generation for an existing reviewed submission."""
+    try:
+        submission = Submission.find_one({'submission_id': submission_id})
+        if not submission:
+            return jsonify({'error': 'Submission not found'}), 404
+
+        assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+        if not assignment or assignment['teacher_id'] != session['teacher_id']:
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        if not submission.get('feedback_sent'):
+            return jsonify({'error': 'Feedback has not been sent yet'}), 400
+
+        if submission.get('corrections_required'):
+            return jsonify({'error': 'Corrections already triggered for this submission'}), 400
+
+        if not _submission_needs_corrections(submission, assignment):
+            return jsonify({'success': True, 'message': 'No corrections needed — all answers are correct'})
+
+        student = Student.find_one({'student_id': submission['student_id']})
+        from utils.pdf_generator import generate_correction_pdf
+        from gridfs import GridFS
+        correction_pdf_bytes = generate_correction_pdf(submission, assignment, student)
+        fs = GridFS(db.db)
+        correction_pdf_id = fs.put(
+            correction_pdf_bytes,
+            filename=f"correction_{assignment['title']}_{student['student_id']}.pdf",
+            content_type='application/pdf'
+        )
+        Submission.update_one(
+            {'submission_id': submission_id},
+            {'$set': {
+                'corrections_required': True,
+                'correction_pdf_id': str(correction_pdf_id),
+                'correction_submitted': False
+            }}
+        )
+        return jsonify({'success': True, 'message': 'Corrections triggered and PDF generated'})
+
+    except Exception as e:
+        logger.error(f"Error triggering corrections: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/teacher/review/<submission_id>/send', methods=['POST'])
 @limiter.limit("200 per hour")
 @teacher_required
