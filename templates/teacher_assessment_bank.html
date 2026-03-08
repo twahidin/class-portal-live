@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Assessment Bank - Teacher Portal{% endblock %}
+
+{% block navbar %}
+{% set active_nav = 'assignments' %}
+{% include 'partials/teacher_navbar.html' %}
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1">
+                    <li class="breadcrumb-item"><a href="{{ url_for('teacher_assignments') }}">Assignments</a></li>
+                    <li class="breadcrumb-item active">Assessment Bank</li>
+                </ol>
+            </nav>
+            <h1><i class="bi bi-bank me-2"></i>Assessment Bank</h1>
+            <p class="text-muted">Your saved assignments for reuse</p>
+        </div>
+        <a href="{{ url_for('teacher_assignments') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Back to Assignments
+        </a>
+    </div>
+
+    {% if assignments %}
+    <div class="assignments-grid">
+        {% for assignment in assignments %}
+        <div class="assignment-manage-card" id="bank-card-{{ assignment.assignment_id }}">
+            <div class="assignment-header">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="badge bg-primary mb-2">{{ assignment.subject }}</span>
+                        {% if assignment.assignment_type == 'assessment' %}
+                        <span class="badge bg-success mb-2">Assessment</span>
+                        {% endif %}
+                        {% if assignment.target_display or assignment.target_class_id %}
+                        <span class="badge bg-info mb-2">
+                            <i class="bi bi-collection me-1"></i>{{ assignment.target_display or assignment.target_class_id }}
+                        </span>
+                        {% endif %}
+                    </div>
+                </div>
+                <h4>{{ assignment.title }}</h4>
+            </div>
+
+            <div class="assignment-stats">
+                <div class="stat">
+                    <i class="bi bi-question-circle"></i>
+                    <span>{{ assignment.get('questions', [])|length }} questions</span>
+                </div>
+                <div class="stat">
+                    {% if assignment.marking_type == 'rubric' or assignment.get('award_marks', True) %}
+                    <i class="bi bi-star"></i>
+                    <span>{{ assignment.total_marks }} marks</span>
+                    {% else %}
+                    <i class="bi bi-check2-all"></i>
+                    <span>Correct / Partial / Incorrect</span>
+                    {% endif %}
+                </div>
+                <div class="stat">
+                    <i class="bi bi-inbox"></i>
+                    <span>{{ assignment.submission_count }} submissions</span>
+                </div>
+            </div>
+
+            <div class="assignment-actions">
+                <a href="{{ url_for('assignment_summary', assignment_id=assignment.assignment_id) }}" class="btn btn-primary btn-sm">
+                    <i class="bi bi-bar-chart me-1"></i>Summary
+                </a>
+                {% if assignment.get('question_paper_id') %}
+                <a href="{{ url_for('download_assignment_file', assignment_id=assignment.assignment_id, file_type='question_paper') }}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-download me-1"></i>Download PDF
+                </a>
+                {% endif %}
+                <button class="btn btn-outline-danger btn-sm" onclick="removeFromBank('{{ assignment.assignment_id }}')">
+                    <i class="bi bi-x-circle me-1"></i>Remove
+                </button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i class="bi bi-bank"></i>
+        <h4>Assessment Bank is Empty</h4>
+        <p>Save assignments from their summary page, or enable auto-save in <a href="{{ url_for('teacher_settings') }}">Settings</a>.</p>
+        <a href="{{ url_for('teacher_assignments') }}" class="btn btn-primary">
+            <i class="bi bi-arrow-left me-1"></i>Back to Assignments
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function removeFromBank(assignmentId) {
+    if (!confirm('Remove this assignment from the Assessment Bank?')) return;
+    try {
+        const resp = await fetch(`/api/teacher/assignments/bank/${assignmentId}/remove`, {
+            method: 'POST'
+        });
+        const data = await resp.json();
+        if (data.success) {
+            const card = document.getElementById('bank-card-' + assignmentId);
+            if (card) {
+                card.style.transition = 'opacity 0.3s';
+                card.style.opacity = '0';
+                setTimeout(() => card.remove(), 300);
+            }
+            // If no cards left, reload to show empty state
+            setTimeout(() => {
+                if (!document.querySelector('.assignment-manage-card')) {
+                    window.location.reload();
+                }
+            }, 400);
+        } else {
+            alert(data.error || 'Failed to remove from bank');
+        }
+    } catch (e) {
+        alert('Failed to remove from bank. Please try again.');
+    }
+}
+</script>
+{% endblock %}

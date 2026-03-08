@@ -5329,12 +5329,76 @@ def teacher_assignments():
         subject_class_map.setdefault(key, []).append(a)
     folders_by_subject_class = [{'name': k, 'assignments': v} for k, v in subject_class_map.items()]
     
+    has_module_trees = _teacher_has_module_access(session['teacher_id']) and bool(
+        Module.find_one({'teacher_id': session['teacher_id'], 'parent_id': None})
+    )
+    bank_count = db.db.assignments.count_documents({
+        'teacher_id': session['teacher_id'],
+        'in_assessment_bank': True
+    })
+
     return render_template('teacher_assignments.html',
                          teacher=teacher,
                          assignments=assignments,
                          folders_by_subject=folders_by_subject,
                          folders_by_class=folders_by_class,
-                         folders_by_subject_class=folders_by_subject_class)
+                         folders_by_subject_class=folders_by_subject_class,
+                         has_module_trees=has_module_trees,
+                         bank_count=bank_count)
+
+@app.route('/teacher/assignments/bank')
+@teacher_required
+def teacher_assessment_bank():
+    """Assessment Bank listing page."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    bank_assignments = list(db.db.assignments.find({
+        'teacher_id': session['teacher_id'],
+        'in_assessment_bank': True
+    }).sort('bank_added_at', -1))
+    for a in bank_assignments:
+        a['submission_count'] = db.db.submissions.count_documents({'assignment_id': a['assignment_id']})
+    return render_template('teacher_assessment_bank.html',
+                         teacher=teacher,
+                         assignments=bank_assignments)
+
+@app.route('/api/teacher/assignments/bank/sync', methods=['POST'])
+@teacher_required
+def sync_to_assessment_bank():
+    """Add an assignment to the assessment bank."""
+    data = request.get_json(force=True)
+    assignment_id = data.get('assignment_id')
+    assignment = db.db.assignments.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return jsonify({'error': 'Assignment not found'}), 404
+    db.db.assignments.update_one(
+        {'assignment_id': assignment_id},
+        {'$set': {'in_assessment_bank': True, 'bank_added_at': datetime.utcnow()}}
+    )
+    return jsonify({'success': True})
+
+@app.route('/api/teacher/assignments/bank/<assignment_id>/remove', methods=['POST'])
+@teacher_required
+def remove_from_assessment_bank(assignment_id):
+    """Remove an assignment from the assessment bank."""
+    db.db.assignments.update_one(
+        {'assignment_id': assignment_id, 'teacher_id': session['teacher_id']},
+        {'$set': {'in_assessment_bank': False}, '$unset': {'bank_added_at': ''}}
+    )
+    return jsonify({'success': True})
+
+@app.route('/api/teacher/assignments/bank/backfill', methods=['POST'])
+@teacher_required
+def backfill_assessment_bank():
+    """Add all existing assignments to the assessment bank."""
+    result = db.db.assignments.update_many(
+        {'teacher_id': session['teacher_id'], 'in_assessment_bank': {'$ne': True}},
+        {'$set': {'in_assessment_bank': True, 'bank_added_at': datetime.utcnow()}}
+    )
+    return jsonify({'success': True, 'count': result.modified_count})
+
 
 def _build_student_status_for_submission(submission):
     """Build display status dict for one submission (for class view and API)."""
@@ -7306,7 +7370,12 @@ def create_assignment():
             if is_assessment:
                 assignment_doc['assignment_type'] = 'assessment'
                 assignment_doc['submission_mode'] = 'manual_only'  # Students hand in physical papers; teacher uploads
-            
+
+            # Auto-save to assessment bank if teacher has toggle enabled
+            if teacher.get('auto_save_to_assessment_bank'):
+                assignment_doc['in_assessment_bank'] = True
+                assignment_doc['bank_added_at'] = datetime.utcnow()
+
             # Add Google Drive folder IDs if created (for submissions)
             if drive_folders:
                 assignment_doc['drive_folders'] = drive_folders
@@ -9724,6 +9793,9 @@ def teacher_settings():
             elif 'subjects' in data:
                 update_data['subjects'] = []
             
+            # Assessment Bank auto-save toggle
+            update_data['auto_save_to_assessment_bank'] = 'auto_save_to_assessment_bank' in data
+
             # Update messaging hours settings
             update_data['messaging_hours_enabled'] = 'messaging_hours_enabled' in data
             if data.get('messaging_start_time'):
@@ -10499,22 +10571,12 @@ def _save_module_access_config(teacher_ids, class_ids):
     )
 
 def _teacher_has_module_access(teacher_id):
-    """True if this teacher is allocated access to create/manage learning modules."""
-    config = _get_module_access_config()
-    return teacher_id in config['teacher_ids']
+    """All teachers have module access by default."""
+    return True
 
 def _student_has_module_access(student_id):
-    """True if this student's class(es) are allocated access to learning modules."""
-    student = Student.find_one({'student_id': student_id})
-    if not student:
-        return False
-    config = _get_module_access_config()
-    if not config['class_ids']:
-        return False
-    student_classes = student.get('classes', [])
-    if not student_classes and student.get('class'):
-        student_classes = [student['class']]
-    return bool(set(student_classes) & set(config['class_ids']))
+    """All students have module access by default."""
+    return True
 
 
 # ============================================================================

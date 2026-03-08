@@ -24,19 +24,16 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('student_submissions') }}">
-                        <i class="bi bi-check2-square me-1"></i>Submissions
+                    <a class="nav-link" href="{{ url_for('student_modules') }}">
+                        <i class="bi bi-diagram-3 me-1"></i>Modules
                     </a>
                 </li>
-                {% if student_has_module_access or student_has_python_lab_access or student_has_collab_space_access or student_has_interactives_access %}
+                {% if student_has_python_lab_access or student_has_collab_space_access or student_has_interactives_access %}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="navbarLearningTools" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="bi bi-tools me-1"></i>Learning Tools
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="navbarLearningTools">
-                        {% if student_has_module_access %}
-                        <li><a class="dropdown-item" href="{{ url_for('student_modules') }}"><i class="bi bi-diagram-3 me-1"></i>Modules</a></li>
-                        {% endif %}
                         {% if student_has_python_lab_access %}
                         <li><a class="dropdown-item" href="{{ url_for('student_python_lab') }}"><i class="bi bi-code-slash me-1"></i>Python Lab</a></li>
                         {% endif %}
@@ -152,25 +149,11 @@
     </div>
 
     <!-- Learning Tools (shortcuts if access given) -->
-    {% if student_has_module_access or student_has_python_lab_access or student_has_collab_space_access or student_has_interactives_access %}
+    {% if student_has_python_lab_access or student_has_collab_space_access or student_has_interactives_access %}
     <h2 class="section-title mb-3">
         <i class="bi bi-tools me-2"></i>Learning Tools
     </h2>
     <div class="row g-4 mb-5">
-        {% if student_has_module_access %}
-        <div class="col-md-6 col-lg-4">
-            <a href="{{ url_for('student_modules') }}" class="stat-card stat-primary text-decoration-none d-flex align-items-center">
-                <div class="stat-icon">
-                    <i class="bi bi-diagram-3"></i>
-                </div>
-                <div class="stat-info">
-                    <h3>Modules</h3>
-                    <p>My learning modules</p>
-                </div>
-                <i class="bi bi-chevron-right ms-auto text-muted"></i>
-            </a>
-        </div>
-        {% endif %}
         {% if student_has_python_lab_access %}
         <div class="col-md-6 col-lg-4">
             <a href="{{ url_for('student_python_lab') }}" class="stat-card stat-success text-decoration-none d-flex align-items-center">

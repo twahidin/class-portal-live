@@ -36,9 +36,26 @@
                 </div>
             </div>
             {% endif %}
-            <a href="{{ url_for('create_assignment') }}" class="btn btn-primary btn-lg">
-                <i class="bi bi-plus-circle me-2"></i>Create Assignment
-            </a>
+            <div class="dropdown">
+                <button class="btn btn-primary btn-lg dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <i class="bi bi-plus-circle me-2"></i>Assignments
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="{{ url_for('create_assignment') }}">
+                        <i class="bi bi-pencil-square me-2"></i>Create</a></li>
+                    <li><a class="dropdown-item {% if not has_module_trees %}disabled{% endif %}"
+                           href="{% if has_module_trees %}#{% else %}javascript:void(0){% endif %}"
+                           {% if not has_module_trees %}title="Create a module tree first"{% endif %}>
+                        <i class="bi bi-lightning me-2"></i>Generate</a></li>
+                    <li><a class="dropdown-item" href="#">
+                        <i class="bi bi-pencil me-2"></i>Modify</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item {% if bank_count == 0 %}disabled{% endif %}"
+                           href="{% if bank_count > 0 %}{{ url_for('teacher_assessment_bank') }}{% else %}javascript:void(0){% endif %}"
+                           {% if bank_count == 0 %}title="No assignments in bank yet"{% endif %}>
+                        <i class="bi bi-bank me-2"></i>Assessment Bank{% if bank_count > 0 %} ({{ bank_count }}){% endif %}</a></li>
+                </ul>
+            </div>
             {% if teacher_has_assessments_access %}
             <a href="{{ url_for('create_assignment', type='assessment') }}" class="btn btn-success btn-lg">
                 <i class="bi bi-clipboard-check me-2"></i>Create Assessment

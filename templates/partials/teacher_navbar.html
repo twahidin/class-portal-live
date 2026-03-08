@@ -1,4 +1,4 @@
-{# Teacher navbar partial. Set active_nav to one of: dashboard, assignments, submissions, learning_tools, messages, settings #}
+{# Teacher navbar partial. Set active_nav to one of: dashboard, assignments, modules, learning_tools, messages, settings #}
 <nav class="navbar navbar-expand-lg navbar-dark teacher-nav">
     <div class="container">
         <a class="navbar-brand" href="{{ url_for('teacher_dashboard') }}">
@@ -17,26 +17,23 @@
                 <li class="nav-item">
                     <a class="nav-link {{ 'active' if active_nav == 'assignments' else '' }}" href="{{ url_for('teacher_assignments') }}">
                         <i class="bi bi-journal-text me-1"></i>Assignments
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{ 'active' if active_nav == 'submissions' else '' }}" href="{{ url_for('teacher_submissions', status='pending') }}">
-                        <i class="bi bi-inbox me-1"></i>Submissions
                         {% set _pending_badge = pending_count if pending_count is defined else (stats.pending_submissions if stats is defined else 0) %}
                         {% if _pending_badge > 0 %}
                         <span class="badge bg-danger">{{ _pending_badge }}</span>
                         {% endif %}
                     </a>
                 </li>
-                {% if teacher_has_module_access or teacher_has_python_lab_access or teacher_has_collab_space_access or teacher_has_interactives_access %}
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if active_nav == 'modules' else '' }}" href="{{ url_for('teacher_modules') }}">
+                        <i class="bi bi-diagram-3 me-1"></i>Modules
+                    </a>
+                </li>
+                {% if teacher_has_python_lab_access or teacher_has_collab_space_access or teacher_has_interactives_access %}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle {{ 'active' if active_nav == 'learning_tools' else '' }}" href="#" id="navbarLearningTools" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="bi bi-tools me-1"></i>Learning Tools
                     </a>
                     <ul class="dropdown-menu" aria-labelledby="navbarLearningTools">
-                        {% if teacher_has_module_access %}
-                        <li><a class="dropdown-item" href="{{ url_for('teacher_modules') }}"><i class="bi bi-diagram-3 me-1"></i>Modules</a></li>
-                        {% endif %}
                         {% if teacher_has_python_lab_access %}
                         <li><a class="dropdown-item" href="{{ url_for('teacher_python_lab') }}"><i class="bi bi-code-slash me-1"></i>Python Lab</a></li>
                         {% endif %}

@@ -39,6 +39,15 @@
                     <button class="btn btn-outline-success" onclick="openArchiveModal('/api/teacher/archive/assignment/{{ assignment.assignment_id }}')">
                         <i class="bi bi-archive me-1"></i>Archive
                     </button>
+                    {% if not assignment.get('in_assessment_bank') %}
+                    <button class="btn btn-outline-primary" id="save-to-bank-btn" onclick="saveToAssessmentBank('{{ assignment.assignment_id }}')">
+                        <i class="bi bi-bank me-1"></i>Save to Bank
+                    </button>
+                    {% else %}
+                    <span class="btn btn-outline-secondary disabled">
+                        <i class="bi bi-check-circle me-1"></i>In Bank
+                    </span>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -716,6 +725,32 @@
 
 {% block scripts %}
 <script>
+async function saveToAssessmentBank(assignmentId) {
+    const btn = document.getElementById('save-to-bank-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+    try {
+        const resp = await fetch('/api/teacher/assignments/bank/sync', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({assignment_id: assignmentId})
+        });
+        const data = await resp.json();
+        if (data.success) {
+            btn.outerHTML = '<span class="btn btn-outline-secondary disabled"><i class="bi bi-check-circle me-1"></i>In Bank</span>';
+        } else {
+            alert(data.error || 'Failed to save to bank');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-bank me-1"></i>Save to Bank';
+        }
+    } catch (e) {
+        alert('Failed to save to bank. Please try again.');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-bank me-1"></i>Save to Bank';
+    }
+}
+
 function filterStudents(status) {
     const rows = document.querySelectorAll('#students-table tbody tr');
     const buttons = document.querySelectorAll('.btn-group .btn');
