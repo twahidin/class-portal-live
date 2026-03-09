@@ -241,9 +241,11 @@ class Submission:
         return db.db.submissions.find_one(query, **kwargs)
     
     @staticmethod
-    def find(query):
+    def find(query, projection=None):
+        if projection:
+            return db.db.submissions.find(query, projection)
         return db.db.submissions.find(query)
-    
+
     @staticmethod
     def insert_one(document):
         return db.db.submissions.insert_one(document).inserted_id

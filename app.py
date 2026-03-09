@@ -2979,11 +2979,14 @@ def student_python_template_cells(assignment_id):
         if file_name.lower().endswith('.ipynb'):
             nb = _json.loads(raw.decode('utf-8'))
             for cell in nb.get('cells', []):
-                if cell.get('cell_type') == 'code':
-                    src = cell.get('source', '')
-                    if isinstance(src, list):
-                        src = ''.join(src)
-                    cells.append({'content': src})
+                cell_type = cell.get('cell_type', 'code')
+                src = cell.get('source', '')
+                if isinstance(src, list):
+                    src = ''.join(src)
+                if cell_type == 'markdown':
+                    cells.append({'content': src, 'type': 'markdown'})
+                elif cell_type == 'code':
+                    cells.append({'content': src, 'type': 'code'})
         else:
             # .py file — split on # %% Cell markers or treat as single cell
             text = raw.decode('utf-8')
@@ -2992,10 +2995,10 @@ def student_python_template_cells(assignment_id):
             for seg in segments:
                 trimmed = seg.strip()
                 if trimmed:
-                    cells.append({'content': trimmed})
+                    cells.append({'content': trimmed, 'type': 'code'})
 
         if not cells:
-            cells = [{'content': raw.decode('utf-8', errors='replace').strip() or '# Empty template\n'}]
+            cells = [{'content': raw.decode('utf-8', errors='replace').strip() or '# Empty template\n', 'type': 'code'}]
 
         return jsonify({'cells': cells})
     except Exception as e:
@@ -9079,10 +9082,18 @@ def teacher_python_cells(submission_id):
             if filename.lower().endswith('.ipynb'):
                 nb = _json.loads(raw.decode('utf-8'))
                 for idx, cell in enumerate(nb.get('cells', [])):
-                    if cell.get('cell_type') == 'code':
-                        src = cell.get('source', '')
-                        if isinstance(src, list):
-                            src = ''.join(src)
+                    cell_type = cell.get('cell_type', 'code')
+                    src = cell.get('source', '')
+                    if isinstance(src, list):
+                        src = ''.join(src)
+                    if cell_type == 'markdown':
+                        cells.append({
+                            'index': len(cells) + 1,
+                            'source': src,
+                            'outputs': '',
+                            'cell_type': 'markdown'
+                        })
+                    elif cell_type == 'code':
                         # Extract outputs
                         outputs_text = ''
                         for out in cell.get('outputs', []):
@@ -9102,7 +9113,8 @@ def teacher_python_cells(submission_id):
                         cells.append({
                             'index': len(cells) + 1,
                             'source': src,
-                            'outputs': outputs_text
+                            'outputs': outputs_text,
+                            'cell_type': 'code'
                         })
             else:
                 # .py file — split on # %% Cell markers
