@@ -139,6 +139,9 @@
                                 <button class="btn btn-outline-danger" id="delete-selected-students" disabled>
                                     <i class="bi bi-trash me-1"></i>Delete Selected
                                 </button>
+                                <button class="btn btn-outline-info" id="merge-selected-students" disabled>
+                                    <i class="bi bi-arrow-left-right me-1"></i>Merge
+                                </button>
                             </div>
                         </div>
                         <div class="card-body">
@@ -1510,6 +1513,33 @@
     </div>
 </div>
 
+<!-- Merge Students Modal -->
+<div class="modal fade" id="merge-students-modal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="bi bi-arrow-left-right me-2"></i>Merge Students</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Choose which student account to <strong>keep</strong>. All submissions, messages, and data from the other account will be merged into the kept account, and the other will be deleted.</p>
+                <div class="d-flex flex-column gap-3" id="merge-options"></div>
+                <div class="alert alert-warning mt-3 small mb-0">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    <strong>This cannot be undone.</strong> The non-selected student will be permanently deleted after their data is transferred.
+                </div>
+                <div id="merge-error" class="alert alert-danger mt-2 small" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info" id="confirm-merge-btn" disabled>
+                    <i class="bi bi-arrow-left-right me-1"></i>Merge Students
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Edit Teaching Group Students Modal -->
 <div class="modal fade" id="edit-tg-modal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-lg">
@@ -2027,6 +2057,7 @@
         const selectedStudents = document.querySelectorAll('.student-checkbox:checked').length;
         document.getElementById('delete-selected-students').disabled = selectedStudents === 0;
         document.getElementById('reset-selected-passwords').disabled = selectedStudents === 0;
+        document.getElementById('merge-selected-students').disabled = selectedStudents !== 2;
         
         // Update mass reset modal count
         document.getElementById('reset-count-text').textContent = `${selectedStudents} student(s) selected`;
@@ -2085,6 +2116,91 @@
         } catch (e) {
             alert('❌ Failed to assign students');
             console.error(e);
+        }
+    });
+
+    // Merge selected students
+    let mergeKeepId = null;
+    let mergeDeleteId = null;
+    const mergeModal = new bootstrap.Modal(document.getElementById('merge-students-modal'));
+
+    document.getElementById('merge-selected-students').addEventListener('click', () => {
+        const selected = [...document.querySelectorAll('.student-checkbox:checked')];
+        if (selected.length !== 2) return;
+
+        mergeKeepId = null;
+        mergeDeleteId = null;
+        document.getElementById('merge-error').style.display = 'none';
+        document.getElementById('confirm-merge-btn').disabled = true;
+
+        const students = selected.map(cb => {
+            const row = cb.closest('tr');
+            const nameCell = row.querySelector('td:nth-child(2)');
+            return {
+                id: cb.value,
+                name: nameCell ? nameCell.textContent.trim().split('\n')[0].trim() : cb.value,
+                class: row.querySelector('td:nth-child(3)')?.textContent.trim() || '-'
+            };
+        });
+
+        const optionsDiv = document.getElementById('merge-options');
+        optionsDiv.innerHTML = students.map((s, i) => `
+            <div class="form-check border rounded p-3 merge-option" data-keep="${s.id}" data-delete="${students[1-i].id}">
+                <input class="form-check-input" type="radio" name="merge-keep" id="merge-keep-${i}" value="${s.id}">
+                <label class="form-check-label w-100" for="merge-keep-${i}">
+                    <strong>Keep: ${s.name}</strong><br>
+                    <small class="text-muted">ID: ${s.id} | Class: ${s.class}</small>
+                </label>
+            </div>
+        `).join('');
+
+        optionsDiv.querySelectorAll('input[name="merge-keep"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const option = radio.closest('.merge-option');
+                mergeKeepId = option.dataset.keep;
+                mergeDeleteId = option.dataset.delete;
+                document.getElementById('confirm-merge-btn').disabled = false;
+                optionsDiv.querySelectorAll('.merge-option').forEach(el => el.classList.remove('border-info', 'bg-light'));
+                option.classList.add('border-info', 'bg-light');
+            });
+        });
+
+        mergeModal.show();
+    });
+
+    document.getElementById('confirm-merge-btn').addEventListener('click', async () => {
+        if (!mergeKeepId || !mergeDeleteId) return;
+        const btn = document.getElementById('confirm-merge-btn');
+        const errorDiv = document.getElementById('merge-error');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Merging...';
+        errorDiv.style.display = 'none';
+
+        try {
+            const response = await fetch('/admin/merge_students', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keep_student_id: mergeKeepId, delete_student_id: mergeDeleteId })
+            });
+            const data = await response.json();
+            if (data.success) {
+                mergeModal.hide();
+                alert(`Merged successfully. ${data.message || ''}`);
+                loadStudents();
+                document.getElementById('select-all-students').checked = false;
+                updateSelectionUI();
+            } else {
+                errorDiv.textContent = data.error || 'Merge failed';
+                errorDiv.style.display = 'block';
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        } catch (e) {
+            errorDiv.textContent = 'Failed to connect to server';
+            errorDiv.style.display = 'block';
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
         }
     });
 

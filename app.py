@@ -14297,6 +14297,133 @@ def delete_students():
         logger.error(f"Error deleting students: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/admin/merge_students', methods=['POST'])
+@admin_required
+def merge_students():
+    """Merge two student accounts: transfer all data from delete_student to keep_student, then delete."""
+    try:
+        data = request.get_json()
+        keep_id = data.get('keep_student_id')
+        delete_id = data.get('delete_student_id')
+
+        if not keep_id or not delete_id or keep_id == delete_id:
+            return jsonify({'error': 'Invalid student IDs'}), 400
+
+        keep_student = Student.find_one({'student_id': keep_id})
+        delete_student = Student.find_one({'student_id': delete_id})
+        if not keep_student:
+            return jsonify({'error': f'Student {keep_id} not found'}), 404
+        if not delete_student:
+            return jsonify({'error': f'Student {delete_id} not found'}), 404
+
+        counts = {}
+
+        # 1. Submissions: transfer ownership
+        result = db.db.submissions.update_many(
+            {'student_id': delete_id},
+            {'$set': {'student_id': keep_id}}
+        )
+        counts['submissions'] = result.modified_count
+
+        # 2. Messages: transfer ownership
+        result = db.db.messages.update_many(
+            {'student_id': delete_id},
+            {'$set': {'student_id': keep_id}}
+        )
+        counts['messages'] = result.modified_count
+
+        # 3. Module mastery: transfer (skip if keep_student already has entry for same module)
+        mastery_transferred = 0
+        for mastery in db.db.student_module_mastery.find({'student_id': delete_id}):
+            existing = db.db.student_module_mastery.find_one({
+                'student_id': keep_id, 'module_id': mastery['module_id']
+            })
+            if not existing:
+                db.db.student_module_mastery.update_one(
+                    {'_id': mastery['_id']},
+                    {'$set': {'student_id': keep_id}}
+                )
+                mastery_transferred += 1
+            else:
+                db.db.student_module_mastery.delete_one({'_id': mastery['_id']})
+        counts['module_mastery'] = mastery_transferred
+
+        # 4. Learning profiles: transfer (skip if keep_student already has entry for same subject)
+        profiles_transferred = 0
+        for profile in db.db.student_learning_profiles.find({'student_id': delete_id}):
+            existing = db.db.student_learning_profiles.find_one({
+                'student_id': keep_id, 'subject': profile.get('subject')
+            })
+            if not existing:
+                db.db.student_learning_profiles.update_one(
+                    {'_id': profile['_id']},
+                    {'$set': {'student_id': keep_id}}
+                )
+                profiles_transferred += 1
+            else:
+                db.db.student_learning_profiles.delete_one({'_id': profile['_id']})
+        counts['learning_profiles'] = profiles_transferred
+
+        # 5. Learning sessions: transfer
+        result = db.db.learning_sessions.update_many(
+            {'student_id': delete_id},
+            {'$set': {'student_id': keep_id}}
+        )
+        counts['learning_sessions'] = result.modified_count
+
+        # 6. AI usage records: transfer
+        result = db.db.ai_usage.update_many(
+            {'student_id': delete_id},
+            {'$set': {'student_id': keep_id}}
+        )
+        counts['ai_usage'] = result.modified_count
+
+        # 7. Teaching groups: replace delete_id with keep_id in student_ids arrays
+        tg_updated = 0
+        for tg in db.db.teaching_groups.find({'student_ids': delete_id}):
+            student_ids = tg.get('student_ids', [])
+            # Remove delete_id, add keep_id if not already present
+            new_ids = [sid for sid in student_ids if sid != delete_id]
+            if keep_id not in new_ids:
+                new_ids.append(keep_id)
+            db.db.teaching_groups.update_one(
+                {'_id': tg['_id']},
+                {'$set': {'student_ids': new_ids}}
+            )
+            tg_updated += 1
+        counts['teaching_groups'] = tg_updated
+
+        # 8. Merge teachers list from deleted student into kept student
+        delete_teachers = set(delete_student.get('teachers', []) or [])
+        keep_teachers = set(keep_student.get('teachers', []) or [])
+        merged_teachers = list(keep_teachers | delete_teachers)
+        if merged_teachers != list(keep_teachers):
+            db.db.students.update_one(
+                {'student_id': keep_id},
+                {'$set': {'teachers': merged_teachers}}
+            )
+
+        # 9. If kept student has no telegram_id but deleted one does, transfer it
+        if not keep_student.get('telegram_id') and delete_student.get('telegram_id'):
+            db.db.students.update_one(
+                {'student_id': keep_id},
+                {'$set': {'telegram_id': delete_student['telegram_id']}}
+            )
+
+        # 10. Delete the merged-away student
+        db.db.students.delete_one({'student_id': delete_id})
+
+        total_transferred = sum(counts.values())
+        message = f"Transferred {total_transferred} records from {delete_student.get('name', delete_id)} ({delete_id}) into {keep_student.get('name', keep_id)} ({keep_id})."
+        logger.info(f"Student merge: {message} Details: {counts}")
+
+        return jsonify({'success': True, 'message': message, 'counts': counts})
+
+    except Exception as e:
+        logger.error(f"Error merging students: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/admin/reset_student_password', methods=['POST'])
 @admin_required
 def reset_student_password():
