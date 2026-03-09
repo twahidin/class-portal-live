@@ -588,6 +588,7 @@ def send_message():
         return jsonify({'error': 'Failed to send message'}), 500
 
 @app.route('/api/poll_messages/<teacher_id>')
+@limiter.limit("600 per hour")
 @login_required
 def poll_messages(teacher_id):
     """Poll for new messages from a teacher"""
