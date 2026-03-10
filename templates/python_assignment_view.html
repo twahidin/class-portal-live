@@ -451,10 +451,6 @@
         });
     }
 
-    // Auto-save every 30 seconds
-    if (!hasExistingSubmission) {
-        setInterval(function() { saveDraftOnline(true); }, 30000);
-    }
 
     function uploadCells(file) {
         var reader = new FileReader();
