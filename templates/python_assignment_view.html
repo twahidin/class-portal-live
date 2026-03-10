@@ -418,8 +418,10 @@
                 try {
                     var nb = JSON.parse(text);
                     (nb.cells || []).forEach(function(cell) {
-                        if (cell.cell_type === 'code') {
-                            var src = Array.isArray(cell.source) ? cell.source.join('') : (cell.source || '');
+                        var src = Array.isArray(cell.source) ? cell.source.join('') : (cell.source || '');
+                        if (cell.cell_type === 'markdown') {
+                            newCells.push({ id: String(++cellId), type: 'markdown', content: src, output: '', running: false });
+                        } else if (cell.cell_type === 'code') {
                             var out = '';
                             (cell.outputs || []).forEach(function(o) {
                                 if (o.text) out += (Array.isArray(o.text) ? o.text.join('') : o.text);
