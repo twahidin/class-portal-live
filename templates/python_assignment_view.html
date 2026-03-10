@@ -134,10 +134,16 @@
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
         html = html.replace(/`(.+?)`/g, '<code>$1</code>');
-        html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-        html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
+        html = html.replace(/^- (.+)$/gm, '<<LI>>$1<</LI>>');
+        html = html.replace(/^(\d+)\. (.+)$/gm, '<<LI>>$2<</LI>>');
         html = html.replace(/^---$/gm, '<hr>');
         html = html.replace(/\n/g, '<br>');
+        // Wrap consecutive <li> runs in <ul>
+        html = html.replace(/(<<LI>>[\s\S]*?<</LI>>)(?:<br>)*/g, function(match) {
+            var items = match.replace(/<br>/g, '').replace(/<<LI>>/g, '<li>').replace(/<\/LI>>/g, '</li>');
+            return items;
+        });
+        html = html.replace(/(<li>[\s\S]*?<\/li>)+/g, '<ul>$&</ul>');
         return html;
     }
 
