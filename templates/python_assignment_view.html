@@ -125,42 +125,8 @@
         return div.innerHTML;
     }
 
-    function simpleMarkdown(text) {
-        // Minimal markdown rendering for notebook markdown cells
-        var html = escapeHtml(text);
-        html = html.replace(/^### (.+)$/gm, '<h5>$1</h5>');
-        html = html.replace(/^## (.+)$/gm, '<h4>$1</h4>');
-        html = html.replace(/^# (.+)$/gm, '<h3>$1</h3>');
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-        html = html.replace(/`(.+?)`/g, '<code>$1</code>');
-        html = html.replace(/^- (.+)$/gm, '<<LI>>$1<</LI>>');
-        html = html.replace(/^(\d+)\. (.+)$/gm, '<<LI>>$2<</LI>>');
-        html = html.replace(/^---$/gm, '<hr>');
-        html = html.replace(/\n/g, '<br>');
-        // Wrap consecutive <li> runs in <ul>
-        html = html.replace(/(<<LI>>[\s\S]*?<</LI>>)(?:<br>)*/g, function(match) {
-            var items = match.replace(/<br>/g, '').replace(/<<LI>>/g, '<li>').replace(/<\/LI>>/g, '</li>');
-            return items;
-        });
-        html = html.replace(/(<li>[\s\S]*?<\/li>)+/g, '<ul>$&</ul>');
-        return html;
-    }
-
     function renderCells() {
         container.innerHTML = cells.map(function(c) {
-            if (c.type === 'markdown') {
-                return '<div class="card mb-3 cell-card" data-id="' + c.id + '">' +
-                    '<div class="card-header py-2 d-flex justify-content-between align-items-center">' +
-                    '<span class="badge bg-info">markdown</span>' +
-                    '<div>' +
-                    '<button type="button" class="btn btn-sm btn-outline-danger delete-cell" title="Delete">' +
-                    '<i class="bi bi-trash"></i></button>' +
-                    '</div></div>' +
-                    '<div class="card-body p-2 markdown-cell">' +
-                    simpleMarkdown(c.content) +
-                    '</div></div>';
-            }
             var isRunning = c.running;
             var runBtn = isRunning
                 ? '<button type="button" class="btn btn-sm btn-danger stop-cell" title="Stop"><i class="bi bi-stop-fill"></i></button> '
@@ -358,13 +324,6 @@
             var source = c.content.split('\n').map(function(line, i, arr) {
                 return i < arr.length - 1 ? line + '\n' : line;
             });
-            if (c.type === 'markdown') {
-                return {
-                    cell_type: 'markdown',
-                    metadata: {},
-                    source: source
-                };
-            }
             var cell = {
                 cell_type: 'code',
                 execution_count: null,
@@ -418,10 +377,8 @@
                 try {
                     var nb = JSON.parse(text);
                     (nb.cells || []).forEach(function(cell) {
-                        var src = Array.isArray(cell.source) ? cell.source.join('') : (cell.source || '');
-                        if (cell.cell_type === 'markdown') {
-                            newCells.push({ id: String(++cellId), type: 'markdown', content: src, output: '', running: false });
-                        } else if (cell.cell_type === 'code') {
+                        if (cell.cell_type === 'code') {
+                            var src = Array.isArray(cell.source) ? cell.source.join('') : (cell.source || '');
                             var out = '';
                             (cell.outputs || []).forEach(function(o) {
                                 if (o.text) out += (Array.isArray(o.text) ? o.text.join('') : o.text);
@@ -515,7 +472,7 @@
         .then(function(data) {
             if (data.cells && data.cells.length > 0) {
                 cells = data.cells.map(function(c) {
-                    return { id: String(++cellId), type: c.type || 'code', content: c.content || '', output: '', running: false };
+                    return { id: String(++cellId), type: 'code', content: c.content || '', output: '', running: false };
                 });
             } else {
                 cells = [{ id: String(++cellId), type: 'code', content: '# Write your code here\n', output: '', running: false }];
