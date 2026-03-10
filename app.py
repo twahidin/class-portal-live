@@ -887,6 +887,56 @@ def save_draft(assignment_id):
         logger.error(f"Error saving draft: {e}")
         return jsonify({'error': 'Failed to save'}), 500
 
+@app.route('/assignments/<assignment_id>/save-python', methods=['POST'])
+@limiter.exempt
+@login_required
+def save_python_draft(assignment_id):
+    """Save Python notebook cells as a draft so students can resume later."""
+    try:
+        data = request.get_json()
+        notebook_cells = data.get('cells', [])
+
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        if not assignment or assignment.get('marking_type') != 'python':
+            return jsonify({'error': 'Not found'}), 404
+
+        # Check for existing submission
+        existing = Submission.find_one({
+            'assignment_id': assignment_id,
+            'student_id': session['student_id']
+        })
+
+        if existing:
+            if existing.get('status') in ['submitted', 'ai_reviewed', 'reviewed', 'approved']:
+                return jsonify({'error': 'Already submitted'}), 400
+
+            Submission.update_one(
+                {'submission_id': existing['submission_id']},
+                {'$set': {
+                    'notebook_cells': notebook_cells,
+                    'updated_at': datetime.utcnow()
+                }}
+            )
+            submission_id = existing['submission_id']
+        else:
+            submission_id = generate_submission_id()
+            Submission.insert_one({
+                'submission_id': submission_id,
+                'assignment_id': assignment_id,
+                'student_id': session['student_id'],
+                'notebook_cells': notebook_cells,
+                'status': 'draft',
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow()
+            })
+
+        return jsonify({'success': True, 'submission_id': submission_id})
+
+    except Exception as e:
+        logger.error(f"Error saving Python draft: {e}")
+        return jsonify({'error': 'Failed to save'}), 500
+
+
 @app.route('/assignments/<assignment_id>/feedback', methods=['POST'])
 @login_required
 @limiter.limit("5 per minute")
@@ -2969,6 +3019,16 @@ def student_python_template_cells(assignment_id):
     teacher_ids = get_student_teacher_ids(session['student_id'])
     if assignment['teacher_id'] not in teacher_ids or not can_student_access_assignment(student, assignment):
         return jsonify({'error': 'Unauthorized'}), 403
+
+    # Check for saved draft first — return draft cells if available
+    draft = Submission.find_one({
+        'assignment_id': assignment_id,
+        'student_id': session['student_id'],
+        'status': 'draft',
+        'notebook_cells': {'$exists': True}
+    })
+    if draft and draft.get('notebook_cells'):
+        return jsonify({'cells': draft['notebook_cells'], 'draft': True})
 
     template_id = assignment.get('python_question_template_id')
     if not template_id:
