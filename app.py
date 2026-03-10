@@ -397,6 +397,7 @@ def index():
     return redirect(url_for('login'))
 
 @app.route('/dashboard')
+@limiter.exempt
 @login_required
 def dashboard():
     """Student dashboard - show assigned teachers"""
@@ -638,6 +639,7 @@ def poll_messages(teacher_id):
 # ============================================================================
 
 @app.route('/assignments')
+@limiter.exempt
 @login_required
 def assignments_list():
     """List subjects with assignments"""
@@ -694,6 +696,7 @@ def assignments_list():
                          total_feedback_count=total_feedback_count)
 
 @app.route('/assignments/subject/<subject>')
+@limiter.exempt
 @login_required
 def assignments_by_subject(subject):
     """List assignments for a specific subject"""
@@ -760,6 +763,7 @@ def assignments_by_subject(subject):
                          submitted_count=submitted_count)
 
 @app.route('/assignments/<assignment_id>')
+@limiter.exempt
 @login_required
 def view_assignment(assignment_id):
     """View and work on an assignment"""
@@ -1197,6 +1201,7 @@ def student_submissions():
                          submissions=submissions)
 
 @app.route('/submissions/<submission_id>')
+@limiter.exempt
 @login_required
 def view_submission(submission_id):
     """View a specific submission"""
@@ -2612,6 +2617,7 @@ def student_preview_feedback():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/student/submission/<submission_id>/file/<int:file_index>')
+@limiter.exempt
 @login_required
 def view_student_submission_file(submission_id, file_index):
     """Serve student's submission file. Optional query param: rotate=90|180|270 to rotate PDF or image."""
@@ -2853,6 +2859,7 @@ def export_annotated_pdf(submission_id):
 
 
 @app.route('/student/assignment/<assignment_id>/file/<file_type>')
+@limiter.exempt
 @login_required
 def download_student_assignment_file(assignment_id, file_type):
     """Download assignment file (question paper) for student"""
@@ -2949,6 +2956,7 @@ def download_student_assignment_file(assignment_id, file_type):
 
 
 @app.route('/student/assignment/<assignment_id>/python-template')
+@limiter.exempt
 @login_required
 def student_python_template_cells(assignment_id):
     """Return Python question template cells as JSON for the Python assignment view."""
@@ -3008,6 +3016,7 @@ def student_python_template_cells(assignment_id):
 
 
 @app.route('/student/assignment/<assignment_id>/question-paper-page/<int:page_num>')
+@limiter.exempt
 @login_required
 def student_question_paper_page_image(assignment_id, page_num):
     """Return a single question paper page as PNG for the annotator. Headers: X-PDF-Page-Count."""
@@ -3135,6 +3144,7 @@ def _get_marked_copy_files(submission: dict):
 
 
 @app.route('/student/feedback/<submission_id>/pdf')
+@limiter.exempt
 @login_required
 def download_student_feedback_pdf(submission_id):
     """Download feedback PDF for student (same content as teacher review: standard or rubric)."""
@@ -3175,6 +3185,7 @@ def download_student_feedback_pdf(submission_id):
 
 
 @app.route('/student/submission/<submission_id>/correction-pdf')
+@limiter.exempt
 @login_required
 def download_correction_pdf(submission_id):
     """Serve the auto-generated correction PDF for a student."""
@@ -11142,7 +11153,7 @@ def _check_teacher_storage(teacher_id):
     """Check if teacher is within storage limit.
     Returns (ok, used_bytes, limit_bytes, message)."""
     teacher = Teacher.find_one({'teacher_id': teacher_id})
-    limit_bytes = (teacher or {}).get('storage_limit_bytes', 500 * 1024 * 1024)
+    limit_bytes = (teacher or {}).get('storage_limit_bytes', 5 * 1024 * 1024 * 1024)
     used_bytes = _calculate_teacher_storage(teacher_id)
     percentage = (used_bytes / limit_bytes * 100) if limit_bytes > 0 else 0
 
@@ -11163,7 +11174,7 @@ def api_teacher_storage():
             return jsonify({'error': 'Teacher not found'}), 404
 
         used_bytes = _calculate_teacher_storage(session['teacher_id'])
-        limit_bytes = teacher.get('storage_limit_bytes', 500 * 1024 * 1024)
+        limit_bytes = teacher.get('storage_limit_bytes', 5 * 1024 * 1024 * 1024)
         percentage = (used_bytes / limit_bytes * 100) if limit_bytes > 0 else 0
 
         return jsonify({
@@ -11190,7 +11201,7 @@ def api_admin_storage():
 
         for t in teachers:
             used = _calculate_teacher_storage(t['teacher_id'])
-            limit = t.get('storage_limit_bytes', 500 * 1024 * 1024)
+            limit = t.get('storage_limit_bytes', 5 * 1024 * 1024 * 1024)
             total_used += used
             teacher_storage.append({
                 'teacher_id': t['teacher_id'],
