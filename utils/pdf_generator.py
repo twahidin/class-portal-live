@@ -10,6 +10,109 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY, TA_RIGHT
 
 logger = logging.getLogger(__name__)
 
+import re as _re
+
+
+def clean_for_pdf(text: str) -> str:
+    """Convert LaTeX math to readable Unicode and XML-escape for ReportLab Paragraph.
+
+    Handles $...$ and $$...$$ delimiters, common LaTeX commands, and ensures
+    special XML characters are properly escaped so Paragraph() doesn't break.
+    """
+    if not text:
+        return ''
+    text = str(text)
+
+    # Remove $$ and $ delimiters
+    text = text.replace('$$', '')
+    text = _re.sub(r'\$([^$]+)\$', r'\1', text)
+    # Remove remaining single $ (stray)
+    text = text.replace('$', '')
+
+    # Common LaTeX commands -> Unicode
+    text = _re.sub(r'\\frac\{([^}]*)\}\{([^}]*)\}', r'(\1)/(\2)', text)
+    text = _re.sub(r'\\sqrt\{([^}]*)\}', r'√(\1)', text)
+    text = _re.sub(r'\\sqrt\[(\d+)\]\{([^}]*)\}', r'\1√(\2)', text)
+    text = text.replace('\\times', '×')
+    text = text.replace('\\cdot', '·')
+    text = text.replace('\\div', '÷')
+    text = text.replace('\\pm', '±')
+    text = text.replace('\\mp', '∓')
+    text = text.replace('\\leq', '≤').replace('\\le', '≤')
+    text = text.replace('\\geq', '≥').replace('\\ge', '≥')
+    text = text.replace('\\neq', '≠').replace('\\ne', '≠')
+    text = text.replace('\\approx', '≈')
+    text = text.replace('\\infty', '∞')
+    text = text.replace('\\pi', 'π')
+    text = text.replace('\\theta', 'θ')
+    text = text.replace('\\alpha', 'α')
+    text = text.replace('\\beta', 'β')
+    text = text.replace('\\gamma', 'γ')
+    text = text.replace('\\delta', 'δ')
+    text = text.replace('\\lambda', 'λ')
+    text = text.replace('\\sigma', 'σ')
+    text = text.replace('\\mu', 'μ')
+    text = text.replace('\\therefore', '∴')
+    text = text.replace('\\because', '∵')
+    text = text.replace('\\rightarrow', '→').replace('\\to', '→')
+    text = text.replace('\\leftarrow', '←')
+    text = text.replace('\\Rightarrow', '⇒').replace('\\implies', '⇒')
+    text = text.replace('\\Leftarrow', '⇐')
+    text = text.replace('\\sum', 'Σ')
+    text = text.replace('\\prod', 'Π')
+    text = text.replace('\\int', '∫')
+    text = text.replace('\\partial', '∂')
+    text = text.replace('\\nabla', '∇')
+    text = text.replace('\\forall', '∀')
+    text = text.replace('\\exists', '∃')
+    text = text.replace('\\in', '∈')
+    text = text.replace('\\notin', '∉')
+    text = text.replace('\\subset', '⊂')
+    text = text.replace('\\cup', '∪')
+    text = text.replace('\\cap', '∩')
+    text = text.replace('\\emptyset', '∅')
+    text = text.replace('\\degree', '°')
+    text = text.replace('\\circ', '°')
+    text = text.replace('\\triangle', '△')
+    text = text.replace('\\angle', '∠')
+    text = text.replace('\\perp', '⊥')
+    text = text.replace('\\parallel', '∥')
+    text = text.replace('\\blacksquare', '■')
+    text = text.replace('\\quad', ' ')
+    text = text.replace('\\qquad', '  ')
+    text = text.replace('\\text{', '').replace('\\mathrm{', '').replace('\\textbf{', '').replace('\\mathbf{', '')
+
+    # Convert superscripts: ^{...} or ^x
+    _sup_map = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+                '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+                '+': '⁺', '-': '⁻', '(': '⁽', ')': '⁾', 'n': 'ⁿ', 'i': 'ⁱ'}
+    def _sup_repl(m):
+        content = m.group(1)
+        return ''.join(_sup_map.get(c, c) for c in content)
+    text = _re.sub(r'\^\{([^}]*)\}', _sup_repl, text)
+    text = _re.sub(r'\^([0-9])', lambda m: _sup_map.get(m.group(1), m.group(1)), text)
+
+    # Convert subscripts: _{...} or _x
+    _sub_map = {'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+                '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+                '+': '₊', '-': '₋', '(': '₍', ')': '₎'}
+    def _sub_repl(m):
+        content = m.group(1)
+        return ''.join(_sub_map.get(c, c) for c in content)
+    text = _re.sub(r'_\{([^}]*)\}', _sub_repl, text)
+    text = _re.sub(r'_([0-9])', lambda m: _sub_map.get(m.group(1), m.group(1)), text)
+
+    # Remove remaining braces from LaTeX grouping
+    text = _re.sub(r'\\[a-zA-Z]+', '', text)  # strip unknown \commands
+    text = text.replace('{', '').replace('}', '')
+
+    # XML-escape for ReportLab Paragraph (must come last)
+    text = text.replace('&', '&amp;')
+    text = text.replace('<', '&lt;')
+    text = text.replace('>', '&gt;')
+
+    return text
+
 
 def _image_bytes_to_pdf_page(image_bytes: bytes) -> bytes:
     """Convert image bytes to a single-page PDF."""
@@ -169,23 +272,25 @@ def generate_review_pdf(submission: dict, assignment: dict, student: dict, teach
     story.append(Paragraph("📚 Assignment Feedback Report", styles['Title_Custom']))
     story.append(Spacer(1, 5))
     
-    # Info box
+    # Info box — use Paragraphs so long text wraps instead of overflowing
+    _cell = styles['TableCell']
+    _bold_cell = ParagraphStyle('InfoBold', parent=_cell, fontName='Helvetica-Bold')
     info_data = [
-        ['Student:', student.get('name', 'Unknown'), 'Date:', datetime.utcnow().strftime('%d %B %Y')],
-        ['ID:', student.get('student_id', 'N/A'), 'Class:', student.get('class', 'N/A')],
-        ['Assignment:', assignment.get('title', 'Untitled'), 'Subject:', assignment.get('subject', 'N/A')],
+        [Paragraph('Student:', _bold_cell), Paragraph(clean_for_pdf(student.get('name', 'Unknown')), _cell),
+         Paragraph('Date:', _bold_cell), Paragraph(datetime.utcnow().strftime('%d %B %Y'), _cell)],
+        [Paragraph('ID:', _bold_cell), Paragraph(clean_for_pdf(student.get('student_id', 'N/A')), _cell),
+         Paragraph('Class:', _bold_cell), Paragraph(clean_for_pdf(student.get('class', 'N/A')), _cell)],
+        [Paragraph('Assignment:', _bold_cell), Paragraph(clean_for_pdf(assignment.get('title', 'Untitled')), _cell),
+         Paragraph('Subject:', _bold_cell), Paragraph(clean_for_pdf(assignment.get('subject', 'N/A')), _cell)],
     ]
-    
+
     info_table = Table(info_data, colWidths=[2*cm, 6*cm, 2*cm, 6*cm])
     info_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('TEXTCOLOR', (0, 0), (-1, -1), TEXT_COLOR),
         ('BACKGROUND', (0, 0), (-1, -1), LIGHT_GRAY),
         ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
         ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
         ('PADDING', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
     story.append(info_table)
     story.append(Spacer(1, 15))
@@ -313,7 +418,7 @@ def generate_review_pdf(submission: dict, assignment: dict, student: dict, teach
         story.append(Paragraph("Overall Comments", styles['Heading_Custom']))
         
         # Create a styled box for overall feedback
-        overall_data = [[Paragraph(overall, styles['Body_Custom'])]]
+        overall_data = [[Paragraph(clean_for_pdf(overall), styles['Body_Custom'])]]
         overall_table = Table(overall_data, colWidths=[16*cm])
         overall_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), HexColor('#e8f5e9')),
@@ -321,18 +426,18 @@ def generate_review_pdf(submission: dict, assignment: dict, student: dict, teach
             ('PADDING', (0, 0), (-1, -1), 10),
         ]))
         story.append(overall_table)
-    
+
     # Areas for improvement
     improvement_notes = []
     for q in questions:
         if q.get('improvement'):
             improvement_notes.append(f"Q{q.get('question_num', '?')}: {q.get('improvement')}")
-    
+
     if improvement_notes:
         story.append(Spacer(1, 15))
         story.append(Paragraph("Areas for Improvement", styles['Heading_Custom']))
         for note in improvement_notes:
-            story.append(Paragraph(f"• {note}", styles['Body_Custom']))
+            story.append(Paragraph(f"&bull; {clean_for_pdf(note)}", styles['Body_Custom']))
     
     # Footer
     story.append(Spacer(1, 30))
@@ -397,14 +502,11 @@ def generate_correction_pdf(submission: dict, assignment: dict, student: dict) -
 
     info_table = Table(info_data, colWidths=[2*cm, 6*cm, 2*cm, 6*cm])
     info_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('TEXTCOLOR', (0, 0), (-1, -1), TEXT_COLOR),
         ('BACKGROUND', (0, 0), (-1, -1), LIGHT_GRAY),
         ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
         ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
         ('PADDING', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
     story.append(info_table)
     story.append(Spacer(1, 15))
@@ -561,23 +663,25 @@ def generate_rubric_review_pdf(submission: dict, assignment: dict, student: dict
     story.append(Paragraph("📝 Essay Feedback Report", styles['Title_Custom']))
     story.append(Spacer(1, 5))
     
-    # Info box
+    # Info box — use Paragraphs so long text wraps instead of overflowing
+    _cell = styles['TableCell']
+    _bold_cell = ParagraphStyle('InfoBold', parent=_cell, fontName='Helvetica-Bold')
     info_data = [
-        ['Student:', student.get('name', 'Unknown'), 'Date:', datetime.utcnow().strftime('%d %B %Y')],
-        ['ID:', student.get('student_id', 'N/A'), 'Class:', student.get('class', 'N/A')],
-        ['Assignment:', assignment.get('title', 'Untitled'), 'Subject:', assignment.get('subject', 'N/A')],
+        [Paragraph('Student:', _bold_cell), Paragraph(clean_for_pdf(student.get('name', 'Unknown')), _cell),
+         Paragraph('Date:', _bold_cell), Paragraph(datetime.utcnow().strftime('%d %B %Y'), _cell)],
+        [Paragraph('ID:', _bold_cell), Paragraph(clean_for_pdf(student.get('student_id', 'N/A')), _cell),
+         Paragraph('Class:', _bold_cell), Paragraph(clean_for_pdf(student.get('class', 'N/A')), _cell)],
+        [Paragraph('Assignment:', _bold_cell), Paragraph(clean_for_pdf(assignment.get('title', 'Untitled')), _cell),
+         Paragraph('Subject:', _bold_cell), Paragraph(clean_for_pdf(assignment.get('subject', 'N/A')), _cell)],
     ]
-    
+
     info_table = Table(info_data, colWidths=[2*cm, 6*cm, 2*cm, 6*cm])
     info_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('TEXTCOLOR', (0, 0), (-1, -1), TEXT_COLOR),
         ('BACKGROUND', (0, 0), (-1, -1), LIGHT_GRAY),
         ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
         ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
         ('PADDING', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
     story.append(info_table)
     story.append(Spacer(1, 15))
@@ -668,7 +772,7 @@ def generate_rubric_review_pdf(submission: dict, assignment: dict, student: dict
     if overall:
         story.append(Paragraph("💬 Overall Feedback", styles['Heading_Custom']))
         
-        overall_data = [[Paragraph(overall, styles['Body_Custom'])]]
+        overall_data = [[Paragraph(clean_for_pdf(overall), styles['Body_Custom'])]]
         overall_table = Table(overall_data, colWidths=[16*cm])
         overall_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), HexColor('#e8f5e9')),
@@ -677,7 +781,7 @@ def generate_rubric_review_pdf(submission: dict, assignment: dict, student: dict
         ]))
         story.append(overall_table)
         story.append(Spacer(1, 15))
-    
+
     # Table 2: Detailed Corrections
     story.append(Paragraph("⚠️ Detailed Corrections", styles['Heading_Custom']))
     
@@ -1246,15 +1350,15 @@ def generate_student_feedback_elements(submission: dict, assignment: dict, stude
     overall = teacher_feedback.get('overall_feedback') or ai_feedback.get('overall_feedback', '')
     if overall:
         elements.append(Spacer(1, 10))
-        elements.append(Paragraph(f"<b>Comments:</b> {overall}", styles['Body_Custom']))
+        elements.append(Paragraph(f"<b>Comments:</b> {clean_for_pdf(overall)}", styles['Body_Custom']))
     
     return elements
 
 def truncate_text(text: str, max_length: int) -> str:
-    """Truncate text to max length with ellipsis"""
+    """Clean LaTeX, XML-escape, and truncate text for PDF Paragraphs."""
     if not text:
         return ''
-    text = str(text)
+    text = clean_for_pdf(str(text))
     if len(text) <= max_length:
         return text
     return text[:max_length-3] + '...'
@@ -1476,14 +1580,11 @@ def generate_class_student_list_pdf(class_id: str, class_name: str, students: li
     
     info_table = Table(info_data, colWidths=[2.5*cm, 5.5*cm, 3*cm, 5*cm])
     info_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('TEXTCOLOR', (0, 0), (-1, -1), TEXT_COLOR),
         ('BACKGROUND', (0, 0), (-1, -1), LIGHT_GRAY),
         ('BOX', (0, 0), (-1, -1), 1, BORDER_COLOR),
         ('GRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
         ('PADDING', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
     ]))
     story.append(info_table)
     story.append(Spacer(1, 20))
