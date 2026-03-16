@@ -455,8 +455,10 @@ def analyze_submission_images(pages: list, assignment: dict, answer_key_content:
     try:
         # Build content array with images
         content = []
-        
+
         # Build additional context from reference materials and rubrics
+        # Preserve any caller-supplied additional_context (e.g. OCR confirmed answers)
+        caller_context = additional_context or ""
         additional_context = ""
         
         # Add reference materials text if available (for literature, history, etc.)
@@ -539,9 +541,11 @@ Respond ONLY with valid JSON in this exact format:
     "review_notes": "REQUIRED if confidence is low — explain what was unclear and why teacher review is needed"
 }}"""
 
-        # Append additional context if provided (e.g. for correction re-marking)
+        # Append additional context (reference materials, rubrics, caller context)
         if additional_context:
             system_prompt += f"\n\nADDITIONAL CONTEXT:\n{additional_context}"
+        if caller_context:
+            system_prompt += f"\n\n{caller_context}"
 
         # Add answer key - ALWAYS use PDF vision for accuracy (critical for marking)
         # Extracted text is stored but not used here to ensure we don't miss 
@@ -1594,7 +1598,7 @@ def generate_feedback_summary(submission: dict, assignment: dict, ai_feedback: d
     }
 
 
-def analyze_essay_with_rubrics(pages: list, assignment: dict, rubrics_content: bytes = None, teacher: dict = None, override_ai_model: str = None) -> dict:
+def analyze_essay_with_rubrics(pages: list, assignment: dict, rubrics_content: bytes = None, teacher: dict = None, override_ai_model: str = None, additional_context: str = None) -> dict:
     """
     Analyze student essay submission using rubrics for criteria-based marking.
     
@@ -1735,6 +1739,10 @@ Respond ONLY with valid JSON in this exact format:
     "strengths": ["What the student did well", "Another strength"],
     "priority_improvements": ["Most important thing to work on", "Second priority"]
 }}"""
+
+        # Append caller-supplied additional context (e.g. OCR confirmed essay text)
+        if additional_context:
+            system_prompt += f"\n\n{additional_context}"
 
         # Add rubrics PDF with vision if available
         if rubrics_content:
@@ -2125,3 +2133,211 @@ RULES:
     except Exception as e:
         logger.error(f"Error formatting text as LaTeX: {e}")
         return texts
+
+
+# ============================================================================
+# OCR PREVIEW — Extract student answers using Haiku before submission
+# ============================================================================
+
+def ocr_extract_answers(pages: list, assignment: dict, teacher: dict = None,
+                        question_paper_content: bytes = None) -> dict:
+    """
+    Use Claude Haiku to OCR-extract student answers from uploaded images/PDF.
+
+    For standard assignments: extracts per-question answers with question numbers.
+    For rubric/essay assignments: extracts the full essay text as a single block.
+
+    Args:
+        pages: List of page dicts with 'type' ('image'/'pdf') and 'data' (bytes)
+        assignment: Assignment document
+        teacher: Teacher document (for API key resolution)
+        question_paper_content: Optional bytes of question paper PDF for context
+
+    Returns:
+        dict with 'questions' list (standard) or 'essay_text' (rubric)
+    """
+    # Always use Anthropic Haiku for OCR (fast, cheap)
+    api_key = None
+    if teacher and teacher.get('anthropic_api_key'):
+        api_key = decrypt_api_key(teacher['anthropic_api_key'])
+    if not api_key:
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        return {'error': 'No Anthropic API key available for OCR'}
+
+    try:
+        client = Anthropic(api_key=api_key)
+    except Exception as e:
+        return {'error': f'Failed to create Anthropic client: {e}'}
+
+    marking_type = assignment.get('marking_type', 'standard')
+    is_rubric = marking_type == 'rubric'
+
+    # Limit pages
+    if len(pages) > MAX_PAGES_FOR_AI:
+        pages = pages[:MAX_PAGES_FOR_AI]
+
+    # Build system prompt
+    if is_rubric:
+        system_prompt = f"""You are an OCR assistant. Your task is to transcribe the student's handwritten or typed essay/composition from the submitted images.
+
+Assignment: {assignment.get('title', 'Assignment')}
+Subject: {assignment.get('subject', 'General')}
+
+INSTRUCTIONS:
+- Transcribe the full text of the student's essay as accurately as possible
+- Preserve paragraph breaks
+- If handwriting is unclear, make your best guess and mark unclear words with [?]
+- IGNORE any crossed-out or scribbled-over text
+- A caret (^) indicates an insertion — include the inserted text at that position
+
+Respond ONLY with valid JSON:
+{{
+    "essay_text": "the full transcribed essay text"
+}}"""
+    else:
+        system_prompt = f"""You are an OCR assistant. Your task is to transcribe the student's handwritten or typed answers from the submitted images, organized by question number.
+
+Assignment: {assignment.get('title', 'Assignment')}
+Subject: {assignment.get('subject', 'General')}
+Total Marks: {assignment.get('total_marks', 100)}
+
+INSTRUCTIONS:
+- Identify each question number (Q1, Q2, Q3, etc.) from the student's submission
+- Transcribe the student's answer for each question
+- If handwriting is unclear, make your best guess and mark unclear words with [?]
+- If a question appears blank or unanswered, set the answer to "" (empty string)
+- IGNORE any crossed-out or scribbled-over text
+- A caret (^) indicates an insertion — include the inserted text at that position
+- If the question paper is provided, use it to identify the expected questions
+- For sub-questions (e.g. 1a, 1b), list them as separate entries
+
+Respond ONLY with valid JSON:
+{{
+    "questions": [
+        {{
+            "question_num": "1",
+            "extracted_answer": "the student's transcribed answer"
+        }},
+        {{
+            "question_num": "2",
+            "extracted_answer": ""
+        }}
+    ]
+}}"""
+
+    content = []
+
+    # Add question paper for context
+    if question_paper_content:
+        content.append({"type": "text", "text": "QUESTION PAPER (for reference — use this to identify question numbers):"})
+        qp_b64 = base64.standard_b64encode(question_paper_content).decode('utf-8')
+        content.append({
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf", "data": qp_b64}
+        })
+
+    content.append({"type": "text", "text": "\nSTUDENT SUBMISSION (transcribe answers from this):"})
+
+    # Add student pages
+    for i, page in enumerate(pages):
+        if page['type'] == 'image':
+            image_data = resize_image_for_ai(page['data'])
+            image_b64 = base64.standard_b64encode(image_data).decode('utf-8')
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}
+            })
+            content.append({"type": "text", "text": f"(Page {i+1})"})
+        elif page['type'] == 'pdf':
+            pdf_b64 = base64.standard_b64encode(page['data']).decode('utf-8')
+            content.append({
+                "type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}
+            })
+
+    content.append({"type": "text", "text": "\nTranscribe the student's answers and respond with JSON:"})
+
+    try:
+        response = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=8192,
+            messages=[{"role": "user", "content": content}],
+            system=system_prompt
+        )
+        response_text = response.content[0].text
+        result = parse_ai_response(response_text)
+        return result
+    except Exception as e:
+        logger.error(f"OCR extraction error: {e}")
+        return {'error': f'OCR extraction failed: {e}'}
+
+
+def generate_blank_hint(question_num: str, assignment: dict, teacher: dict = None,
+                        question_paper_content: bytes = None) -> dict:
+    """
+    Generate a hint for a blank question to help the student get started.
+    Does NOT give the answer — only provides scaffolding/nudge.
+
+    Args:
+        question_num: The question number (e.g. "1", "2a")
+        assignment: Assignment document
+        teacher: Teacher document for API key
+        question_paper_content: Optional question paper PDF bytes
+
+    Returns:
+        dict with 'hint' string
+    """
+    api_key = None
+    if teacher and teacher.get('anthropic_api_key'):
+        api_key = decrypt_api_key(teacher['anthropic_api_key'])
+    if not api_key:
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        return {'error': 'No API key available'}
+
+    try:
+        client = Anthropic(api_key=api_key)
+    except Exception as e:
+        return {'error': str(e)}
+
+    system_prompt = f"""You are a helpful teacher assistant. A student has left Question {question_num} blank on their assignment.
+
+Assignment: {assignment.get('title', 'Assignment')}
+Subject: {assignment.get('subject', 'General')}
+
+Your task is to give the student a brief, encouraging hint to help them get started on this question.
+- Do NOT give the answer
+- Do NOT solve the problem for them
+- Give a nudge: what concept applies, what to think about, or how to approach it
+- Keep it to 1-3 sentences
+- Be encouraging and supportive
+
+Respond ONLY with valid JSON:
+{{
+    "hint": "your hint here"
+}}"""
+
+    content = []
+    if question_paper_content:
+        content.append({"type": "text", "text": "Here is the question paper. Focus on the question the student left blank:"})
+        qp_b64 = base64.standard_b64encode(question_paper_content).decode('utf-8')
+        content.append({
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf", "data": qp_b64}
+        })
+
+    content.append({"type": "text", "text": f"The student left Question {question_num} blank. Give them a hint to get started."})
+
+    try:
+        response = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=512,
+            messages=[{"role": "user", "content": content}],
+            system=system_prompt
+        )
+        result = parse_ai_response(response.content[0].text)
+        return result
+    except Exception as e:
+        logger.error(f"Blank hint generation error: {e}")
+        return {'error': str(e)}

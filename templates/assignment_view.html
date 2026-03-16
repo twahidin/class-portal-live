@@ -285,7 +285,11 @@
                         <!-- Submit Button -->
                         <div class="d-grid gap-2 mt-3">
                             <button type="submit" class="btn btn-success btn-lg" id="submit-btn" disabled>
+                                {% if assignment.marking_type not in ('spreadsheet', 'python') %}
+                                <i class="bi bi-eye me-1"></i>Scan & Review Answers
+                                {% else %}
                                 <i class="bi bi-send-fill me-1"></i>Submit Assignment
+                                {% endif %}
                             </button>
                             {% if drive_available and drive_submission and drive_submission.google_drive_url %}
                             <button type="button" class="btn btn-primary btn-lg" id="submit-drive-btn" onclick="submitFromDrive()">
@@ -686,6 +690,109 @@
     background: #fff;
 }
 .help-btn[data-help-type].active { font-weight: 600; box-shadow: 0 0 0 2px currentColor; }
+
+/* OCR Review Modal */
+.ocr-review-container {
+    display: flex;
+    height: calc(100vh - 120px);
+}
+.ocr-pages-panel {
+    width: 45%;
+    border-right: 2px solid #dee2e6;
+    display: flex;
+    flex-direction: column;
+}
+.ocr-answers-panel {
+    width: 55%;
+    display: flex;
+    flex-direction: column;
+}
+.ocr-panel-header {
+    padding: 10px 15px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+.ocr-pages-scroll, .ocr-answers-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+}
+.ocr-page-img {
+    width: 100%;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.ocr-question-card {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background: #fff;
+}
+.ocr-question-card.blank {
+    border-color: #ffc107;
+    background: #fffbf0;
+}
+.ocr-question-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+.ocr-question-num {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+.ocr-blank-badge {
+    font-size: 0.75rem;
+}
+.ocr-answer-textarea {
+    width: 100%;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    resize: vertical;
+    min-height: 60px;
+}
+.ocr-answer-textarea:focus {
+    border-color: #667eea;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(102,126,234,0.2);
+}
+.ocr-hint-box {
+    background: #e8f5e9;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 8px;
+    font-size: 0.85rem;
+}
+.ocr-essay-textarea {
+    width: 100%;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 0.9rem;
+    resize: vertical;
+    min-height: 300px;
+    line-height: 1.6;
+}
+@media (max-width: 768px) {
+    .ocr-review-container {
+        flex-direction: column;
+        height: auto;
+    }
+    .ocr-pages-panel, .ocr-answers-panel {
+        width: 100%;
+        border-right: none;
+    }
+    .ocr-pages-panel {
+        border-bottom: 2px solid #dee2e6;
+        max-height: 40vh;
+    }
+}
 </style>
 
 <!-- Ask AI for Help Modal -->
@@ -936,6 +1043,56 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- OCR Review Modal (pre-submission answer review) -->
+{% if not existing_submission and assignment.marking_type not in ('spreadsheet', 'python') %}
+<div class="modal fade" id="ocrReviewModal" data-bs-backdrop="static" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white py-2">
+                <h5 class="modal-title"><i class="bi bi-eye-fill me-2"></i>Review Your Answers Before Submitting</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="ocr-review-container">
+                    <!-- Left: Uploaded pages -->
+                    <div class="ocr-pages-panel">
+                        <div class="ocr-panel-header">
+                            <h6 class="mb-0"><i class="bi bi-images me-1"></i>Your Uploaded Work</h6>
+                        </div>
+                        <div class="ocr-pages-scroll" id="ocr-pages-scroll">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    <!-- Right: Extracted answers -->
+                    <div class="ocr-answers-panel">
+                        <div class="ocr-panel-header">
+                            <h6 class="mb-0"><i class="bi bi-pencil-square me-1"></i>Extracted Answers — Review & Edit</h6>
+                        </div>
+                        <div class="ocr-answers-scroll" id="ocr-answers-scroll">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <div class="d-flex align-items-center gap-2 w-100">
+                    <span class="text-muted small flex-grow-1" id="ocr-blank-warning" style="display:none;">
+                        <i class="bi bi-exclamation-triangle text-warning me-1"></i>
+                        <span id="ocr-blank-count">0</span> question(s) left blank
+                    </span>
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-arrow-left me-1"></i>Go Back & Re-upload
+                    </button>
+                    <button type="button" class="btn btn-success btn-lg" id="ocr-confirm-submit-btn" onclick="confirmAndSubmit()">
+                        <i class="bi bi-send-fill me-1"></i>Confirm & Submit
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -2243,64 +2400,335 @@
     
     // === FORM SUBMISSION ===
     const form = document.getElementById('submission-form');
+    const isRubricAssignment = {{ 'true' if assignment.marking_type == 'rubric' else 'false' }};
+    const enableOcrReview = !isSpreadsheetAssignment && {{ 'true' if assignment.marking_type not in ('spreadsheet', 'python') else 'false' }};
+    let ocrConfirmedAnswers = null;  // Stores student-confirmed answers after OCR review
+
     if (form) {
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             if (isSpreadsheetAssignment) {
                 if (!uploadedExcel) {
                     alert('Please upload your Excel spreadsheet.');
                     return;
                 }
-            } else if (uploadedPhotos.length === 0 && !uploadedPdf) {
+                // Spreadsheet: direct submit (no OCR)
+                await doFinalSubmit();
+                return;
+            }
+
+            if (uploadedPhotos.length === 0 && !uploadedPdf) {
                 alert('Please upload photos or a PDF of your work.');
                 return;
             }
-            
-            if (!confirm('Are you sure you want to submit? You cannot change your answers after submission.')) {
-                return;
-            }
-            
-            const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
-            loadingModal.show();
-            
-            const formData = new FormData();
-            formData.append('assignment_id', '{{ assignment.assignment_id }}');
-            
-            if (isSpreadsheetAssignment && uploadedExcel) {
-                formData.append('files', uploadedExcel, uploadedExcel.name);
-                formData.append('file_type', 'excel');
-            } else if (uploadedPhotos.length > 0) {
-                uploadedPhotos.forEach((photo, idx) => {
-                    formData.append('files', photo, `page_${idx + 1}.jpg`);
-                });
-                formData.append('file_type', 'images');
-            } else if (uploadedPdf) {
-                formData.append('files', uploadedPdf);
-                formData.append('file_type', 'pdf');
-            }
-            
-            try {
-                const response = await fetch('/student/submit', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const result = await response.json();
-                loadingModal.hide();
-                
-                if (result.success) {
-                    alert('Assignment submitted successfully! AI is generating feedback...');
-                    window.location.href = result.redirect || '/student/submissions';
-                } else {
-                    alert(result.error || 'Submission failed. Please try again.');
-                }
-            } catch (error) {
-                loadingModal.hide();
-                alert('Error submitting. Please try again.');
-                console.error(error);
+
+            if (enableOcrReview) {
+                // Trigger OCR scan and show review modal
+                await startOcrReview();
+            } else {
+                // Direct submit for non-OCR types
+                if (!confirm('Are you sure you want to submit? You cannot change your answers after submission.')) return;
+                await doFinalSubmit();
             }
         });
+    }
+
+    // === OCR REVIEW FLOW ===
+    async function startOcrReview() {
+        const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
+        document.getElementById('loading-text').textContent = 'Scanning your work with AI...';
+        loadingModal.show();
+
+        // Build form data for OCR
+        const formData = new FormData();
+        formData.append('assignment_id', '{{ assignment.assignment_id }}');
+
+        if (uploadedPhotos.length > 0) {
+            uploadedPhotos.forEach((photo, idx) => {
+                formData.append('files', photo, `page_${idx + 1}.jpg`);
+            });
+            formData.append('file_type', 'images');
+        } else if (uploadedPdf) {
+            formData.append('files', uploadedPdf);
+            formData.append('file_type', 'pdf');
+        }
+
+        try {
+            const response = await fetch('/api/student/ocr-preview', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+            loadingModal.hide();
+
+            if (result.success && result.ocr_result) {
+                showOcrReviewModal(result.ocr_result);
+            } else {
+                // OCR failed — offer to submit without review
+                const proceed = confirm(
+                    'AI scanning could not extract your answers: ' +
+                    (result.error || 'Unknown error') +
+                    '\n\nWould you like to submit without review?'
+                );
+                if (proceed) {
+                    ocrConfirmedAnswers = null;
+                    await doFinalSubmit();
+                }
+            }
+        } catch (err) {
+            loadingModal.hide();
+            console.error('OCR error:', err);
+            const proceed = confirm(
+                'Could not connect to the scanning service.\n\nWould you like to submit without review?'
+            );
+            if (proceed) {
+                ocrConfirmedAnswers = null;
+                await doFinalSubmit();
+            }
+        }
+    }
+
+    function showOcrReviewModal(ocrResult) {
+        const pagesScroll = document.getElementById('ocr-pages-scroll');
+        const answersScroll = document.getElementById('ocr-answers-scroll');
+        if (!pagesScroll || !answersScroll) return;
+
+        // Populate left panel with uploaded page images
+        pagesScroll.innerHTML = '';
+        if (uploadedPhotos.length > 0) {
+            uploadedPhotos.forEach((file, idx) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = document.createElement('img');
+                    img.src = e.target.result;
+                    img.className = 'ocr-page-img';
+                    img.alt = `Page ${idx + 1}`;
+                    pagesScroll.appendChild(img);
+                };
+                reader.readAsDataURL(file);
+            });
+        } else if (uploadedPdf) {
+            // For PDF, show a message with filename
+            pagesScroll.innerHTML = `
+                <div class="text-center py-4">
+                    <i class="bi bi-file-earmark-pdf text-danger" style="font-size: 3rem;"></i>
+                    <p class="mt-2 mb-0">${uploadedPdf.name}</p>
+                    <p class="text-muted small">PDF uploaded — answers extracted on the right</p>
+                </div>`;
+        }
+
+        // Populate right panel with extracted answers
+        answersScroll.innerHTML = '';
+
+        if (isRubricAssignment) {
+            // Essay: single large textarea
+            const essayText = ocrResult.essay_text || '';
+            answersScroll.innerHTML = `
+                <div class="alert alert-info small mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Review the transcribed text below. Edit any OCR errors before submitting.
+                </div>
+                <label class="form-label fw-semibold">Your Essay</label>
+                <textarea class="ocr-essay-textarea" id="ocr-essay-text">${escapeHtml(essayText)}</textarea>
+            `;
+        } else {
+            // Standard: per-question text boxes
+            const questions = ocrResult.questions || [];
+            if (questions.length === 0) {
+                answersScroll.innerHTML = `
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        AI could not identify individual questions. You can still submit your work.
+                    </div>`;
+            } else {
+                let html = `
+                    <div class="alert alert-info small mb-3">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Review each answer below. Edit any OCR errors, or type your answer if blank.
+                    </div>`;
+
+                let blankCount = 0;
+                questions.forEach((q, idx) => {
+                    const qNum = q.question_num || (idx + 1);
+                    const answer = q.extracted_answer || '';
+                    const isBlank = !answer.trim();
+                    if (isBlank) blankCount++;
+
+                    html += `
+                        <div class="ocr-question-card ${isBlank ? 'blank' : ''}" id="ocr-q-card-${qNum}">
+                            <div class="ocr-question-header">
+                                <span class="ocr-question-num">Question ${qNum}</span>
+                                ${isBlank ? '<span class="badge bg-warning text-dark ocr-blank-badge"><i class="bi bi-exclamation-triangle me-1"></i>Blank</span>' : '<span class="badge bg-success ocr-blank-badge"><i class="bi bi-check me-1"></i>Extracted</span>'}
+                            </div>
+                            <textarea class="ocr-answer-textarea" id="ocr-answer-${qNum}"
+                                      data-qnum="${qNum}"
+                                      placeholder="Type your answer here..."
+                                      oninput="updateOcrBlankStatus()">${escapeHtml(answer)}</textarea>
+                            ${isBlank ? `
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-outline-success" onclick="getOcrHint('${qNum}', this)">
+                                    <i class="bi bi-lightbulb me-1"></i>Get Hint
+                                </button>
+                                <div class="ocr-hint-box" id="ocr-hint-${qNum}" style="display:none;"></div>
+                            </div>` : ''}
+                        </div>`;
+                });
+
+                html += '';
+                answersScroll.innerHTML = html;
+
+                // Update blank warning
+                updateOcrBlankCount(blankCount);
+            }
+        }
+
+        // Show the modal
+        const modal = new bootstrap.Modal(document.getElementById('ocrReviewModal'));
+        modal.show();
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function updateOcrBlankStatus() {
+        const textareas = document.querySelectorAll('.ocr-answer-textarea');
+        let blankCount = 0;
+        textareas.forEach(ta => {
+            const card = ta.closest('.ocr-question-card');
+            if (!ta.value.trim()) {
+                blankCount++;
+                if (card) card.classList.add('blank');
+            } else {
+                if (card) card.classList.remove('blank');
+            }
+        });
+        updateOcrBlankCount(blankCount);
+    }
+
+    function updateOcrBlankCount(count) {
+        const warning = document.getElementById('ocr-blank-warning');
+        const countSpan = document.getElementById('ocr-blank-count');
+        if (warning && countSpan) {
+            if (count > 0) {
+                countSpan.textContent = count;
+                warning.style.display = 'inline';
+            } else {
+                warning.style.display = 'none';
+            }
+        }
+    }
+
+    async function getOcrHint(qNum, btn) {
+        const hintBox = document.getElementById(`ocr-hint-${qNum}`);
+        if (!hintBox) return;
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
+
+        try {
+            const response = await fetch('/api/student/blank-hint', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    assignment_id: '{{ assignment.assignment_id }}',
+                    question_num: qNum
+                })
+            });
+            const result = await response.json();
+
+            if (result.success && result.hint) {
+                hintBox.innerHTML = `<i class="bi bi-lightbulb text-success me-1"></i>${escapeHtml(result.hint)}`;
+                hintBox.style.display = 'block';
+            } else {
+                hintBox.innerHTML = `<i class="bi bi-x-circle text-danger me-1"></i>${escapeHtml(result.error || 'Could not generate hint.')}`;
+                hintBox.style.display = 'block';
+            }
+        } catch (err) {
+            hintBox.innerHTML = '<i class="bi bi-x-circle text-danger me-1"></i>Error connecting to server.';
+            hintBox.style.display = 'block';
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-lightbulb me-1"></i>Get Hint';
+    }
+
+    async function confirmAndSubmit() {
+        // Collect confirmed answers from the review modal
+        if (isRubricAssignment) {
+            const essayTextarea = document.getElementById('ocr-essay-text');
+            if (essayTextarea) {
+                ocrConfirmedAnswers = { essay: essayTextarea.value };
+            }
+        } else {
+            const textareas = document.querySelectorAll('.ocr-answer-textarea');
+            if (textareas.length > 0) {
+                ocrConfirmedAnswers = {};
+                textareas.forEach(ta => {
+                    const qNum = ta.getAttribute('data-qnum');
+                    if (qNum) {
+                        ocrConfirmedAnswers[qNum] = ta.value;
+                    }
+                });
+            }
+        }
+
+        // Close the review modal
+        const reviewModal = bootstrap.Modal.getInstance(document.getElementById('ocrReviewModal'));
+        if (reviewModal) reviewModal.hide();
+
+        // Proceed with actual submission
+        await doFinalSubmit();
+    }
+
+    async function doFinalSubmit() {
+        const loadingModal = new bootstrap.Modal(document.getElementById('loading-modal'));
+        document.getElementById('loading-text').textContent = 'Uploading your work...';
+        loadingModal.show();
+
+        const formData = new FormData();
+        formData.append('assignment_id', '{{ assignment.assignment_id }}');
+
+        if (isSpreadsheetAssignment && uploadedExcel) {
+            formData.append('files', uploadedExcel, uploadedExcel.name);
+            formData.append('file_type', 'excel');
+        } else if (uploadedPhotos.length > 0) {
+            uploadedPhotos.forEach((photo, idx) => {
+                formData.append('files', photo, `page_${idx + 1}.jpg`);
+            });
+            formData.append('file_type', 'images');
+        } else if (uploadedPdf) {
+            formData.append('files', uploadedPdf);
+            formData.append('file_type', 'pdf');
+        }
+
+        // Include student-confirmed answers from OCR review
+        if (ocrConfirmedAnswers) {
+            formData.append('student_confirmed_answers', JSON.stringify(ocrConfirmedAnswers));
+        }
+
+        try {
+            const response = await fetch('/student/submit', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+            loadingModal.hide();
+
+            if (result.success) {
+                alert('Assignment submitted successfully! AI is generating feedback...');
+                window.location.href = result.redirect || '/student/submissions';
+            } else {
+                alert(result.error || 'Submission failed. Please try again.');
+            }
+        } catch (error) {
+            loadingModal.hide();
+            alert('Error submitting. Please try again.');
+            console.error(error);
+        }
     }
 
     // === CORRECTION SUBMISSION ===

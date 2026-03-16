@@ -969,6 +969,110 @@ def get_ai_feedback(assignment_id):
         logger.error(f"Error getting AI feedback: {e}")
         return jsonify({'error': 'Failed to get feedback'}), 500
 
+@app.route('/api/student/ocr-preview', methods=['POST'])
+@login_required
+@limiter.limit("20 per hour")
+def ocr_preview_submission():
+    """OCR-extract student answers from uploaded images/PDF using Haiku before submission"""
+    from utils.ai_marking import ocr_extract_answers
+    from gridfs import GridFS
+
+    try:
+        assignment_id = request.form.get('assignment_id')
+        file_type = request.form.get('file_type', 'images')
+        files = request.files.getlist('files')
+
+        if not assignment_id or not files:
+            return jsonify({'success': False, 'error': 'Missing assignment or files'}), 400
+
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        if not assignment:
+            return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+        teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
+
+        # Build pages list from uploaded files
+        pages = []
+        for i, file in enumerate(files):
+            file_data = file.read()
+            if file.filename.lower().endswith('.pdf'):
+                pages.append({'type': 'pdf', 'data': file_data, 'page_num': i + 1})
+            else:
+                pages.append({'type': 'image', 'data': file_data, 'page_num': i + 1})
+
+        if not pages:
+            return jsonify({'success': False, 'error': 'No valid files uploaded'}), 400
+
+        # Get question paper content for OCR context
+        question_paper_content = None
+        qp_id = assignment.get('question_paper_id')
+        if qp_id:
+            from bson import ObjectId
+            fs = GridFS(db.db)
+            try:
+                qp_file = fs.get(ObjectId(qp_id))
+                question_paper_content = qp_file.read()
+            except Exception as e:
+                logger.warning(f"Could not load question paper for OCR: {e}")
+
+        result = ocr_extract_answers(pages, assignment, teacher, question_paper_content)
+
+        if result.get('error'):
+            return jsonify({'success': False, 'error': result['error']}), 500
+
+        return jsonify({'success': True, 'ocr_result': result})
+
+    except Exception as e:
+        logger.error(f"OCR preview error: {e}")
+        return jsonify({'success': False, 'error': 'OCR scanning failed. Please try again.'}), 500
+
+
+@app.route('/api/student/blank-hint', methods=['POST'])
+@login_required
+@limiter.limit("30 per hour")
+def get_blank_hint():
+    """Get a hint for a blank question to help student get started"""
+    from utils.ai_marking import generate_blank_hint
+    from gridfs import GridFS
+
+    try:
+        data = request.get_json(silent=True) or {}
+        assignment_id = data.get('assignment_id')
+        question_num = data.get('question_num')
+
+        if not assignment_id or not question_num:
+            return jsonify({'success': False, 'error': 'Missing assignment or question number'}), 400
+
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        if not assignment:
+            return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+        teacher = Teacher.find_one({'teacher_id': assignment['teacher_id']})
+
+        # Get question paper for context
+        question_paper_content = None
+        qp_id = assignment.get('question_paper_id')
+        if qp_id:
+            from bson import ObjectId
+            fs = GridFS(db.db)
+            try:
+                qp_file = fs.get(ObjectId(qp_id))
+                question_paper_content = qp_file.read()
+            except Exception as e:
+                logger.warning(f"Could not load question paper for hint: {e}")
+
+        result = generate_blank_hint(str(question_num), assignment, teacher, question_paper_content)
+
+        if result.get('error'):
+            return jsonify({'success': False, 'error': result['error']}), 500
+
+        return jsonify({'success': True, 'hint': result.get('hint', 'Try reviewing your notes for this topic.')})
+
+    except Exception as e:
+        logger.error(f"Blank hint error: {e}")
+        return jsonify({'success': False, 'error': 'Could not generate hint'}), 500
+
+
 @app.route('/api/student/question-help', methods=['POST'])
 @login_required
 @limiter.limit("20 per hour")
@@ -2233,6 +2337,14 @@ def student_submit_files():
             'submitted_via': 'web',
             'created_at': existing['created_at'] if existing else datetime.utcnow()
         }
+        # Store student-confirmed OCR answers if provided
+        student_confirmed_answers = request.form.get('student_confirmed_answers')
+        if student_confirmed_answers:
+            try:
+                import json as _json
+                submission['student_confirmed_answers'] = _json.loads(student_confirmed_answers)
+            except (ValueError, TypeError):
+                pass
         if version is not None:
             submission['version'] = version
         if existing:
@@ -2473,8 +2585,18 @@ Respond ONLY with valid JSON in this exact format:
                         rubrics_content = rubrics_file.read()
                     except:
                         pass
-                
-                ai_result = analyze_essay_with_rubrics(pages, assignment, rubrics_content, teacher)
+
+                # Build additional context from student-confirmed OCR essay text
+                essay_context = None
+                confirmed = submission.get('student_confirmed_answers')
+                if confirmed and confirmed.get('essay'):
+                    essay_context = (
+                        "The student has reviewed and confirmed the following transcription of their essay "
+                        "(use this alongside the images for more accurate marking):\n" +
+                        confirmed['essay']
+                    )
+
+                ai_result = analyze_essay_with_rubrics(pages, assignment, rubrics_content, teacher, additional_context=essay_context)
             else:
                 # For standard marking, use the question-based analysis
                 answer_key_content = None
@@ -2484,9 +2606,26 @@ Respond ONLY with valid JSON in this exact format:
                         answer_key_content = answer_file.read()
                     except:
                         pass
-                
-                ai_result = analyze_submission_images(pages, assignment, answer_key_content, teacher)
-            
+
+                # Build additional context from student-confirmed OCR answers
+                ocr_context = None
+                confirmed = submission.get('student_confirmed_answers')
+                if confirmed and isinstance(confirmed, dict):
+                    lines = []
+                    for qnum, ans in confirmed.items():
+                        if qnum == 'essay':
+                            continue
+                        if isinstance(ans, str) and ans.strip():
+                            lines.append(f"Q{qnum}: {ans.strip()}")
+                    if lines:
+                        ocr_context = (
+                            "The student has reviewed and confirmed the following transcribed answers "
+                            "(use these alongside the images for more accurate marking):\n" +
+                            "\n".join(lines)
+                        )
+
+                ai_result = analyze_submission_images(pages, assignment, answer_key_content, teacher, additional_context=ocr_context)
+
             # If already handled (e.g. spreadsheet), skip standard/rubric update
             if marking_type is not None:
                 # If AI returned 413 (request too large), auto-reject so student can resubmit with smaller/fewer images
