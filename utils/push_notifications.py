@@ -278,11 +278,59 @@ def send_message_notification(db, student_id: str, teacher_name: str,
         url="/",
         tag=f"message-{teacher_name}"
     )
-    
+
     if result is None:
         students_col.update_one(
             {"student_id": student_id},
             {"$unset": {"push_subscription": ""}}
         )
-    
+
+    return result is True
+
+
+def send_validation_notification(db, student_id: str, assignment: dict,
+                                  submission_id: str) -> bool:
+    """
+    Send push notification asking student to validate their bulk-uploaded submission.
+
+    Args:
+        db: Database instance
+        student_id: Student's ID
+        assignment: Assignment document
+        submission_id: The submission to validate
+
+    Returns:
+        True if sent successfully
+    """
+    students_col = db.db['students']
+    student = students_col.find_one({"student_id": student_id})
+
+    if not student or not student.get('push_subscription'):
+        return False
+
+    subscription = student['push_subscription']
+    if isinstance(subscription, str):
+        try:
+            subscription = json.loads(subscription)
+        except:
+            return False
+
+    title = "Please review your submission"
+    body = f"Your teacher uploaded your work for '{assignment.get('title', 'Assignment')}'. Please review and confirm your answers."
+    url = f"/student/submission/{submission_id}/validate"
+
+    result = send_push_notification(
+        subscription_info=subscription,
+        title=title,
+        body=body,
+        url=url,
+        tag=f"validate-{submission_id}"
+    )
+
+    if result is None:
+        students_col.update_one(
+            {"student_id": student_id},
+            {"$unset": {"push_subscription": ""}}
+        )
+
     return result is True

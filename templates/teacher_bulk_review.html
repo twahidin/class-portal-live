@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+
+{% block title %}Review Bulk Submission - Teacher Portal{% endblock %}
+
+{% block navbar %}
+{% set active_nav = 'submissions' %}
+{% include 'partials/teacher_navbar.html' %}
+{% endblock %}
+
+{% block head %}
+<style>
+    .confidence-high { color: #198754; font-weight: 600; }
+    .confidence-low { color: #dc3545; font-weight: 600; }
+    .split-row.low-confidence { background-color: #fff3cd; }
+    .stat-card { text-align: center; padding: 1rem; border-radius: 0.5rem; }
+    .stat-card .stat-value { font-size: 1.75rem; font-weight: 700; }
+    .stat-card .stat-label { font-size: 0.85rem; color: #6c757d; }
+    #processing-state .spinner-border { width: 3rem; height: 3rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('teacher_assignments') }}">Assignments</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('assignment_summary', assignment_id=assignment.assignment_id) }}">{{ assignment.title }}</a></li>
+            <li class="breadcrumb-item active">Review Bulk Submission</li>
+        </ol>
+    </nav>
+
+    <!-- Processing State -->
+    <div id="processing-state" {% if bulk.status != 'processing' %}style="display:none"{% endif %}>
+        <div class="row justify-content-center">
+            <div class="col-lg-6">
+                <div class="card text-center py-5">
+                    <div class="card-body">
+                        <div class="spinner-border text-primary mb-3" role="status">
+                            <span class="visually-hidden">Processing...</span>
+                        </div>
+                        <h4 class="mb-2">Analysing pages...</h4>
+                        <p class="text-muted mb-3">Detecting student names using AI. This may take a minute or two.</p>
+                        <p class="text-muted" id="page-count-indicator">
+                            <i class="bi bi-file-earmark me-1"></i><span id="page-count">{{ bulk.total_pages or '?' }}</span> pages to process
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error State -->
+    <div id="error-state" style="display:none">
+        <div class="row justify-content-center">
+            <div class="col-lg-6">
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <span id="error-message">An error occurred while processing the PDF.</span>
+                </div>
+                <a href="{{ url_for('assignment_summary', assignment_id=assignment.assignment_id) }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left me-1"></i>Try again
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Review State -->
+    <div id="review-state" {% if bulk.status != 'ready_for_review' %}style="display:none"{% endif %}>
+        <div class="card">
+            <div class="card-header bg-success text-white d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-check2-circle me-2"></i>Review detected splits</h5>
+                <span class="badge bg-light text-dark" id="total-pages-badge">{{ bulk.total_pages or 0 }} pages</span>
+            </div>
+            <div class="card-body">
+                <!-- Stats Row -->
+                <div class="row mb-4 g-3">
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card bg-success bg-opacity-10 border border-success border-opacity-25">
+                            <div class="stat-value text-success" id="stat-matched">0</div>
+                            <div class="stat-label">Students matched</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card bg-warning bg-opacity-10 border border-warning border-opacity-25">
+                            <div class="stat-value text-warning" id="stat-low-confidence">0</div>
+                            <div class="stat-label">Low confidence</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card bg-danger bg-opacity-10 border border-danger border-opacity-25">
+                            <div class="stat-value text-danger" id="stat-unmatched">0</div>
+                            <div class="stat-label">Unmatched pages</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="stat-card bg-secondary bg-opacity-10 border border-secondary border-opacity-25">
+                            <div class="stat-value text-secondary" id="stat-missing">0</div>
+                            <div class="stat-label">Missing students</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Splits Table -->
+                <div class="table-responsive mb-4">
+                    <table class="table table-hover align-middle" id="splits-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="min-width:200px">Student</th>
+                                <th>Pages</th>
+                                <th>Confidence</th>
+                                <th>Name detected</th>
+                                <th style="width:80px">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="splits-tbody"></tbody>
+                    </table>
+                </div>
+
+                <!-- Unmatched Pages Section -->
+                <div id="unmatched-section" style="display:none" class="mb-4">
+                    <h6 class="text-danger mb-3"><i class="bi bi-question-circle me-1"></i>Unmatched pages</h6>
+                    <p class="text-muted small">These pages could not be matched to any student. Assign them manually or leave them unassigned.</p>
+                    <div id="unmatched-pages-list"></div>
+                </div>
+
+                <!-- Missing Students Section -->
+                <div id="missing-section" style="display:none" class="mb-4">
+                    <h6 class="text-secondary mb-3"><i class="bi bi-person-x me-1"></i>Missing students</h6>
+                    <p class="text-muted small">These students were not detected in any page of the PDF.</p>
+                    <div id="missing-students-list"></div>
+                </div>
+
+                <!-- Actions -->
+                <div class="d-flex gap-2 mt-4 pt-3 border-top">
+                    <button class="btn btn-success" id="confirm-btn" onclick="confirmSplits()">
+                        <i class="bi bi-check-lg me-1"></i>Confirm &amp; Create Submissions
+                    </button>
+                    <a href="{{ url_for('assignment_summary', assignment_id=assignment.assignment_id) }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Start over
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const bulkId = {{ bulk._id | tojson }};
+const assignmentId = {{ assignment.assignment_id | tojson }};
+const students = {{ students | tojson }};
+
+let currentSplits = [];
+let currentUnmatched = [];
+let currentMissing = [];
+
+// Build <option> HTML for student dropdowns
+function studentOptions(selectedId) {
+    let html = '<option value="">-- Select student --</option>';
+    for (const s of students) {
+        const sel = (s.student_id === selectedId) ? ' selected' : '';
+        html += `<option value="${s.student_id}"${sel}>${s.name} (${s.student_id})</option>`;
+    }
+    return html;
+}
+
+// Confidence badge HTML
+function confidenceBadge(confidence) {
+    if (confidence >= 0.7) {
+        return `<span class="confidence-high">${Math.round(confidence * 100)}%</span>`;
+    }
+    return `<span class="confidence-low">${Math.round(confidence * 100)}%</span>`;
+}
+
+// Render all split data into the review UI
+function renderSplits(data) {
+    currentSplits = data.splits || [];
+    currentUnmatched = data.unmatched_pages || [];
+    currentMissing = data.missing_students || [];
+
+    // Stats
+    const matched = currentSplits.filter(s => s.student_id).length;
+    const lowConf = currentSplits.filter(s => s.confidence < 0.7).length;
+    document.getElementById('stat-matched').textContent = matched;
+    document.getElementById('stat-low-confidence').textContent = lowConf;
+    document.getElementById('stat-unmatched').textContent = currentUnmatched.length;
+    document.getElementById('stat-missing').textContent = currentMissing.length;
+
+    if (data.total_pages) {
+        document.getElementById('total-pages-badge').textContent = data.total_pages + ' pages';
+    }
+
+    // Splits table
+    const tbody = document.getElementById('splits-tbody');
+    tbody.innerHTML = '';
+    currentSplits.forEach((split, idx) => {
+        const isLow = split.confidence < 0.7;
+        const tr = document.createElement('tr');
+        tr.className = 'split-row' + (isLow ? ' low-confidence' : '');
+        tr.innerHTML = `
+            <td>
+                <select class="form-select form-select-sm split-student" data-idx="${idx}">
+                    ${studentOptions(split.student_id)}
+                </select>
+            </td>
+            <td>${(split.pages || []).join(', ')}</td>
+            <td>${confidenceBadge(split.confidence)}</td>
+            <td><small class="text-muted">${split.detected_name || '—'}</small></td>
+            <td>
+                <button class="btn btn-sm btn-outline-danger" onclick="removeSplit(${idx})" title="Remove split">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    // Unmatched pages
+    const unmatchedSection = document.getElementById('unmatched-section');
+    const unmatchedList = document.getElementById('unmatched-pages-list');
+    if (currentUnmatched.length > 0) {
+        unmatchedSection.style.display = '';
+        unmatchedList.innerHTML = '';
+        currentUnmatched.forEach((page, idx) => {
+            const div = document.createElement('div');
+            div.className = 'd-flex align-items-center gap-2 mb-2';
+            div.innerHTML = `
+                <span class="badge bg-secondary">Page ${page}</span>
+                <select class="form-select form-select-sm unmatched-student" data-page="${page}" style="max-width:300px">
+                    ${studentOptions('')}
+                </select>
+            `;
+            unmatchedList.appendChild(div);
+        });
+    } else {
+        unmatchedSection.style.display = 'none';
+    }
+
+    // Missing students
+    const missingSection = document.getElementById('missing-section');
+    const missingList = document.getElementById('missing-students-list');
+    if (currentMissing.length > 0) {
+        missingSection.style.display = '';
+        missingList.innerHTML = '';
+        currentMissing.forEach(name => {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-secondary me-1 mb-1';
+            badge.textContent = name;
+            missingList.appendChild(badge);
+        });
+    } else {
+        missingSection.style.display = 'none';
+    }
+}
+
+// Remove a split by index
+function removeSplit(idx) {
+    // Move pages from removed split to unmatched
+    const removed = currentSplits.splice(idx, 1)[0];
+    if (removed && removed.pages) {
+        currentUnmatched.push(...removed.pages);
+        currentUnmatched.sort((a, b) => a - b);
+    }
+    renderSplits({
+        splits: currentSplits,
+        unmatched_pages: currentUnmatched,
+        missing_students: currentMissing,
+        total_pages: document.getElementById('total-pages-badge').textContent.replace(' pages', '')
+    });
+}
+
+// Confirm and create submissions
+async function confirmSplits() {
+    const btn = document.getElementById('confirm-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating submissions...';
+
+    // Collect final splits from dropdown values
+    const finalSplits = [];
+    document.querySelectorAll('.split-student').forEach((sel, idx) => {
+        if (currentSplits[idx]) {
+            finalSplits.push({
+                student_id: sel.value,
+                pages: currentSplits[idx].pages
+            });
+        }
+    });
+
+    // Collect assigned unmatched pages
+    document.querySelectorAll('.unmatched-student').forEach(sel => {
+        if (sel.value) {
+            const page = parseInt(sel.dataset.page);
+            // Try to find an existing split for this student
+            const existing = finalSplits.find(s => s.student_id === sel.value);
+            if (existing) {
+                existing.pages.push(page);
+                existing.pages.sort((a, b) => a - b);
+            } else {
+                finalSplits.push({
+                    student_id: sel.value,
+                    pages: [page]
+                });
+            }
+        }
+    });
+
+    try {
+        const resp = await fetch(`/teacher/assignment/${assignmentId}/bulk-review/${bulkId}/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ splits: finalSplits })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            window.location.href = data.redirect_url;
+        } else {
+            alert(data.error || 'Failed to create submissions.');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Confirm & Create Submissions';
+        }
+    } catch (err) {
+        alert('Network error. Please try again.');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Confirm & Create Submissions';
+    }
+}
+
+// Polling (when processing)
+{% if bulk.status == 'processing' %}
+(function pollStatus() {
+    const interval = setInterval(async () => {
+        try {
+            const resp = await fetch(`/api/teacher/bulk-status/${bulkId}`);
+            const data = await resp.json();
+
+            // Update page count
+            if (data.total_pages) {
+                document.getElementById('page-count').textContent = data.total_pages;
+            }
+
+            if (data.status === 'ready_for_review') {
+                clearInterval(interval);
+                document.getElementById('processing-state').style.display = 'none';
+                document.getElementById('review-state').style.display = '';
+                renderSplits(data);
+            } else if (data.status === 'failed') {
+                clearInterval(interval);
+                document.getElementById('processing-state').style.display = 'none';
+                document.getElementById('error-message').textContent = data.error || 'Processing failed. Please try again.';
+                document.getElementById('error-state').style.display = '';
+            }
+        } catch (err) {
+            console.error('Poll error:', err);
+        }
+    }, 3000);
+})();
+{% endif %}
+
+// If already ready_for_review, render immediately
+{% if bulk.status == 'ready_for_review' %}
+document.addEventListener('DOMContentLoaded', function() {
+    renderSplits({{ bulk | tojson }});
+});
+{% endif %}
+</script>
+{% endblock %}

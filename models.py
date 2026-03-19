@@ -41,6 +41,10 @@ class Database:
         self.db.submissions.create_index([('assignment_id', 1), ('status', 1)])
         self.db.submissions.create_index('submission_id', unique=True)
 
+        # Bulk submissions
+        self.db.bulk_submissions.create_index('bulk_id', unique=True)
+        self.db.bulk_submissions.create_index([('assignment_id', 1), ('teacher_id', 1)])
+
         # Module indexes
         self.db.modules.create_index('module_id', unique=True)
         self.db.modules.create_index('teacher_id')
@@ -261,6 +265,26 @@ class Submission:
     @staticmethod
     def count(query):
         return db.db.submissions.count_documents(query)
+
+class BulkSubmission:
+    """Metadata for a bulk upload job where a teacher uploads an entire class's scanned work as one PDF."""
+    @staticmethod
+    def find_one(query, **kwargs):
+        return db.db.bulk_submissions.find_one(query, **kwargs)
+
+    @staticmethod
+    def find(query, projection=None):
+        if projection:
+            return db.db.bulk_submissions.find(query, projection)
+        return db.db.bulk_submissions.find(query)
+
+    @staticmethod
+    def insert_one(document):
+        return db.db.bulk_submissions.insert_one(document).inserted_id
+
+    @staticmethod
+    def update_one(query, update):
+        return db.db.bulk_submissions.update_one(query, update)
 
 
 # ============================================================================

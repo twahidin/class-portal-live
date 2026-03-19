@@ -5,6 +5,7 @@ import json
 import re
 from anthropic import Anthropic
 from utils.auth import decrypt_api_key
+import difflib
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -2341,3 +2342,221 @@ Respond ONLY with valid JSON:
     except Exception as e:
         logger.error(f"Blank hint generation error: {e}")
         return {'error': str(e)}
+
+
+# ============================================================================
+# BULK SUBMISSION — Detect student names on scanned pages
+# ============================================================================
+
+def detect_student_names_in_pages(pages: list, student_names: list, teacher: dict = None) -> list:
+    """
+    Detect student names on scanned pages using Claude Haiku vision.
+
+    Args:
+        pages: list of {'type': 'image'|'pdf', 'data': bytes, 'page_num': int}
+        student_names: list of student name strings to match against
+        teacher: optional teacher dict for API key resolution
+
+    Returns:
+        list of {'page_num': int, 'name_detected': str|None, 'matched_student': str|None, 'confidence': 'high'|'low'}
+    """
+    # Resolve API key same way as ocr_extract_answers
+    api_key = None
+    if teacher and teacher.get('anthropic_api_key'):
+        api_key = decrypt_api_key(teacher['anthropic_api_key'])
+    if not api_key:
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        logger.error("No Anthropic API key available for name detection")
+        return [{'page_num': p.get('page_num', i + 1), 'name_detected': None,
+                 'matched_student': None, 'confidence': 'low'}
+                for i, p in enumerate(pages)]
+
+    try:
+        client = Anthropic(api_key=api_key)
+    except Exception as e:
+        logger.error(f"Failed to create Anthropic client for name detection: {e}")
+        return [{'page_num': p.get('page_num', i + 1), 'name_detected': None,
+                 'matched_student': None, 'confidence': 'low'}
+                for i, p in enumerate(pages)]
+
+    names_list_str = "\n".join(f"- {name}" for name in student_names)
+
+    results = []
+    batch_size = 3
+
+    for batch_start in range(0, len(pages), batch_size):
+        batch = pages[batch_start:batch_start + batch_size]
+
+        content = []
+        page_nums_in_batch = []
+
+        for page in batch:
+            page_num = page.get('page_num', batch_start + len(page_nums_in_batch) + 1)
+            page_nums_in_batch.append(page_num)
+
+            if page['type'] == 'image':
+                image_data = resize_image_for_ai(page['data'])
+                image_b64 = base64.standard_b64encode(image_data).decode('utf-8')
+                content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}
+                })
+                content.append({"type": "text", "text": f"(Page {page_num})"})
+            elif page['type'] == 'pdf':
+                pdf_b64 = base64.standard_b64encode(page['data']).decode('utf-8')
+                content.append({
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64}
+                })
+                content.append({"type": "text", "text": f"(Page {page_num})"})
+
+        page_nums_str = ", ".join(str(pn) for pn in page_nums_in_batch)
+        content.append({
+            "type": "text",
+            "text": f"\nFor each of the pages above ({page_nums_str}), identify if there is a student name written on the page. Respond with JSON."
+        })
+
+        system_prompt = f"""You are a name detection assistant. Your task is to find student names on scanned assignment pages.
+
+Look for names typically written at the top of pages — in headers, name fields, or handwritten at the top margin.
+
+Here is the class list of student names:
+{names_list_str}
+
+For EACH page provided, report whether you see a student name.
+
+Respond ONLY with valid JSON:
+{{
+    "pages": [
+        {{
+            "page_num": 1,
+            "name_detected": "the name you see on the page or null if none",
+            "confidence": "high or low"
+        }}
+    ]
+}}
+
+Rules:
+- Only report a name if you actually see one written/printed on that page
+- If no name is visible, set name_detected to null
+- Use "high" confidence when the name is clearly readable
+- Use "low" confidence when the name is partially obscured or hard to read
+- Report the name EXACTLY as it appears on the page (even if misspelled)"""
+
+        try:
+            response = client.messages.create(
+                model='claude-haiku-4-5-20251001',
+                max_tokens=2048,
+                messages=[{"role": "user", "content": content}],
+                system=system_prompt
+            )
+            response_text = response.content[0].text
+            parsed = parse_ai_response(response_text)
+
+            if 'pages' in parsed:
+                for page_result in parsed['pages']:
+                    pn = page_result.get('page_num')
+                    name_raw = page_result.get('name_detected')
+                    confidence = page_result.get('confidence', 'low')
+
+                    # Fuzzy match against class list
+                    matched_student = None
+                    if name_raw:
+                        matches = difflib.get_close_matches(
+                            name_raw.strip().lower(),
+                            [n.lower() for n in student_names],
+                            n=1, cutoff=0.5
+                        )
+                        if matches:
+                            # Find original-case name
+                            match_lower = matches[0]
+                            for orig_name in student_names:
+                                if orig_name.lower() == match_lower:
+                                    matched_student = orig_name
+                                    break
+
+                    results.append({
+                        'page_num': pn,
+                        'name_detected': name_raw,
+                        'matched_student': matched_student,
+                        'confidence': confidence if name_raw else 'low'
+                    })
+            else:
+                # AI response didn't have expected structure
+                logger.warning(f"Name detection: unexpected response structure for pages {page_nums_str}")
+                for pn in page_nums_in_batch:
+                    results.append({
+                        'page_num': pn,
+                        'name_detected': None,
+                        'matched_student': None,
+                        'confidence': 'low'
+                    })
+
+        except Exception as e:
+            logger.error(f"Name detection error for batch starting at page {page_nums_in_batch[0]}: {e}")
+            for pn in page_nums_in_batch:
+                results.append({
+                    'page_num': pn,
+                    'name_detected': None,
+                    'matched_student': None,
+                    'confidence': 'low'
+                })
+
+    return results
+
+
+def group_pages_by_student(detection_results: list, student_names: list) -> tuple:
+    """
+    Group sequential pages by detected student names.
+
+    When a new matched_student is detected on a page, a new split begins.
+    Pages without a detected name are assigned to the current student's section.
+    Pages before any name is detected go to unmatched_pages.
+
+    Args:
+        detection_results: list from detect_student_names_in_pages()
+        student_names: list of student name strings (for reference)
+
+    Returns:
+        (splits, unmatched_pages) where:
+        - splits is list of {
+            'student_name': str,
+            'name_detected_raw': str,
+            'pages': [int, ...],
+            'confidence': 'high'|'low',
+            'name_found_on_page': int
+          }
+        - unmatched_pages is list of page_num ints
+    """
+    # Sort by page number
+    sorted_results = sorted(detection_results, key=lambda r: r.get('page_num', 0))
+
+    splits = []
+    unmatched_pages = []
+    current_split = None
+
+    for result in sorted_results:
+        page_num = result.get('page_num')
+        matched = result.get('matched_student')
+        name_raw = result.get('name_detected')
+        confidence = result.get('confidence', 'low')
+
+        if matched:
+            # New student detected — start a new split
+            current_split = {
+                'student_name': matched,
+                'name_detected_raw': name_raw,
+                'pages': [page_num],
+                'confidence': confidence,
+                'name_found_on_page': page_num
+            }
+            splits.append(current_split)
+        elif current_split is not None:
+            # No name on this page — belongs to current student
+            current_split['pages'].append(page_num)
+        else:
+            # No student identified yet — unmatched
+            unmatched_pages.append(page_num)
+
+    return (splits, unmatched_pages)

@@ -6,8 +6,8 @@ from functools import wraps
 import os
 import io
 from datetime import datetime, timedelta, timezone
-from models import db, Student, Teacher, Message, Class, TeachingGroup, Assignment, Submission, Module, ModuleResource, ModuleTextbook, StudentModuleMastery, StudentLearningProfile, LearningSession, Interactive, LOQuestion
-from utils.auth import hash_password, verify_password, validate_password, generate_assignment_id, generate_submission_id, encrypt_api_key, decrypt_api_key
+from models import db, Student, Teacher, Message, Class, TeachingGroup, Assignment, Submission, BulkSubmission, Module, ModuleResource, ModuleTextbook, StudentModuleMastery, StudentLearningProfile, LearningSession, Interactive, LOQuestion
+from utils.auth import hash_password, verify_password, validate_password, generate_assignment_id, generate_submission_id, generate_bulk_id, encrypt_api_key, decrypt_api_key
 from utils.ai_marking import get_teacher_ai_service, mark_submission
 from utils.google_drive import get_teacher_drive_manager, upload_assignment_file
 from utils.pdf_generator import generate_feedback_pdf
@@ -468,11 +468,18 @@ def dashboard():
         'feedback_received': feedback_received_count
     }
     
+    # Check for pending bulk submission validations
+    pending_validations = list(Submission.find({
+        'student_id': session['student_id'],
+        'pending_validation': True
+    }))
+
     must_change = student.get('must_change_password', False)
-    return render_template('dashboard.html', 
-                         student=student, 
+    return render_template('dashboard.html',
+                         student=student,
                          teachers=teachers,
                          assignment_stats=assignment_stats,
+                         pending_validations=pending_validations,
                          must_change_password=must_change)
 
 @app.route('/chat/<teacher_id>')
@@ -7406,6 +7413,624 @@ def manual_submission(assignment_id):
         )
     
     return redirect(url_for('review_submission', submission_id=submission_id))
+
+
+# ============================================================================
+# BULK SUBMISSION ROUTES
+# ============================================================================
+
+def _process_bulk_submission(bulk_id, assignment_id, teacher_id):
+    """Background thread: analyze pages and detect student names."""
+    from gridfs import GridFS
+    from utils.ai_marking import detect_student_names_in_pages, group_pages_by_student
+    from bson import ObjectId
+    import fitz  # PyMuPDF for PDF page extraction
+
+    try:
+        fs = GridFS(db.db)
+        bulk = BulkSubmission.find_one({'bulk_id': bulk_id})
+        if not bulk:
+            return
+
+        assignment = Assignment.find_one({'assignment_id': assignment_id})
+        teacher = Teacher.find_one({'teacher_id': teacher_id})
+        students = _get_students_for_assignment(assignment, teacher_id)
+        student_names = [s['name'] for s in students]
+        student_name_to_id = {s['name']: s['student_id'] for s in students}
+
+        # Extract pages from PDF
+        source_file = fs.get(ObjectId(bulk['source_file_id']))
+        pdf_bytes = source_file.read()
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        pages = []
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            # Render page to image (150 DPI for good OCR quality)
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("jpeg")
+            pages.append({
+                'type': 'image',
+                'data': img_bytes,
+                'page_num': page_num + 1
+            })
+        doc.close()
+
+        BulkSubmission.update_one(
+            {'bulk_id': bulk_id},
+            {'$set': {'total_pages': len(pages), 'status': 'processing'}}
+        )
+
+        # Detect student names
+        detection_results = detect_student_names_in_pages(pages, student_names, teacher)
+
+        # Group pages by student
+        splits, unmatched_pages = group_pages_by_student(detection_results, student_names)
+
+        # Map student names to IDs
+        splits_with_ids = []
+        for split in splits:
+            student_id = student_name_to_id.get(split['student_name'])
+            splits_with_ids.append({
+                'student_id': student_id,
+                'student_name': split['student_name'],
+                'student_name_detected': split['name_detected_raw'],
+                'pages': split['pages'],
+                'confidence': split['confidence'],
+                'name_found_on_page': split['name_found_on_page']
+            })
+
+        # Find missing students (in class but not detected in PDF)
+        detected_ids = {s['student_id'] for s in splits_with_ids if s['student_id']}
+        missing_students = [
+            {'student_id': s['student_id'], 'student_name': s['name']}
+            for s in students if s['student_id'] not in detected_ids
+        ]
+
+        BulkSubmission.update_one(
+            {'bulk_id': bulk_id},
+            {'$set': {
+                'splits': splits_with_ids,
+                'unmatched_pages': unmatched_pages,
+                'missing_students': missing_students,
+                'status': 'ready_for_review'
+            }}
+        )
+
+    except Exception as e:
+        logger.error(f"Bulk submission processing error: {e}")
+        BulkSubmission.update_one(
+            {'bulk_id': bulk_id},
+            {'$set': {'status': 'failed', 'processing_error': str(e)}}
+        )
+
+
+@app.route('/teacher/assignment/<assignment_id>/bulk-submission', methods=['GET', 'POST'])
+@teacher_required
+def bulk_submission(assignment_id):
+    """Upload entire class PDF for bulk splitting and submission."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return redirect(url_for('teacher_assignments'))
+
+    all_students = _get_students_for_assignment(assignment, session['teacher_id'])
+
+    if request.method == 'GET':
+        return render_template('teacher_bulk_submission.html',
+                             teacher=teacher,
+                             assignment=assignment,
+                             student_count=len(all_students))
+
+    # POST: upload PDF and start background processing
+    from gridfs import GridFS
+
+    file = request.files.get('pdf_file')
+    if not file or not file.filename:
+        return render_template('teacher_bulk_submission.html',
+                             teacher=teacher,
+                             assignment=assignment,
+                             student_count=len(all_students),
+                             error='Please upload a PDF file.')
+
+    if not file.filename.lower().endswith('.pdf'):
+        return render_template('teacher_bulk_submission.html',
+                             teacher=teacher,
+                             assignment=assignment,
+                             student_count=len(all_students),
+                             error='Only PDF files are accepted for bulk upload.')
+
+    require_validation = request.form.get('require_validation') == 'on'
+
+    # Store PDF in GridFS
+    fs = GridFS(db.db)
+    file_data = file.read()
+    source_file_id = fs.put(
+        file_data,
+        filename=f"bulk_{assignment_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.pdf",
+        content_type='application/pdf'
+    )
+
+    bulk_id = generate_bulk_id()
+    BulkSubmission.insert_one({
+        'bulk_id': bulk_id,
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id'],
+        'require_validation': require_validation,
+        'status': 'processing',
+        'created_at': datetime.utcnow(),
+        'source_file_id': str(source_file_id),
+        'total_pages': 0,
+        'splits': [],
+        'unmatched_pages': [],
+        'missing_students': []
+    })
+
+    # Start background processing
+    t = threading.Thread(
+        target=_process_bulk_submission,
+        args=(bulk_id, assignment_id, session['teacher_id']),
+        daemon=True
+    )
+    t.start()
+
+    return redirect(url_for('bulk_review', assignment_id=assignment_id, bulk_id=bulk_id))
+
+
+@app.route('/teacher/assignment/<assignment_id>/bulk-review/<bulk_id>')
+@teacher_required
+def bulk_review(assignment_id, bulk_id):
+    """Review AI-detected page splits for bulk submission."""
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return redirect(url_for('teacher_assignments'))
+
+    bulk = BulkSubmission.find_one({'bulk_id': bulk_id, 'teacher_id': session['teacher_id']})
+    if not bulk:
+        return redirect(url_for('teacher_assignments'))
+
+    all_students = _get_students_for_assignment(assignment, session['teacher_id'])
+
+    return render_template('teacher_bulk_review.html',
+                         teacher=teacher,
+                         assignment=assignment,
+                         bulk=bulk,
+                         students=all_students)
+
+
+@app.route('/api/teacher/bulk-status/<bulk_id>')
+@teacher_required
+def bulk_status(bulk_id):
+    """Poll bulk submission processing status."""
+    bulk = BulkSubmission.find_one(
+        {'bulk_id': bulk_id, 'teacher_id': session['teacher_id']},
+        {'status': 1, 'splits': 1, 'unmatched_pages': 1, 'missing_students': 1,
+         'total_pages': 1, 'processing_error': 1}
+    )
+    if not bulk:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+
+    return jsonify({
+        'success': True,
+        'status': bulk['status'],
+        'total_pages': bulk.get('total_pages', 0),
+        'splits': bulk.get('splits', []),
+        'unmatched_pages': bulk.get('unmatched_pages', []),
+        'missing_students': bulk.get('missing_students', []),
+        'processing_error': bulk.get('processing_error')
+    })
+
+
+@app.route('/teacher/assignment/<assignment_id>/bulk-review/<bulk_id>/confirm', methods=['POST'])
+@teacher_required
+def bulk_confirm(assignment_id, bulk_id):
+    """Confirm bulk splits and create individual submissions."""
+    from gridfs import GridFS
+    from utils.ai_marking import analyze_submission_images, analyze_essay_with_rubrics
+    from bson import ObjectId
+    import fitz
+
+    assignment = Assignment.find_one({
+        'assignment_id': assignment_id,
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return jsonify({'success': False, 'error': 'Assignment not found'}), 404
+
+    bulk = BulkSubmission.find_one({'bulk_id': bulk_id, 'teacher_id': session['teacher_id']})
+    if not bulk or bulk['status'] != 'ready_for_review':
+        return jsonify({'success': False, 'error': 'Bulk submission not ready'}), 400
+
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+
+    # Get teacher's edited splits from POST body
+    edited_splits = request.json.get('splits', [])
+    if not edited_splits:
+        return jsonify({'success': False, 'error': 'No splits provided'}), 400
+
+    fs = GridFS(db.db)
+
+    # Load the source PDF
+    source_file = fs.get(ObjectId(bulk['source_file_id']))
+    pdf_bytes = source_file.read()
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+    require_validation = bulk.get('require_validation', False)
+    submission_ids = []
+
+    for split in edited_splits:
+        student_id = split.get('student_id')
+        page_numbers = split.get('pages', [])
+        if not student_id or not page_numbers:
+            continue
+
+        # Check for existing submission
+        existing_sub = Submission.find_one(
+            {'assignment_id': assignment_id, 'student_id': student_id},
+            sort=[('submitted_at', -1), ('created_at', -1)]
+        )
+
+        if existing_sub:
+            submission_id = existing_sub['submission_id']
+            # Delete old files
+            for old_fid in existing_sub.get('file_ids', []):
+                try:
+                    fs.delete(ObjectId(old_fid))
+                except Exception:
+                    pass
+        else:
+            submission_id = generate_submission_id()
+
+        # Extract pages for this student and store in GridFS
+        file_ids = []
+        pages_data = []
+        for idx, page_num in enumerate(sorted(page_numbers)):
+            page = doc[page_num - 1]  # 0-indexed
+            pix = page.get_pixmap(dpi=200)
+            img_bytes = pix.tobytes("jpeg")
+
+            file_id = fs.put(
+                img_bytes,
+                filename=f"{submission_id}_page_{idx+1}.jpg",
+                content_type='image/jpeg',
+                submission_id=submission_id,
+                page_num=idx + 1
+            )
+            file_ids.append(str(file_id))
+            pages_data.append({'type': 'image', 'data': img_bytes, 'page_num': idx + 1})
+
+        submission_doc = {
+            'submission_id': submission_id,
+            'assignment_id': assignment_id,
+            'student_id': student_id,
+            'teacher_id': assignment['teacher_id'],
+            'file_ids': file_ids,
+            'file_type': 'image',
+            'page_count': len(file_ids),
+            'status': 'submitted',
+            'submitted_at': datetime.utcnow(),
+            'submitted_via': 'bulk',
+            'submitted_by_teacher': session['teacher_id'],
+            'bulk_id': bulk_id,
+            'created_at': existing_sub['created_at'] if existing_sub else datetime.utcnow()
+        }
+
+        if require_validation:
+            submission_doc['pending_validation'] = True
+
+        if existing_sub:
+            Submission.update_one(
+                {'submission_id': submission_id},
+                {'$set': submission_doc,
+                 '$unset': {'rejection_reason': '', 'rejected_at': '', 'rejected_by': ''}}
+            )
+        else:
+            Submission.insert_one(submission_doc)
+
+        submission_ids.append(submission_id)
+
+        if require_validation:
+            # Send validation notification
+            from utils.push_notifications import send_validation_notification
+            send_validation_notification(db, student_id, assignment, submission_id)
+        else:
+            # Run AI marking immediately in current thread (blocking)
+            try:
+                marking_type = assignment.get('marking_type', 'standard')
+                if marking_type == 'rubric':
+                    rubrics_content = None
+                    if assignment.get('rubrics_id'):
+                        try:
+                            rubrics_file = fs.get(assignment['rubrics_id'])
+                            rubrics_content = rubrics_file.read()
+                        except Exception:
+                            pass
+                    ai_result = analyze_essay_with_rubrics(pages_data, assignment, rubrics_content, teacher)
+                else:
+                    answer_key_content = None
+                    if assignment.get('answer_key_id'):
+                        try:
+                            answer_file = fs.get(assignment['answer_key_id'])
+                            answer_key_content = answer_file.read()
+                        except Exception:
+                            pass
+                    ai_result = analyze_submission_images(pages_data, assignment, answer_key_content, teacher)
+
+                Submission.update_one(
+                    {'submission_id': submission_id},
+                    {'$set': {'ai_feedback': ai_result, 'status': 'ai_reviewed'}}
+                )
+            except Exception as e:
+                logger.error(f"AI feedback error on bulk submission {submission_id}: {e}")
+                Submission.update_one(
+                    {'submission_id': submission_id},
+                    {'$set': {'ai_feedback': {'error': str(e), 'questions': [], 'overall_feedback': f'Error: {e}'}}}
+                )
+
+    doc.close()
+
+    # Update bulk submission status
+    BulkSubmission.update_one(
+        {'bulk_id': bulk_id},
+        {'$set': {
+            'status': 'confirmed',
+            'confirmed_at': datetime.utcnow(),
+            'submission_ids': submission_ids
+        }}
+    )
+
+    return jsonify({
+        'success': True,
+        'submission_count': len(submission_ids),
+        'redirect_url': url_for('teacher_submissions') + f'?assignment_id={assignment_id}'
+    })
+
+
+@app.route('/student/submission/<submission_id>/validate')
+@login_required
+def validate_submission(submission_id):
+    """Student validates their bulk-uploaded submission answers."""
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id']
+    })
+    if not submission or not submission.get('pending_validation'):
+        return redirect(url_for('dashboard'))
+
+    assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+    if not assignment:
+        return redirect(url_for('dashboard'))
+
+    return render_template('student_validate_submission.html',
+                         assignment=assignment,
+                         submission=submission)
+
+
+@app.route('/api/student/submission/<submission_id>/validate', methods=['POST'])
+@login_required
+def api_validate_submission(submission_id):
+    """Student confirms their validated answers, triggers AI marking."""
+    from gridfs import GridFS
+    from utils.ai_marking import analyze_submission_images, analyze_essay_with_rubrics
+    from bson import ObjectId
+
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id']
+    })
+    if not submission or not submission.get('pending_validation'):
+        return jsonify({'success': False, 'error': 'Submission not found or already validated'}), 404
+
+    confirmed_answers = request.json.get('confirmed_answers')
+
+    # Clear pending_validation, store confirmed answers
+    update_fields = {
+        'pending_validation': False,
+        'validated_at': datetime.utcnow()
+    }
+    if confirmed_answers:
+        update_fields['student_confirmed_answers'] = confirmed_answers
+
+    Submission.update_one(
+        {'submission_id': submission_id},
+        {'$set': update_fields, '$unset': {'pending_validation': ''}}
+    )
+
+    # Trigger AI marking
+    assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+    teacher = Teacher.find_one({'teacher_id': submission['teacher_id']})
+
+    fs = GridFS(db.db)
+    pages = []
+    for i, fid in enumerate(submission.get('file_ids', [])):
+        try:
+            f = fs.get(ObjectId(fid))
+            pages.append({'type': 'image', 'data': f.read(), 'page_num': i + 1})
+        except Exception:
+            pass
+
+    try:
+        marking_type = assignment.get('marking_type', 'standard')
+        if marking_type == 'rubric':
+            rubrics_content = None
+            if assignment.get('rubrics_id'):
+                try:
+                    rubrics_file = fs.get(assignment['rubrics_id'])
+                    rubrics_content = rubrics_file.read()
+                except Exception:
+                    pass
+            ai_result = analyze_essay_with_rubrics(pages, assignment, rubrics_content, teacher,
+                                                     student_answers=confirmed_answers)
+        else:
+            answer_key_content = None
+            if assignment.get('answer_key_id'):
+                try:
+                    answer_file = fs.get(assignment['answer_key_id'])
+                    answer_key_content = answer_file.read()
+                except Exception:
+                    pass
+            ai_result = analyze_submission_images(pages, assignment, answer_key_content, teacher,
+                                                    student_answers=confirmed_answers)
+
+        Submission.update_one(
+            {'submission_id': submission_id},
+            {'$set': {'ai_feedback': ai_result, 'status': 'ai_reviewed'}}
+        )
+    except Exception as e:
+        logger.error(f"AI feedback error on validated submission {submission_id}: {e}")
+        Submission.update_one(
+            {'submission_id': submission_id},
+            {'$set': {'ai_feedback': {'error': str(e)}, 'status': 'submitted'}}
+        )
+
+    return jsonify({'success': True, 'redirect_url': url_for('dashboard')})
+
+
+@app.route('/api/teacher/submission/<submission_id>/force-validate', methods=['POST'])
+@teacher_required
+def force_validate_submission(submission_id):
+    """Teacher force-validates a submission, skipping student review."""
+    from bson import ObjectId
+
+    submission = Submission.find_one({'submission_id': submission_id})
+    if not submission or not submission.get('pending_validation'):
+        return jsonify({'success': False, 'error': 'Not found or not pending'}), 404
+
+    # Verify teacher owns this assignment
+    assignment = Assignment.find_one({
+        'assignment_id': submission['assignment_id'],
+        'teacher_id': session['teacher_id']
+    })
+    if not assignment:
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+    teacher_id = session['teacher_id']
+
+    Submission.update_one(
+        {'submission_id': submission_id},
+        {'$set': {'pending_validation': False, 'force_validated_by': teacher_id,
+                  'validated_at': datetime.utcnow()},
+         '$unset': {'pending_validation': ''}}
+    )
+
+    # Trigger AI marking in background thread
+    def _mark_submission():
+        from gridfs import GridFS
+        from utils.ai_marking import analyze_submission_images, analyze_essay_with_rubrics
+        fs = GridFS(db.db)
+        teacher = Teacher.find_one({'teacher_id': teacher_id})
+        pages = []
+        for i, fid in enumerate(submission.get('file_ids', [])):
+            try:
+                f = fs.get(ObjectId(fid))
+                pages.append({'type': 'image', 'data': f.read(), 'page_num': i + 1})
+            except Exception:
+                pass
+        try:
+            marking_type = assignment.get('marking_type', 'standard')
+            if marking_type == 'rubric':
+                rubrics_content = None
+                if assignment.get('rubrics_id'):
+                    try:
+                        rubrics_file = fs.get(assignment['rubrics_id'])
+                        rubrics_content = rubrics_file.read()
+                    except Exception:
+                        pass
+                ai_result = analyze_essay_with_rubrics(pages, assignment, rubrics_content, teacher)
+            else:
+                answer_key_content = None
+                if assignment.get('answer_key_id'):
+                    try:
+                        answer_file = fs.get(assignment['answer_key_id'])
+                        answer_key_content = answer_file.read()
+                    except Exception:
+                        pass
+                ai_result = analyze_submission_images(pages, assignment, answer_key_content, teacher)
+            Submission.update_one(
+                {'submission_id': submission_id},
+                {'$set': {'ai_feedback': ai_result, 'status': 'ai_reviewed'}}
+            )
+        except Exception as e:
+            logger.error(f"AI feedback error on force-validated {submission_id}: {e}")
+
+    t = threading.Thread(target=_mark_submission, daemon=True)
+    t.start()
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/student/bulk-ocr-preview/<submission_id>')
+@login_required
+def bulk_ocr_preview(submission_id):
+    """Run OCR on an existing submission's stored files for validation."""
+    from gridfs import GridFS
+    from utils.ai_marking import ocr_extract_answers
+    from bson import ObjectId
+
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id'],
+        'pending_validation': True
+    })
+    if not submission:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+
+    assignment = Assignment.find_one({'assignment_id': submission['assignment_id']})
+    teacher = Teacher.find_one({'teacher_id': submission['teacher_id']})
+
+    fs = GridFS(db.db)
+    pages = []
+    for i, fid in enumerate(submission.get('file_ids', [])):
+        try:
+            f = fs.get(ObjectId(fid))
+            file_data = f.read()
+            pages.append({'type': 'image', 'data': file_data, 'page_num': i + 1})
+        except Exception:
+            pass
+
+    if not pages:
+        return jsonify({'success': False, 'error': 'No files found'}), 404
+
+    # Load question paper for context if available
+    question_paper_content = None
+    if assignment.get('question_paper_id'):
+        try:
+            qp_file = fs.get(assignment['question_paper_id'])
+            question_paper_content = qp_file.read()
+        except Exception:
+            pass
+
+    try:
+        result = ocr_extract_answers(pages, assignment, teacher, question_paper_content)
+        return jsonify({'success': True, 'ocr_result': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/student/submission/<submission_id>/report-issue', methods=['POST'])
+@login_required
+def report_submission_issue(submission_id):
+    """Student reports an issue with their bulk-uploaded submission."""
+    submission = Submission.find_one({
+        'submission_id': submission_id,
+        'student_id': session['student_id']
+    })
+    if not submission:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+
+    Submission.update_one(
+        {'submission_id': submission_id},
+        {'$set': {'issue_reported': True, 'issue_reported_at': datetime.utcnow()}}
+    )
+    return jsonify({'success': True})
+
 
 def analyze_class_insights(submissions: list) -> dict:
     """Analyze AI feedback to identify class-wide patterns, misconceptions, and topics to review"""

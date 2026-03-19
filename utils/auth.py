@@ -38,6 +38,10 @@ def generate_submission_id() -> str:
     """Generate a unique submission ID"""
     return f"SUB-{secrets.token_hex(8).upper()}"
 
+def generate_bulk_id() -> str:
+    """Generate a unique bulk submission ID"""
+    return f"BULK-{secrets.token_hex(8).upper()}"
+
 def generate_student_id() -> str:
     """Generate a unique student ID"""
     return f"S{secrets.token_hex(4).upper()}"
