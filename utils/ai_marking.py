@@ -100,6 +100,101 @@ def resize_image_for_ai(image_bytes: bytes, max_dimension: int = 1200, quality: 
         logger.warning(f"Could not resize image for AI: {e}")
         return image_bytes
 
+
+def build_content_block_for_file(file_bytes: bytes) -> dict:
+    """
+    Build the correct API content block for a file based on its actual content.
+    Detects whether bytes are PDF, image, or Word doc and returns the appropriate
+    structure for the Claude API.
+    """
+    # Check PDF magic bytes
+    if file_bytes[:5] == b'%PDF-':
+        b64_data = base64.standard_b64encode(file_bytes).decode('utf-8')
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": b64_data
+            }
+        }
+
+    # Check for Word doc (DOCX is a ZIP file starting with PK)
+    if file_bytes[:2] == b'PK':
+        # Likely a .docx — convert to PDF via PyMuPDF
+        try:
+            import fitz
+            doc = fitz.open(stream=file_bytes, filetype="docx")
+            pdf_bytes = doc.convert_to_pdf()
+            doc.close()
+            b64_data = base64.standard_b64encode(pdf_bytes).decode('utf-8')
+            logger.info("Converted DOCX to PDF for AI processing")
+            return {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": b64_data
+                }
+            }
+        except Exception as e:
+            logger.warning(f"Could not convert DOCX to PDF: {e}, sending as-is")
+
+    # Check for legacy .doc (OLE2 compound document)
+    if file_bytes[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+        try:
+            import fitz
+            doc = fitz.open(stream=file_bytes, filetype="doc")
+            pdf_bytes = doc.convert_to_pdf()
+            doc.close()
+            b64_data = base64.standard_b64encode(pdf_bytes).decode('utf-8')
+            logger.info("Converted DOC to PDF for AI processing")
+            return {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": b64_data
+                }
+            }
+        except Exception as e:
+            logger.warning(f"Could not convert DOC to PDF: {e}, sending as-is")
+
+    # Check common image signatures
+    if file_bytes[:3] == b'\xff\xd8\xff':
+        media_type = "image/jpeg"
+    elif file_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+        media_type = "image/png"
+    elif file_bytes[:4] in (b'GIF8',):
+        media_type = "image/gif"
+    elif file_bytes[:4] == b'RIFF' and len(file_bytes) > 12 and file_bytes[8:12] == b'WEBP':
+        media_type = "image/webp"
+    else:
+        # Unknown format — default to PDF and let the API handle it
+        logger.warning("Could not detect file type from magic bytes, defaulting to PDF")
+        b64_data = base64.standard_b64encode(file_bytes).decode('utf-8')
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": b64_data
+            }
+        }
+
+    # For images, resize before sending
+    resized = resize_image_for_ai(file_bytes)
+    resized_b64 = base64.standard_b64encode(resized).decode('utf-8')
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": media_type,
+            "data": resized_b64
+        }
+    }
+
+
 # Model mappings for each provider
 MODEL_MAPPINGS = {
     'anthropic': 'claude-sonnet-4-6',
@@ -557,17 +652,9 @@ Respond ONLY with valid JSON in this exact format:
                 "text": "ANSWER KEY (use for marking):"
             })
             
-            # Always use PDF vision for answer key - accuracy over cost savings
-            answer_key_b64 = base64.standard_b64encode(answer_key_content).decode('utf-8')
-            content.append({
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": answer_key_b64
-                }
-            })
-            logger.info("Using PDF vision for answer key (prioritizing accuracy for marking)")
+            # Detect actual file type and build appropriate content block
+            content.append(build_content_block_for_file(answer_key_content))
+            logger.info("Using vision for answer key (prioritizing accuracy for marking)")
         
         content.append({
             "type": "text",
@@ -1751,15 +1838,7 @@ Respond ONLY with valid JSON in this exact format:
                 "type": "text",
                 "text": "GRADING RUBRICS (reference document):"
             })
-            rubrics_b64 = base64.standard_b64encode(rubrics_content).decode('utf-8')
-            content.append({
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": rubrics_b64
-                }
-            })
+            content.append(build_content_block_for_file(rubrics_content))
         
         content.append({
             "type": "text",
@@ -2232,11 +2311,7 @@ Respond ONLY with valid JSON:
     # Add question paper for context
     if question_paper_content:
         content.append({"type": "text", "text": "QUESTION PAPER (for reference — use this to identify question numbers):"})
-        qp_b64 = base64.standard_b64encode(question_paper_content).decode('utf-8')
-        content.append({
-            "type": "document",
-            "source": {"type": "base64", "media_type": "application/pdf", "data": qp_b64}
-        })
+        content.append(build_content_block_for_file(question_paper_content))
 
     content.append({"type": "text", "text": "\nSTUDENT SUBMISSION (transcribe answers from this):"})
 
@@ -2322,11 +2397,7 @@ Respond ONLY with valid JSON:
     content = []
     if question_paper_content:
         content.append({"type": "text", "text": "Here is the question paper. Focus on the question the student left blank:"})
-        qp_b64 = base64.standard_b64encode(question_paper_content).decode('utf-8')
-        content.append({
-            "type": "document",
-            "source": {"type": "base64", "media_type": "application/pdf", "data": qp_b64}
-        })
+        content.append(build_content_block_for_file(question_paper_content))
 
     content.append({"type": "text", "text": f"The student left Question {question_num} blank. Give them a hint to get started."})
 
