@@ -2372,11 +2372,13 @@ def student_submit_files():
                 from utils.ai_marking import get_teacher_ai_service, make_ai_api_call, parse_ai_response, resolve_model_type
 
                 student_cells = []
+                all_notebook_cells = []  # includes markdown cells for context
                 try:
                     raw = pages[0]['data']
                     try:
                         nb = _json.loads(raw.decode('utf-8'))
-                        for cell in nb.get('cells', []):
+                        all_notebook_cells = nb.get('cells', [])
+                        for cell in all_notebook_cells:
                             if cell.get('cell_type') == 'code':
                                 src = cell.get('source', '')
                                 if isinstance(src, list):
@@ -2407,6 +2409,10 @@ def student_submit_files():
                                 student_cells.append({'index': len(student_cells) + 1, 'source': trimmed, 'outputs': ''})
                 except Exception as e:
                     logger.error(f"Error parsing Python submission: {e}")
+
+                # Filter out unmodified template cells (question/starter cells)
+                if student_cells:
+                    student_cells = _filter_python_student_cells(student_cells, all_notebook_cells, assignment, fs)
 
                 if student_cells:
                     answer_key_text = ''
@@ -2480,13 +2486,18 @@ Respond ONLY with valid JSON in this exact format:
     "confidence": "high/medium/low"
 }}"""
 
-                        student_text = '\n\n'.join(
-                            f'--- Cell {c["index"]} ---\n{c["source"]}'
-                            + (f'\n[Output]: {c["outputs"]}' if c.get('outputs') else '')
-                            for c in student_cells
-                        )
+                        def _format_cell(c):
+                            parts = []
+                            if c.get('question_context'):
+                                parts.append(f'[Question]: {c["question_context"]}')
+                            parts.append(f'--- Cell {c["index"]} ---\n{c["source"]}')
+                            if c.get('outputs'):
+                                parts.append(f'[Output]: {c["outputs"]}')
+                            return '\n'.join(parts)
 
-                        content = [{"type": "text", "text": f"STUDENT SUBMISSION ({len(student_cells)} code cells):\n\n{student_text}"}]
+                        student_text = '\n\n'.join(_format_cell(c) for c in student_cells)
+
+                        content = [{"type": "text", "text": f"STUDENT SUBMISSION ({len(student_cells)} answer cells):\n\n{student_text}"}]
                         if answer_key_text:
                             content.insert(0, {"type": "text", "text": f"ANSWER KEY:\n\n{answer_key_text}\n\n"})
                         content.append({"type": "text", "text": "\nAnalyze each cell and provide JSON feedback:"})
@@ -7180,6 +7191,79 @@ def _submission_display_marks(submission, total_possible):
         return None, 0
 
 
+def _filter_python_student_cells(student_cells, all_notebook_cells, assignment, fs):
+    """Filter out unmodified template cells from student code cells for Python marking.
+
+    Compares student code cells against the question template. Cells that match
+    the template exactly are instruction/starter cells and should not be marked.
+    Also collects the preceding markdown cell as question context for each answer cell.
+    """
+    import json as _json
+    from bson import ObjectId
+
+    template_id = assignment.get('python_question_template_id')
+    if not template_id:
+        return student_cells
+
+    # Load question template code cells
+    template_code_sources = []
+    try:
+        fobj = fs.get(ObjectId(template_id) if isinstance(template_id, str) else template_id)
+        raw = fobj.read()
+        filename = getattr(fobj, 'filename', '') or ''
+        if filename.lower().endswith('.ipynb'):
+            nb = _json.loads(raw.decode('utf-8'))
+            for cell in nb.get('cells', []):
+                if cell.get('cell_type') == 'code':
+                    src = cell.get('source', '')
+                    if isinstance(src, list):
+                        src = ''.join(src)
+                    template_code_sources.append(src.strip())
+        else:
+            import re
+            text = raw.decode('utf-8')
+            segments = re.split(r'^# %% Cell.*$', text, flags=re.MULTILINE)
+            template_code_sources = [s.strip() for s in segments if s.strip()]
+    except Exception as e:
+        logger.error(f"Error loading Python question template for filtering: {e}")
+        return student_cells
+
+    if not template_code_sources:
+        return student_cells
+
+    # Build a map from code cell index to preceding markdown text
+    markdown_context = {}
+    last_markdown = None
+    code_idx = 0
+    for cell in all_notebook_cells:
+        if cell.get('cell_type') == 'markdown':
+            last_markdown = cell.get('source', '')
+            if isinstance(last_markdown, list):
+                last_markdown = ''.join(last_markdown)
+        elif cell.get('cell_type') == 'code':
+            if last_markdown:
+                markdown_context[code_idx] = last_markdown
+            code_idx += 1
+
+    # Filter: keep cells whose source differs from the template
+    filtered = []
+    for i, cell in enumerate(student_cells):
+        student_src = cell['source'].strip()
+        is_template = any(student_src == t for t in template_code_sources)
+        if not is_template:
+            # Add question context from preceding markdown cell
+            if i in markdown_context:
+                cell = dict(cell)  # don't mutate original
+                cell['question_context'] = markdown_context[i]
+            filtered.append(cell)
+
+    # Re-index filtered cells
+    for idx, cell in enumerate(filtered):
+        cell['index'] = idx + 1
+
+    return filtered if filtered else student_cells  # fallback to all if nothing left
+
+
 def _get_students_for_assignment(assignment, teacher_id):
     """Get list of students for an assignment (class or teaching group)."""
     target_type = assignment.get('target_type', 'class')
@@ -10388,12 +10472,14 @@ def regenerate_ai_feedback(submission_id):
 
             # Parse student notebook cells
             student_cells = []
+            all_notebook_cells = []
             try:
                 raw = pages[0]['data']
                 # Try to detect if .ipynb by parsing as JSON
                 try:
                     nb = _json.loads(raw.decode('utf-8'))
-                    for cell in nb.get('cells', []):
+                    all_notebook_cells = nb.get('cells', [])
+                    for cell in all_notebook_cells:
                         if cell.get('cell_type') == 'code':
                             src = cell.get('source', '')
                             if isinstance(src, list):
@@ -10425,6 +10511,10 @@ def regenerate_ai_feedback(submission_id):
                             student_cells.append({'index': len(student_cells) + 1, 'source': trimmed, 'outputs': ''})
             except Exception as e:
                 logger.error(f"Error parsing Python submission: {e}")
+
+            # Filter out unmodified template cells
+            if student_cells:
+                student_cells = _filter_python_student_cells(student_cells, all_notebook_cells, assignment, fs)
 
             if not student_cells:
                 return jsonify({'success': False, 'error': 'Could not parse any code cells from the notebook'}), 400
@@ -10503,14 +10593,19 @@ Respond ONLY with valid JSON in this exact format:
     "confidence": "high/medium/low"
 }}"""
 
-            # Build student cells text
-            student_text = '\n\n'.join(
-                f'--- Cell {c["index"]} ---\n{c["source"]}'
-                + (f'\n[Output]: {c["outputs"]}' if c.get('outputs') else '')
-                for c in student_cells
-            )
+            # Build student cells text (with question context if available)
+            def _format_cell(c):
+                parts = []
+                if c.get('question_context'):
+                    parts.append(f'[Question]: {c["question_context"]}')
+                parts.append(f'--- Cell {c["index"]} ---\n{c["source"]}')
+                if c.get('outputs'):
+                    parts.append(f'[Output]: {c["outputs"]}')
+                return '\n'.join(parts)
 
-            content = [{"type": "text", "text": f"STUDENT SUBMISSION ({len(student_cells)} code cells):\n\n{student_text}"}]
+            student_text = '\n\n'.join(_format_cell(c) for c in student_cells)
+
+            content = [{"type": "text", "text": f"STUDENT SUBMISSION ({len(student_cells)} answer cells):\n\n{student_text}"}]
             if answer_key_text:
                 content.insert(0, {"type": "text", "text": f"ANSWER KEY:\n\n{answer_key_text}\n\n"})
             content.append({"type": "text", "text": "\nAnalyze each cell and provide JSON feedback:"})
