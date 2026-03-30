@@ -371,6 +371,49 @@
                                     </label>
                                 </div>
                                 <small class="text-muted d-block mt-1" id="rubrics-help">Upload grading rubrics for essays, literature, or subjective answers where there's no single correct answer.</small>
+                                <!-- Rubric Criteria Editor (populated after extraction) -->
+                                <div id="rubric-criteria-editor" class="mt-3" style="display: none;">
+                                    <div class="card border-warning">
+                                        <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center py-2">
+                                            <h6 class="mb-0"><i class="bi bi-list-check me-2"></i>Extracted Rubric Criteria</h6>
+                                            <span class="badge bg-info" id="criteria-total-marks"></span>
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="text-muted small mb-3">Review and edit the extracted criteria. The AI will mark essays using exactly these criteria.</p>
+                                            <div id="criteria-table-container">
+                                                <table class="table table-sm" id="criteria-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th style="width: 20%">Criterion</th>
+                                                            <th style="width: 10%">Max Marks</th>
+                                                            <th>Band Descriptors</th>
+                                                            <th style="width: 5%"></th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="criteria-tbody"></tbody>
+                                                </table>
+                                            </div>
+                                            <div class="d-flex gap-2 mt-2">
+                                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addCriterionRow()">
+                                                    <i class="bi bi-plus-circle me-1"></i>Add criterion
+                                                </button>
+                                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="showReExtractPanel()">
+                                                    <i class="bi bi-arrow-clockwise me-1"></i>Re-extract with AI
+                                                </button>
+                                            </div>
+                                            <div id="re-extract-panel" class="mt-3" style="display: none;">
+                                                <div class="input-group">
+                                                    <input type="text" class="form-control" id="re-extract-instructions"
+                                                           placeholder="e.g., 'Organisation is part of Language, not a separate criterion'">
+                                                    <button type="button" class="btn btn-primary" onclick="reExtractRubric()">
+                                                        <i class="bi bi-arrow-clockwise me-1"></i>Re-extract
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="rubric_criteria" name="rubric_criteria" value="">
                             </div>
                         </div>
                         
@@ -847,6 +890,11 @@
         }
         const releaseAnswerKeyContainer = document.getElementById('release-answer-key-container');
         if (releaseAnswerKeyContainer) releaseAnswerKeyContainer.style.display = (isSpreadsheet || isPython) ? 'none' : 'block';
+        // Hide rubric criteria editor when not in rubric mode
+        if (!isRubric) {
+            document.getElementById('rubric-criteria-editor').style.display = 'none';
+            document.getElementById('rubric_criteria').value = '';
+        }
         // Update answer key section
         const answerKeyTitle = document.getElementById('answer-key-title');
         const answerKeyDesc = document.getElementById('answer-key-desc');
@@ -1196,5 +1244,94 @@
             selectedCountBadge.textContent = count;
         }
     }
+
+    // === RUBRIC CRITERIA EXTRACTION ===
+    var extractedCriteria = [];
+
+    async function extractRubricFromFile(file, instructions) {
+        var editor = document.getElementById('rubric-criteria-editor');
+        var tbody = document.getElementById('criteria-tbody');
+        editor.style.display = 'block';
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary me-2"></div>Extracting rubric criteria with AI...</td></tr>';
+
+        var formData = new FormData();
+        formData.append('rubric_file', file);
+        if (instructions) formData.append('instructions', instructions);
+
+        try {
+            var resp = await fetch('/api/teacher/extract-rubric', { method: 'POST', body: formData });
+            var data = await resp.json();
+            if (data.success && data.criteria && data.criteria.length > 0) {
+                extractedCriteria = data.criteria;
+                renderCriteriaTable();
+                if (data.total_marks) {
+                    var totalInput = document.getElementById('total_marks');
+                    if (totalInput && (!totalInput.value || totalInput.value === '100')) {
+                        totalInput.value = data.total_marks;
+                        totalInput.dispatchEvent(new Event('change'));
+                    }
+                }
+            } else {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-3"><i class="bi bi-exclamation-triangle me-1"></i>' + (data.error || 'Could not extract criteria') + '</td></tr>';
+            }
+        } catch (e) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-3">Error: ' + e.message + '</td></tr>';
+        }
+    }
+
+    function renderCriteriaTable() {
+        var tbody = document.getElementById('criteria-tbody');
+        tbody.innerHTML = '';
+        var totalMax = 0;
+        extractedCriteria.forEach(function(c, idx) {
+            totalMax += c.max_marks || 0;
+            var row = document.createElement('tr');
+            row.innerHTML = '<td><input type="text" class="form-control form-control-sm" value="' + (c.name || '').replace(/"/g, '&quot;') + '" onchange="updateCriterion(' + idx + ', \'name\', this.value)"></td>'
+                + '<td><input type="number" class="form-control form-control-sm" value="' + (c.max_marks || 0) + '" min="1" onchange="updateCriterion(' + idx + ', \'max_marks\', parseInt(this.value))"></td>'
+                + '<td><textarea class="form-control form-control-sm" rows="3" onchange="updateCriterion(' + idx + ', \'descriptors\', this.value)">' + (c.descriptors || '').replace(/</g, '&lt;') + '</textarea></td>'
+                + '<td><button type="button" class="btn btn-outline-danger btn-sm" onclick="removeCriterion(' + idx + ')"><i class="bi bi-x"></i></button></td>';
+            tbody.appendChild(row);
+        });
+        document.getElementById('criteria-total-marks').textContent = 'Total: ' + totalMax + ' marks';
+        document.getElementById('rubric_criteria').value = JSON.stringify(extractedCriteria);
+    }
+
+    function updateCriterion(idx, field, value) {
+        extractedCriteria[idx][field] = value;
+        renderCriteriaTable();
+    }
+
+    function removeCriterion(idx) {
+        extractedCriteria.splice(idx, 1);
+        renderCriteriaTable();
+    }
+
+    function addCriterionRow() {
+        extractedCriteria.push({ name: '', max_marks: 0, descriptors: '' });
+        renderCriteriaTable();
+    }
+
+    function showReExtractPanel() {
+        var panel = document.getElementById('re-extract-panel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        if (panel.style.display === 'block') document.getElementById('re-extract-instructions').focus();
+    }
+
+    function reExtractRubric() {
+        var instructions = document.getElementById('re-extract-instructions').value;
+        var fileInput = document.getElementById('rubrics');
+        if (!fileInput.files.length) { alert('Please upload a rubric PDF first.'); return; }
+        extractRubricFromFile(fileInput.files[0], instructions);
+        document.getElementById('re-extract-panel').style.display = 'none';
+        document.getElementById('re-extract-instructions').value = '';
+    }
+
+    // Auto-extract rubric criteria when rubric file is uploaded and marking type is rubric
+    document.getElementById('rubrics').addEventListener('change', function() {
+        var markingType = document.querySelector('input[name="marking_type"]:checked');
+        if (markingType && markingType.value === 'rubric' && this.files.length > 0) {
+            extractRubricFromFile(this.files[0]);
+        }
+    });
 </script>
 {% endblock %}

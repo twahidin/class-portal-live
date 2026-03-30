@@ -1729,9 +1729,41 @@ def analyze_essay_with_rubrics(pages: list, assignment: dict, rubrics_content: b
     try:
         content = []
         
-        # Get rubrics text from assignment
+        # Get rubrics — prefer structured criteria, fall back to text
+        rubric_criteria = assignment.get('rubric_criteria')
         rubrics_text = assignment.get('rubrics_text', '')
-        
+
+        if rubric_criteria and isinstance(rubric_criteria, list) and len(rubric_criteria) > 0:
+            criteria_lines = "GRADING CRITERIA (teacher-confirmed — use EXACTLY these criteria and marks):\n"
+            for i, c in enumerate(rubric_criteria):
+                criteria_lines += f"\n{i+1}. {c['name']} ({c['max_marks']} marks):"
+                if c.get('descriptors'):
+                    for line in c['descriptors'].split('\n'):
+                        if line.strip():
+                            criteria_lines += f"\n   {line.strip()}"
+                criteria_lines += "\n"
+            criteria_lines += "\nIMPORTANT: Do NOT add, rename, split, or merge criteria. Mark ONLY against these criteria with the exact mark allocations shown."
+            rubric_prompt_section = criteria_lines
+        else:
+            rubric_prompt_section = f"""{"GRADING RUBRICS:" if rubrics_text else "Use standard essay rubrics:"}
+{rubrics_text if rubrics_text else '''
+Default criteria:
+- Content (10 marks): Relevance, ideas, engagement with topic
+- Language (10 marks): Grammar, vocabulary, sentence structure
+- Organisation (10 marks): Paragraphing, coherence, flow
+'''}"""
+
+        # Build dynamic criteria example for JSON format
+        if rubric_criteria and isinstance(rubric_criteria, list) and len(rubric_criteria) > 0:
+            criteria_example = ',\n        '.join(
+                f'''{{"name": "{c['name']}", "max_marks": {c['max_marks']}, "marks_awarded": "number", "reasoning": "...", "afi": "..."}}'''
+                for c in rubric_criteria
+            )
+        else:
+            criteria_example = '''{"name": "Content", "max_marks": 10, "marks_awarded": 7, "reasoning": "Clear explanation...", "afi": "Specific suggestions..."},
+        {"name": "Language", "max_marks": 10, "marks_awarded": 6, "reasoning": "Assessment...", "afi": "Areas to work on..."},
+        {"name": "Organisation", "max_marks": 10, "marks_awarded": 7, "reasoning": "Evaluation...", "afi": "Suggestions..."}'''
+
         # Build system prompt for essay analysis
         system_prompt = f"""You are an experienced English/Language teacher marking student essays.
 
@@ -1739,13 +1771,7 @@ Assignment: {assignment.get('title', 'Essay')}
 Subject: {assignment.get('subject', 'English')}
 Total Marks: {assignment.get('total_marks', 30)}
 
-{"GRADING RUBRICS:" if rubrics_text else "Use standard essay rubrics:"}
-{rubrics_text if rubrics_text else '''
-Default criteria:
-- Content (10 marks): Relevance, ideas, engagement with topic
-- Language (10 marks): Grammar, vocabulary, sentence structure
-- Organisation (10 marks): Paragraphing, coherence, flow
-'''}
+{rubric_prompt_section}
 
 IMPORTANT INSTRUCTIONS:
 1. First, check if this is actually an essay/composition submission. If the student submitted:
@@ -1786,27 +1812,7 @@ Respond ONLY with valid JSON in this exact format:
     "submission_quality": "acceptable" or "poor" or "wrong_submission",
     "rejection_reason": "only if wrong_submission - explain why (e.g., 'This appears to be a math worksheet, not an essay')",
     "criteria": [
-        {{
-            "name": "Content",
-            "max_marks": 10,
-            "marks_awarded": 7,
-            "reasoning": "Clear explanation of why this mark was given...",
-            "afi": "Specific suggestions for improvement in this area..."
-        }},
-        {{
-            "name": "Language",
-            "max_marks": 10,
-            "marks_awarded": 6,
-            "reasoning": "Assessment of grammar, vocabulary, sentence structure...",
-            "afi": "Areas to work on for language improvement..."
-        }},
-        {{
-            "name": "Organisation",
-            "max_marks": 10,
-            "marks_awarded": 7,
-            "reasoning": "Evaluation of structure, paragraphing, flow...",
-            "afi": "Suggestions for better organization..."
-        }}
+        {criteria_example}
     ],
     "errors": [
         {{
@@ -2413,6 +2419,99 @@ Respond ONLY with valid JSON:
     except Exception as e:
         logger.error(f"Blank hint generation error: {e}")
         return {'error': str(e)}
+
+
+# ============================================================================
+# RUBRIC CRITERIA EXTRACTION — Parse rubric PDFs into structured criteria
+# ============================================================================
+
+def extract_rubric_criteria(rubric_bytes: bytes, teacher: dict = None, instructions: str = None) -> dict:
+    """
+    Use Claude Haiku to extract structured marking criteria from a rubric PDF.
+
+    Args:
+        rubric_bytes: PDF/image bytes of the rubric document
+        teacher: Teacher document (for API key resolution)
+        instructions: Optional teacher instructions to guide extraction
+
+    Returns:
+        dict with 'criteria' list and 'total_marks', or {'error': str, 'criteria': []} on failure.
+        Each criterion: {'name': str, 'max_marks': int, 'descriptors': [{'band': str, 'description': str, 'marks': str}]}
+    """
+    # Resolve API key same way as ocr_extract_answers
+    api_key = None
+    if teacher and teacher.get('anthropic_api_key'):
+        api_key = decrypt_api_key(teacher['anthropic_api_key'])
+    if not api_key:
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        return {'error': 'No Anthropic API key available', 'criteria': []}
+
+    try:
+        client = Anthropic(api_key=api_key)
+    except Exception as e:
+        return {'error': f'Failed to create Anthropic client: {e}', 'criteria': []}
+
+    system_prompt = """You are a rubric analysis assistant. Your task is to extract the structured marking criteria from a rubric document.
+
+IMPORTANT RULES:
+- Only extract SEPARATE mark components (criteria that each carry their own marks).
+- Do NOT split sub-points, bullet points, or elaborations within a single criterion into separate criteria.
+  For example, if "Content" is worth 10 marks and has sub-points like "relevance", "depth", "examples" — that is ONE criterion called "Content" worth 10 marks, not three separate criteria.
+- Each criterion should have band descriptors that describe performance levels and their associated mark ranges.
+- If the rubric has a total marks value stated, include it. Otherwise, sum the max_marks of all criteria.
+
+Respond ONLY with valid JSON:
+{
+    "criteria": [
+        {
+            "name": "Criterion Name",
+            "max_marks": 10,
+            "descriptors": [
+                {
+                    "band": "Excellent",
+                    "description": "Description of what excellent performance looks like",
+                    "marks": "9-10"
+                },
+                {
+                    "band": "Good",
+                    "description": "Description of good performance",
+                    "marks": "7-8"
+                }
+            ]
+        }
+    ],
+    "total_marks": 30
+}"""
+
+    content = []
+    content.append({"type": "text", "text": "RUBRIC DOCUMENT:"})
+    content.append(build_content_block_for_file(rubric_bytes))
+
+    if instructions:
+        content.append({"type": "text", "text": f"\nTEACHER INSTRUCTIONS:\n{instructions}"})
+
+    content.append({"type": "text", "text": "\nExtract the marking criteria from this rubric and respond with JSON:"})
+
+    try:
+        response = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=4096,
+            messages=[{"role": "user", "content": content}],
+            system=system_prompt
+        )
+        response_text = response.content[0].text
+        result = parse_ai_response(response_text)
+
+        if 'error' in result and 'criteria' not in result:
+            result['criteria'] = []
+        if 'criteria' in result and 'total_marks' not in result:
+            result['total_marks'] = sum(c.get('max_marks', 0) for c in result['criteria'])
+
+        return result
+    except Exception as e:
+        logger.error(f"Rubric criteria extraction error: {e}")
+        return {'error': f'Rubric extraction failed: {e}', 'criteria': []}
 
 
 # ============================================================================

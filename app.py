@@ -9071,6 +9071,18 @@ def create_assignment():
             # When to send feedback: teacher reviews first (default) or send AI feedback to student straight away
             send_ai_feedback_immediately = data.get('send_ai_feedback_immediately', 'off') == 'on'
             
+            # Parse teacher-confirmed rubric criteria if provided
+            rubric_criteria = None
+            rubric_criteria_json = request.form.get('rubric_criteria') or data.get('rubric_criteria', '')
+            if rubric_criteria_json and rubric_criteria_json.strip():
+                try:
+                    import json as _json_rc
+                    rubric_criteria = _json_rc.loads(rubric_criteria_json)
+                    if not isinstance(rubric_criteria, list):
+                        rubric_criteria = None
+                except (ValueError, TypeError):
+                    rubric_criteria = None
+
             # Build assignment document
             assignment_doc = {
                 'assignment_id': assignment_id,
@@ -9091,6 +9103,7 @@ def create_assignment():
                 'reference_materials_name': reference_materials.filename if reference_materials and reference_materials.filename else (reference_materials_name.replace('DRIVE:', '') if reference_materials_name and reference_materials_name.startswith('DRIVE:') else None),
                 'rubrics_id': rubrics_id,
                 'rubrics_name': rubrics.filename if rubrics and rubrics.filename else (rubrics_name.replace('DRIVE:', '') if rubrics_name and rubrics_name.startswith('DRIVE:') else None),
+                'rubric_criteria': rubric_criteria,
                 # Spreadsheet assignment Excel files (when marking_type == 'spreadsheet')
                 'spreadsheet_student_template_id': spreadsheet_student_template_id if marking_type == 'spreadsheet' else None,
                 'spreadsheet_student_template_name': spreadsheet_student_template_name if marking_type == 'spreadsheet' else None,
@@ -9460,7 +9473,17 @@ def edit_assignment(assignment_id):
                     update_data['rubrics_id'] = rubrics_id
                     update_data['rubrics_name'] = rubrics.filename
                     update_data['rubrics_text'] = rubrics_text
-            
+
+            rubric_criteria_json = request.form.get('rubric_criteria', '')
+            if rubric_criteria_json and rubric_criteria_json.strip():
+                try:
+                    import json as _json_rc
+                    rubric_criteria = _json_rc.loads(rubric_criteria_json)
+                    if isinstance(rubric_criteria, list):
+                        update_data['rubric_criteria'] = rubric_criteria
+                except (ValueError, TypeError):
+                    pass
+
             Assignment.update_one(
                 {'assignment_id': assignment_id},
                 {'$set': update_data}
@@ -14716,6 +14739,42 @@ def api_teacher_format_latex():
 
     results = format_text_as_latex_batch(texts, teacher, model_type)
     return jsonify({'success': True, 'results': results})
+
+@app.route('/api/teacher/extract-rubric', methods=['POST'])
+@teacher_required
+@limiter.limit("20 per hour")
+def extract_rubric():
+    """Extract structured marking criteria from a rubric PDF using AI."""
+    from utils.ai_marking import extract_rubric_criteria
+
+    teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
+    if not teacher:
+        return jsonify({'success': False, 'error': 'Teacher not found'}), 404
+
+    rubric_file = request.files.get('rubric_file')
+    if not rubric_file:
+        return jsonify({'success': False, 'error': 'No rubric file provided'}), 400
+
+    instructions = request.form.get('instructions', '').strip() or None
+
+    try:
+        file_bytes = rubric_file.read()
+        if not file_bytes:
+            return jsonify({'success': False, 'error': 'Empty file'}), 400
+
+        result = extract_rubric_criteria(file_bytes, teacher, instructions)
+
+        if 'error' in result:
+            return jsonify({'success': False, 'error': result['error'], 'criteria': result.get('criteria', [])}), 500
+
+        return jsonify({
+            'success': True,
+            'criteria': result.get('criteria', []),
+            'total_marks': result.get('total_marks', 0)
+        })
+    except Exception as e:
+        logger.error(f"Error extracting rubric criteria: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/teacher/get_students', methods=['GET'])
 @teacher_required
