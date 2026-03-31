@@ -10013,7 +10013,16 @@ def teacher_python_cells(submission_id):
     if not file_ids:
         # Draft submissions store cells in notebook_cells, not GridFS
         if submission.get('notebook_cells'):
-            cells = submission['notebook_cells']
+            # Normalize draft cell format: {'type','content'} → {'cell_type','source','index'}
+            raw_cells = submission['notebook_cells']
+            cells = []
+            for i, c in enumerate(raw_cells):
+                cells.append({
+                    'index': i + 1,
+                    'source': c.get('source') or c.get('content', ''),
+                    'outputs': c.get('outputs', ''),
+                    'cell_type': c.get('cell_type') or c.get('type', 'code')
+                })
             # Parse answer key cells if available
             answer_cells = []
             answer_key_id = assignment.get('python_answer_key_template_id')
