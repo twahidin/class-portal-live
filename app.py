@@ -5520,12 +5520,20 @@ def view_class(class_id):
     """View a specific class with students and assignment status"""
     teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
     
-    # Get teacher's assignments assigned to this specific class
+    # Get teacher's assignments assigned to this class (directly or via teaching groups)
+    teaching_group_ids = [g['group_id'] for g in TeachingGroup.find({
+        'teacher_id': session['teacher_id'],
+        'class_id': class_id
+    })]
     assignments = list(Assignment.find({
         'teacher_id': session['teacher_id'],
         'status': 'published',
-        'target_type': 'class',
-        'target_class_id': class_id
+        '$or': [
+            {'target_type': 'class', 'target_class_id': class_id},
+            {'target_type': 'teaching_group', 'target_group_id': {'$in': teaching_group_ids}}
+        ] if teaching_group_ids else [
+            {'target_type': 'class', 'target_class_id': class_id}
+        ]
     }).sort('created_at', -1))
     assignment_ids = [a['assignment_id'] for a in assignments]
     
