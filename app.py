@@ -10011,6 +10011,29 @@ def teacher_python_cells(submission_id):
 
     file_ids = submission.get('file_ids', [])
     if not file_ids:
+        # Draft submissions store cells in notebook_cells, not GridFS
+        if submission.get('notebook_cells'):
+            cells = submission['notebook_cells']
+            # Parse answer key cells if available
+            answer_cells = []
+            answer_key_id = assignment.get('python_answer_key_template_id')
+            if answer_key_id:
+                try:
+                    fs = GridFS(db.db)
+                    fobj = fs.get(ObjectId(answer_key_id) if isinstance(answer_key_id, str) else answer_key_id)
+                    raw = fobj.read()
+                    filename = getattr(fobj, 'filename', '') or ''
+                    if filename.lower().endswith('.ipynb'):
+                        nb = _json.loads(raw.decode('utf-8'))
+                        for cell in nb.get('cells', []):
+                            if cell.get('cell_type') == 'code':
+                                src = cell.get('source', '')
+                                if isinstance(src, list):
+                                    src = ''.join(src)
+                                answer_cells.append({'index': len(answer_cells) + 1, 'source': src})
+                except Exception as e:
+                    logger.error(f"Error parsing answer key cells: {e}")
+            return jsonify({'cells': cells, 'answer_cells': answer_cells, 'draft': True})
         return jsonify({'cells': [], 'answer_cells': []})
 
     fs = GridFS(db.db)
