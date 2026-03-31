@@ -7257,10 +7257,7 @@ def _filter_python_student_cells(student_cells, all_notebook_cells, assignment, 
                 cell['question_context'] = markdown_context[i]
             filtered.append(cell)
 
-    # Re-index filtered cells
-    for idx, cell in enumerate(filtered):
-        cell['index'] = idx + 1
-
+    # Keep original cell indices so feedback aligns with notebook display
     return filtered if filtered else student_cells  # fallback to all if nothing left
 
 
