@@ -2465,12 +2465,13 @@ IMPORTANT RULES:
 4. Be constructive and encouraging
 5. Note any runtime errors visible in the outputs
 6. Each cell should be treated as a separate question/task
+7. CRITICAL: Use the EXACT cell number shown in the submission (e.g., "Cell 3" → question_num: 3). Do NOT renumber cells starting from 1.
 
 Respond ONLY with valid JSON in this exact format:
 {{
     "questions": [
         {{
-            "question_num": 1,
+            "question_num": <use the cell number from the submission>,
             "student_answer": "brief description of what the student wrote",
             "correct_answer": "expected code or approach from answer key",
             "is_correct": true/false/null,
@@ -10632,12 +10633,13 @@ IMPORTANT RULES:
 4. Be constructive and encouraging
 5. Note any runtime errors visible in the outputs
 6. Each cell should be treated as a separate question/task
+7. CRITICAL: Use the EXACT cell number shown in the submission (e.g., "Cell 3" → question_num: 3). Do NOT renumber cells starting from 1.
 
 Respond ONLY with valid JSON in this exact format:
 {{
     "questions": [
         {{
-            "question_num": 1,
+            "question_num": <use the cell number from the submission>,
             "student_answer": "brief description of what the student wrote",
             "correct_answer": "expected code or approach from answer key",
             "is_correct": true/false/null,
