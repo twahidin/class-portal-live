@@ -2378,7 +2378,7 @@ def student_submit_files():
                     try:
                         nb = _json.loads(raw.decode('utf-8'))
                         all_notebook_cells = nb.get('cells', [])
-                        for cell in all_notebook_cells:
+                        for cell_idx, cell in enumerate(all_notebook_cells):
                             if cell.get('cell_type') == 'code':
                                 src = cell.get('source', '')
                                 if isinstance(src, list):
@@ -2398,7 +2398,8 @@ def student_submit_files():
                                         outputs_text += text
                                     elif out.get('output_type') == 'error':
                                         outputs_text += '\n'.join(out.get('traceback', []))
-                                student_cells.append({'index': len(student_cells) + 1, 'source': src, 'outputs': outputs_text})
+                                # Use notebook position (1-based) so indices match the display
+                                student_cells.append({'index': cell_idx + 1, 'source': src, 'outputs': outputs_text})
                     except (_json.JSONDecodeError, UnicodeDecodeError):
                         import re as _re
                         text = raw.decode('utf-8', errors='replace')
@@ -10540,7 +10541,7 @@ def regenerate_ai_feedback(submission_id):
                 try:
                     nb = _json.loads(raw.decode('utf-8'))
                     all_notebook_cells = nb.get('cells', [])
-                    for cell in all_notebook_cells:
+                    for cell_idx, cell in enumerate(all_notebook_cells):
                         if cell.get('cell_type') == 'code':
                             src = cell.get('source', '')
                             if isinstance(src, list):
@@ -10560,7 +10561,8 @@ def regenerate_ai_feedback(submission_id):
                                     outputs_text += text
                                 elif out.get('output_type') == 'error':
                                     outputs_text += '\n'.join(out.get('traceback', []))
-                            student_cells.append({'index': len(student_cells) + 1, 'source': src, 'outputs': outputs_text})
+                            # Use notebook position (1-based) so indices match the display
+                            student_cells.append({'index': cell_idx + 1, 'source': src, 'outputs': outputs_text})
                 except (_json.JSONDecodeError, UnicodeDecodeError):
                     # Fallback: .py file
                     import re
