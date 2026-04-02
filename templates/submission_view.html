@@ -205,8 +205,37 @@
                 </div>
             </div>
             {% endif %}
+
+            {% if submission.student_confirmed_answers %}
+            <!-- OCR Transcribed Answers (confirmed by student before submission) -->
+            <div class="card mt-3">
+                <div class="card-header bg-light py-2 d-flex justify-content-between align-items-center"
+                     data-bs-toggle="collapse" href="#confirmed-answers" role="button" style="cursor: pointer;">
+                    <h6 class="mb-0"><i class="bi bi-fonts me-2"></i>Your Transcribed Answers</h6>
+                    <i class="bi bi-chevron-down"></i>
+                </div>
+                <div class="collapse" id="confirmed-answers">
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        <p class="text-muted small mb-2">These are the answers you reviewed and confirmed before submitting.</p>
+                        {% set answers = submission.student_confirmed_answers %}
+                        {% if answers.get('essay') or answers.get('essay_text') %}
+                            <div class="border rounded p-2 bg-light small" style="white-space: pre-wrap;">{{ answers.get('essay') or answers.get('essay_text') }}</div>
+                        {% else %}
+                            {% for key, val in answers.items() %}
+                                {% if val and val is string and val.strip() %}
+                                <div class="mb-2">
+                                    <strong class="text-primary small">Q{{ key }}:</strong>
+                                    <span class="small">{{ val }}</span>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
-        
+
         <!-- Right: Feedback + Your correction/challenge column -->
         <div class="col-lg-8 mb-4" id="feedback-panel">
             <div class="card h-100">
