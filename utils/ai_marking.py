@@ -200,7 +200,9 @@ MODEL_MAPPINGS = {
     'anthropic': 'claude-sonnet-4-6',
     'openai': 'gpt-5.2-2025-12-11',  # GPT-5.2 with vision support
     'deepseek': 'deepseek-reasoner',  # DeepSeek-V3.2 thinking mode (best for complex reasoning tasks like marking)
-    'google': 'gemini-3-flash-preview'  # Gemini 3 Flash Preview with vision support
+    'google': 'gemini-3-flash-preview',  # Gemini 3 Flash Preview with vision support
+    'qwen': 'qwen-vl-max',  # Qwen VL Max with vision support
+    'qwen-text': 'qwen-max',  # Qwen Max text-only (cheaper)
 }
 
 VALID_MODEL_TYPES = frozenset(MODEL_MAPPINGS.keys())
@@ -237,6 +239,10 @@ def get_available_ai_models(teacher):
     # Google
     has_google = (teacher and teacher.get('google_api_key')) or bool(os.getenv('GOOGLE_API_KEY'))
     available['google'] = bool(has_google and GEMINI_AVAILABLE)
+    # Qwen (both qwen and qwen-text share same API key)
+    has_qwen = (teacher and teacher.get('qwen_api_key')) or bool(os.getenv('QWEN_API_KEY'))
+    available['qwen'] = bool(has_qwen and OPENAI_AVAILABLE)
+    available['qwen-text'] = bool(has_qwen and OPENAI_AVAILABLE)
     return available
 
 def get_teacher_ai_service(teacher, model_type='anthropic'):
@@ -245,7 +251,7 @@ def get_teacher_ai_service(teacher, model_type='anthropic'):
     
     Args:
         teacher: Teacher document with API keys
-        model_type: 'anthropic', 'openai', 'deepseek', or 'google'
+        model_type: 'anthropic', 'openai', 'deepseek', 'google', 'qwen', or 'qwen-text'
     
     Returns:
         Tuple of (client, model_name, provider_type) or (None, None, None) if unavailable
@@ -323,7 +329,27 @@ def get_teacher_ai_service(teacher, model_type='anthropic'):
         except Exception as e:
             logger.error(f"Error configuring Google Gemini: {e}")
             return None, None, None
-    
+
+    elif model_type in ('qwen', 'qwen-text'):
+        if not OPENAI_AVAILABLE:
+            logger.error("OpenAI package required for Qwen (uses OpenAI-compatible API)")
+            return None, None, None
+        api_key = None
+        if teacher and teacher.get('qwen_api_key'):
+            api_key = decrypt_api_key(teacher['qwen_api_key'])
+        if not api_key:
+            api_key = os.getenv('QWEN_API_KEY')
+        if not api_key:
+            logger.warning("No Qwen API key available")
+            return None, None, None
+        try:
+            # Qwen uses OpenAI-compatible API with Alibaba DashScope endpoint
+            client = OpenAI(api_key=api_key, base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+            return client, MODEL_MAPPINGS[model_type], model_type
+        except Exception as e:
+            logger.error(f"Error creating Qwen client: {e}")
+            return None, None, None
+
     else:
         logger.error(f"Unknown model type: {model_type}")
         return None, None, None
@@ -335,7 +361,7 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
     Args:
         client: The AI service client
         model_name: Model name to use
-        provider: 'anthropic', 'openai', 'deepseek', or 'google'
+        provider: 'anthropic', 'openai', 'deepseek', 'google', 'qwen', or 'qwen-text'
         system_prompt: System prompt string
         messages_content: List of content items (text, images, etc.)
         max_tokens: Maximum tokens in response
@@ -360,8 +386,8 @@ def make_ai_api_call(client, model_name, provider, system_prompt, messages_conte
                 logger.warning(f"Anthropic response truncated (hit max_tokens={max_tokens}, output {message.usage.output_tokens} tokens)")
             return message.content[0].text
         
-        elif provider in ['openai', 'deepseek']:
-            # OpenAI/DeepSeek format - need to convert content format
+        elif provider in ['openai', 'deepseek', 'qwen', 'qwen-text']:
+            # OpenAI/DeepSeek/Qwen format - need to convert content format
             openai_messages = []
             if system_prompt:
                 openai_messages.append({"role": "system", "content": system_prompt})

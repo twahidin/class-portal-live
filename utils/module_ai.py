@@ -762,7 +762,7 @@ The "options" field should only be present for MCQ questions. Omit it for other 
                 messages=[{"role": "user", "content": "Generate the assignment now. Respond with JSON only."}],
             )
             response_text = message.content[0].text
-        elif provider in ('openai', 'deepseek'):
+        elif provider in ('openai', 'deepseek', 'qwen', 'qwen-text'):
             response = client.chat.completions.create(
                 model=model_name,
                 max_tokens=8000,
@@ -903,7 +903,7 @@ The "options" field should only be present for MCQ questions."""
                 messages=[{"role": "user", "content": "Generate the modified assignment now. Respond with JSON only."}],
             )
             response_text = message.content[0].text
-        elif provider in ('openai', 'deepseek'):
+        elif provider in ('openai', 'deepseek', 'qwen', 'qwen-text'):
             response = client.chat.completions.create(
                 model=model_name,
                 max_tokens=8000,

@@ -173,6 +173,8 @@
                                 <option value="openai" {% if teacher.get('default_ai_model') == 'openai' %}selected{% endif %}>OpenAI (GPT)</option>
                                 <option value="deepseek" {% if teacher.get('default_ai_model') == 'deepseek' %}selected{% endif %}>DeepSeek</option>
                                 <option value="google" {% if teacher.get('default_ai_model') == 'google' %}selected{% endif %}>Google Gemini</option>
+                                <option value="qwen" {% if teacher.get('default_ai_model') == 'qwen' %}selected{% endif %}>Qwen VL Max (Vision)</option>
+                                <option value="qwen-text" {% if teacher.get('default_ai_model') == 'qwen-text' %}selected{% endif %}>Qwen Max (Text)</option>
                             </select>
                             <small class="text-muted">This will be the default model used for assignments. You can override it when creating each assignment.</small>
                         </div>
@@ -226,9 +228,23 @@
                             <label class="form-label">
                                 <i class="bi bi-google me-1"></i>Google Gemini API Key
                             </label>
-                            <input type="password" class="form-control" name="google_api_key" 
+                            <input type="password" class="form-control" name="google_api_key"
                                    placeholder="AIza...">
                             {% if teacher.google_api_key %}
+                            <small class="text-success d-block mt-1"><i class="bi bi-check-circle me-1"></i>API key configured</small>
+                            {% else %}
+                            <small class="text-muted d-block mt-1">Leave blank to use system default (if available)</small>
+                            {% endif %}
+                        </div>
+
+                        <!-- Qwen API Key -->
+                        <div class="mb-4">
+                            <label class="form-label">
+                                <i class="bi bi-cloud me-1"></i>Qwen API Key
+                            </label>
+                            <input type="password" class="form-control" name="qwen_api_key"
+                                   placeholder="sk-...">
+                            {% if teacher.qwen_api_key %}
                             <small class="text-success d-block mt-1"><i class="bi bi-check-circle me-1"></i>API key configured</small>
                             {% else %}
                             <small class="text-muted d-block mt-1">Leave blank to use system default (if available)</small>

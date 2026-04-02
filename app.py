@@ -4825,7 +4825,7 @@ Requirements:
                 resp = client.messages.create(model=model_name, max_tokens=3000,
                     messages=[{'role': 'user', 'content': ai_prompt}])
                 ai_notes = resp.content[0].text
-            elif provider in ('openai', 'deepseek'):
+            elif provider in ('openai', 'deepseek', 'qwen', 'qwen-text'):
                 resp = client.chat.completions.create(model=model_name, max_tokens=3000,
                     messages=[{'role': 'user', 'content': ai_prompt}])
                 ai_notes = resp.choices[0].message.content
@@ -6897,7 +6897,7 @@ Rules:
                 messages=[{'role': 'user', 'content': prompt}]
             )
             content = response.content[0].text
-        elif provider == 'openai':
+        elif provider in ('openai', 'qwen', 'qwen-text'):
             response = client.chat.completions.create(
                 model=model, max_tokens=4000,
                 messages=[{'role': 'user', 'content': prompt}]
@@ -8537,7 +8537,7 @@ Every bullet point MUST name the actual concept — never use generic labels lik
                 messages=[{'role': 'user', 'content': prompt}]
             )
             content = response.content[0].text
-        elif provider == 'openai':
+        elif provider in ('openai', 'qwen', 'qwen-text'):
             response = client.chat.completions.create(
                 model=model,
                 max_tokens=16000,
@@ -10382,7 +10382,7 @@ def available_ai_models():
         from utils.ai_marking import get_available_ai_models
         teacher = Teacher.find_one({'teacher_id': session['teacher_id']})
         models = get_available_ai_models(teacher)
-        labels = {'anthropic': 'Anthropic (Claude)', 'openai': 'OpenAI (GPT)', 'deepseek': 'DeepSeek', 'google': 'Google Gemini'}
+        labels = {'anthropic': 'Anthropic (Claude)', 'openai': 'OpenAI (GPT)', 'deepseek': 'DeepSeek', 'google': 'Google Gemini', 'qwen': 'Qwen VL Max (Vision)', 'qwen-text': 'Qwen Max (Text)'}
         return jsonify({
             'success': True,
             'models': models,
@@ -10395,7 +10395,7 @@ def available_ai_models():
 @app.route('/teacher/review/<submission_id>/regenerate-ai-feedback', methods=['POST'])
 @teacher_required
 def regenerate_ai_feedback(submission_id):
-    """Re-run AI feedback generation for a submission. Optional JSON body: { \"ai_model\": \"anthropic\" | \"openai\" | \"deepseek\" | \"google\" } to choose model."""
+    """Re-run AI feedback generation for a submission. Optional JSON body: { \"ai_model\": \"anthropic\" | \"openai\" | \"deepseek\" | \"google\" | \"qwen\" | \"qwen-text\" } to choose model."""
     from gridfs import GridFS
     from bson import ObjectId
     from utils.ai_marking import analyze_submission_images, analyze_essay_with_rubrics
@@ -11708,7 +11708,12 @@ def teacher_settings():
                 encrypted = encrypt_api_key(data['google_api_key'])
                 if encrypted:
                     update_data['google_api_key'] = encrypted
-            
+
+            if data.get('qwen_api_key'):
+                encrypted = encrypt_api_key(data['qwen_api_key'])
+                if encrypted:
+                    update_data['qwen_api_key'] = encrypted
+
             # Update default AI model
             if data.get('default_ai_model'):
                 update_data['default_ai_model'] = data['default_ai_model']
@@ -13940,7 +13945,7 @@ Rules:
         if provider == 'anthropic':
             response = client.messages.create(model=model, max_tokens=4000, messages=[{'role': 'user', 'content': prompt}])
             ai_content = response.content[0].text
-        elif provider == 'openai':
+        elif provider in ('openai', 'qwen', 'qwen-text'):
             response = client.chat.completions.create(model=model, max_tokens=4000, messages=[{'role': 'user', 'content': prompt}])
             ai_content = response.choices[0].message.content
         elif provider == 'google':

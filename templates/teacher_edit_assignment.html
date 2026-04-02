@@ -537,6 +537,8 @@
                                 <option value="openai" {% if current_model == 'openai' %}selected{% endif %}>OpenAI (GPT)</option>
                                 <option value="deepseek" {% if current_model == 'deepseek' %}selected{% endif %}>DeepSeek</option>
                                 <option value="google" {% if current_model == 'google' %}selected{% endif %}>Google Gemini</option>
+                                <option value="qwen" {% if current_model == 'qwen' %}selected{% endif %}>Qwen VL Max (Vision)</option>
+                                <option value="qwen-text" {% if current_model == 'qwen-text' %}selected{% endif %}>Qwen Max (Text)</option>
                             </select>
                             <small class="text-muted">Your default model: <strong>{{ teacher.get('default_ai_model', 'anthropic')|title }}</strong></small>
                         </div>
